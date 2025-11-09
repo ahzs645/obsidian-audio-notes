@@ -46,6 +46,21 @@ If your plugin does not need CSS, delete this file.
 	box-shadow: var(--shadow-s);
 }
 
+.audio-note-player-host {
+	display: none;
+}
+
+.audio-note-player-host.has-player {
+	display: block;
+	margin-bottom: 16px;
+}
+
+.audio-note-player-host .audio-player-container {
+	margin: 0;
+	box-shadow: none;
+	background: var(--background-secondary);
+}
+
 .audio-note-transcript-header {
 	display: flex;
 	justify-content: space-between;
@@ -412,9 +427,10 @@ If your plugin does not need CSS, delete this file.
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
-	margin: 16px 8px 4px;
+	width: 100%;
+	margin: 0;
 	padding: 16px;
-	border-radius: 16px;
+	border-radius: 12px;
 	border: 1px solid var(--background-modifier-border);
 	background: var(--background-primary);
 	box-shadow: var(--shadow-s);

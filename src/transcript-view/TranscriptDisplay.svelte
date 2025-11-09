@@ -1,20 +1,21 @@
 <script lang="ts">
 	import { Notice } from "obsidian";
 	import { onMount, onDestroy, tick } from "svelte";
-import type {
-	TranscriptSegmentWithSpeaker,
-	TranscriptSearchMatch,
-} from "./types";
+	import type {
+		TranscriptSegmentWithSpeaker,
+		TranscriptSearchMatch,
+	} from "./types";
 
 	export let segments: TranscriptSegmentWithSpeaker[] = [];
 	export let transcriptText = "";
-export let metadataDuration: number | null = null;
-export let isTranscribing = false;
-export let progressMessage: string | null = null;
-export let currentTime: number | null = null;
-export let syncWithAudio = false;
-export let onSeekToTime: (time: number) => void = () => {};
-export let title = "Live Transcript";
+	export let metadataDuration: number | null = null;
+	export let isTranscribing = false;
+	export let progressMessage: string | null = null;
+	export let currentTime: number | null = null;
+	export let syncWithAudio = false;
+	export let onSeekToTime: (time: number) => void = () => {};
+	export let title = "Live Transcript";
+	export let playerContainer: HTMLElement | null = null;
 
 	const speakerColorAssignments = new Map<string, string>();
 	const speakerColorClasses = [
@@ -32,9 +33,11 @@ let showSearch = false;
 	let currentMatchIndex = 0;
 	let scrollContainer: HTMLElement | null = null;
 	let searchInputEl: HTMLInputElement | null = null;
-const segmentRefs = new Map<number, HTMLElement>();
-let lastAutoScrollIndex: number | null = null;
-let collapsed = true;
+	const segmentRefs = new Map<number, HTMLElement>();
+	let lastAutoScrollIndex: number | null = null;
+	let collapsed = true;
+	let playerHost: HTMLDivElement | null = null;
+	let mountedPlayerEl: HTMLElement | null = null;
 	type GroupedTranscript = {
 		id: string;
 		speakerKey: string;
@@ -78,6 +81,8 @@ let collapsed = true;
 	$: activeSegmentIndex = syncWithAudio
 		? findActiveSegmentIndex(segments, currentTime ?? null)
 		: null;
+
+	$: attachPlayerToHost();
 
 	$: if (
 		autoScroll &&
@@ -127,6 +132,21 @@ let collapsed = true;
 	onDestroy(() => {
 		segmentRefs.clear();
 	});
+
+	function attachPlayerToHost() {
+		if (!playerHost) return;
+		if (mountedPlayerEl === playerContainer) {
+			return;
+		}
+		while (playerHost.firstChild) {
+			playerHost.removeChild(playerHost.firstChild);
+		}
+		mountedPlayerEl = null;
+		if (playerContainer) {
+			playerHost.appendChild(playerContainer);
+			mountedPlayerEl = playerContainer;
+		}
+	}
 
 	function registerSegmentRef(index: number, el: HTMLElement | null) {
 		if (el) {
@@ -435,6 +455,11 @@ let collapsed = true;
 
 <div class="audio-note-transcript-panel">
 	<div class="audio-note-transcript-card">
+		<div
+			class="audio-note-player-host"
+			class:has-player={Boolean(playerContainer)}
+			bind:this={playerHost}
+		></div>
 		<header class="audio-note-transcript-header">
 			<div>
 				<div class="audio-note-transcript-title">

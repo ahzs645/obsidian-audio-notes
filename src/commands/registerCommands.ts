@@ -39,10 +39,12 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 			if (checking) {
 				return true;
 			}
-			plugin
+			plugin.audioNoteService
 				.getFirstAudioNoteInFile(markdownView.file)
 				.then((audioNote) => {
-					const audioSrcPath = plugin.getFullAudioSrcPath(audioNote);
+					const audioSrcPath = plugin.audioNoteService.getFullAudioSrcPath(
+						audioNote
+					);
 					if (!audioSrcPath) {
 						return;
 					}
@@ -52,7 +54,7 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 					}
 					audioNote.start = currentTime - settings.minusDuration;
 					audioNote.end = currentTime + settings.plusDuration;
-					plugin
+					plugin.audioNoteService
 						.createNewAudioNoteAtEndOfFile(markdownView, audioNote)
 						.catch((error) => {
 							console.error(`Audio Notes: ${error}`);
@@ -149,7 +151,7 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 					false,
 					false
 				);
-				plugin
+				plugin.audioNoteService
 					.createNewAudioNoteAtEndOfFile(markdownViewInstance, audioNote)
 					.catch((error) => {
 						console.error(`Audio Notes: ${error}`);
@@ -171,7 +173,7 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 			const markdownView = app.workspace.getActiveViewOfType(MarkdownView);
 			if (!markdownView) return false;
 			if (!checking) {
-				plugin
+				plugin.audioNoteService
 					.regenerateCurrentAudioNote(markdownView)
 					.catch(() =>
 						new Notice("Could not generate audio notes.", 10000)
@@ -189,7 +191,7 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 			const markdownView = app.workspace.getActiveViewOfType(MarkdownView);
 			if (!markdownView) return false;
 			if (!checking) {
-				plugin
+				plugin.audioNoteService
 					.regenerateAllAudioNotes(markdownView)
 					.catch(() =>
 						new Notice("Could not generate audio notes.", 10000)
