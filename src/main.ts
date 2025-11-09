@@ -23,6 +23,7 @@ import TranscriptDisplay from "./transcript-view/TranscriptDisplay.svelte";
 import type { TranscriptSegmentWithSpeaker } from "./transcript-view/types";
 import { createAudioPlayer } from "./audio/AudioPlayerFactory";
 import type { AudioPlayerEnvironment } from "./audio/AudioPlayerFactory";
+import { registerAudioNoteCommands } from "./commands/registerCommands";
 import { secondsToTimeString, getUniqueId } from "./utils";
 import {
 	AudioNotesSettings,
@@ -154,7 +155,7 @@ export default class AutomaticAudioNotes extends Plugin {
 		this.app.workspace.trigger("audio-notes:settings-updated");
 	}
 
-	private getCurrentlyPlayingAudioElement(): HTMLMediaElement | null {
+	public getCurrentlyPlayingAudioElement(): HTMLMediaElement | null {
 		if (this.currentlyPlayingAudioFakeUuid) {
 			const knownPlayers =
 				this.knownAudioPlayers.getAudioContainersWithTheSameSrc(
@@ -324,378 +325,7 @@ export default class AutomaticAudioNotes extends Plugin {
 			monkeyPatchConsole(this);
 		}
 
-		// Add all the commands
-		this.addCommand({
-			id: "open-audio-notes-calendar",
-			name: "Open Audio Notes calendar",
-			callback: () => {
-				void this.activateCalendarView();
-			},
-		});
-		this.addCommand({
-			id: "import-whisper-archive",
-			name: "Import Whisper transcription archive",
-			callback: () => {
-				new ImportWhisperModal(this).open();
-			},
-		});
-		this.addCommand({
-			id: "create-new-audio-note",
-			name: `Create new Audio Note at current time (-/+ ${this.settings.minusDuration}/${this.settings.plusDuration} seconds)`,
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView =
-					this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (checking) {
-						// This command will only show up in Command Palette when the check function returns true
-						return true;
-					} else {
-						// async via .then().catch() blocks
-						this.getFirstAudioNoteInFile(markdownView.file)
-							.then((audioNote: AudioNote) => {
-								const audioSrcPath =
-									this._getFullAudioSrcPath(audioNote);
-								if (!audioSrcPath) {
-									return undefined;
-								}
-								let currentTime =
-									this.knownCurrentTimes.get(audioSrcPath);
-								if (!currentTime) {
-									currentTime = audioNote.start;
-								}
-								audioNote.start =
-									currentTime -
-									this.settings.minusDuration;
-								audioNote.end =
-									currentTime +
-									this.settings.plusDuration;
-								this.createNewAudioNoteAtEndOfFile(
-									markdownView,
-									audioNote
-								).catch((error) => {
-									console.error(`Audio Notes: ${error}`);
-									new Notice(
-										"Coud not create audio note at end of file.",
-										10000
-									);
-								});
-								this._updateCounts();
-							})
-							.catch((error: Error) => {
-								console.error(`Audio Notes: ${error}`);
-								new Notice("Could not find audio note.", 10000);
-							});
-					}
-				}
-			},
-		});
-
-		this.addCommand({
-			id: "create-audio-note-from-media-extended-plugin",
-			name: `(Media Extended YouTube Video) Create new Audio Note at current time (-/+ ${this.settings.minusDuration}/${this.settings.plusDuration} seconds)`,
-			checkCallback: (checking: boolean) => {
-				// https://github.com/aidenlx/media-extended/blob/1e8f37756403423cd100e51f58d27ed961acf56b/src/mx-main.ts#L120
-				type MediaView = any;
-				const getMediaView = (group: string) =>
-					this.app.workspace
-						.getGroupLeaves(group)
-						.find(
-							(leaf) =>
-								(leaf.view as MediaView).getTimeStamp !==
-								undefined
-						)?.view as MediaView | undefined;
-
-				const markdownView =
-					this.app.workspace.getActiveViewOfType(MarkdownView);
-				let group: WorkspaceLeaf | undefined = undefined;
-				if (markdownView) {
-					group = (markdownView.leaf as any).group;
-				}
-				if (checking) {
-					if (group) {
-						return true;
-					} else {
-						return false;
-					}
-				} else {
-					if (group) {
-						const markdownView =
-							this.app.workspace.getActiveViewOfType(
-								MarkdownView
-							);
-						if (markdownView) {
-							const mediaView = getMediaView(group.toString());
-							const notTimestamp = mediaView.getTimeStamp(); // this is NOT just a timestamp...
-							let url: string = mediaView.info.src.href;
-							if (url.includes("youtube.com")) {
-								// Remove all query params from the YouTube URL except v={id}
-								const urlParts = url.split("?");
-								const urlParams: Map<string, string> =
-									new Map();
-								for (const param of urlParts[1].split("&")) {
-									const [key, value] = param.split("=");
-									urlParams.set(key, value);
-								}
-								url = `${urlParts[0]}?v=${urlParams.get("v")}`;
-								// Make a request to get the title of the YouTube video.
-								request({
-									url: `https://www.youtube.com/oembed?format=json&url=${url}`,
-									method: "GET",
-									contentType: "application/json",
-								}).then((result: string) => {
-									// Finally, create the Audio Note at the end of the file.
-									const videoInfo = JSON.parse(result);
-									const title = videoInfo.title;
-									const currentTime = parseFloat(
-										notTimestamp
-											.split("#t=")[1]
-											.slice(0, -1)
-									);
-									const audioNote = new AudioNote(
-										title,
-										notTimestamp,
-										url,
-										currentTime -
-										this.settings.minusDuration,
-										currentTime +
-										this.settings.plusDuration,
-										1.0,
-										url,
-										undefined,
-										undefined,
-										undefined,
-										false,
-										false
-									);
-									this.createNewAudioNoteAtEndOfFile(
-										markdownView,
-										audioNote
-									).catch((error) => {
-										console.error(`Audio Notes: ${error}`);
-										new Notice(
-											"Coud not create audio note at end of file.",
-											10000
-										);
-									});
-									this._updateCounts();
-								});
-							} else {
-								new Notice(
-									"Currently, only YouTube videos are supported."
-								);
-							}
-						} else {
-							new Notice(
-								"Please focus your cursor on a markdown window."
-							);
-						}
-					} else {
-						new Notice(
-							"Use the command `Media Extended: Open Media from Link` to open a YouTube video."
-						);
-					}
-				}
-			},
-		});
-
-		this.addCommand({
-			id: "regenerate-current-audio-note",
-			name: "Regenerate Current Audio Note",
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView =
-					this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						// async via .then().catch() blocks
-						this.regenerateCurrentAudioNote(markdownView).catch(
-							(error) => {
-								new Notice(
-									"Could not generate audio notes.",
-									10000
-								);
-							}
-						);
-						this._updateCounts();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			},
-		});
-
-		this.addCommand({
-			id: "regenerate-audio-notes",
-			name: "Regenerate All Audio Notes",
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView =
-					this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						// async via .then().catch() blocks
-						this.regenerateAllAudioNotes(markdownView).catch(
-							(error) => {
-								new Notice(
-									"Could not generate audio notes.",
-									10000
-								);
-							}
-						);
-						this._updateCounts();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			},
-		});
-
-		this.addCommand({
-			id: "create-new-audio-note-with-new-file",
-			name: "Create new Audio Note in new file",
-			callback: async () => {
-				const allFiles = this.app.vault.getFiles();
-				const mp3Files = allFiles.filter(
-					(file: TFile) =>
-						file.extension === "mp3" ||
-						file.extension === "m4b" ||
-						file.extension === "m4a"
-				);
-				new CreateNewAudioNoteInNewFileModal(
-					this.app,
-					mp3Files,
-					this.settings.audioNotesApiKey,
-					this.settings.getInfoByApiKey(),
-					this.settings.DGApiKey,
-				).open();
-				this._updateCounts();
-			},
-		});
-
-		this.addCommand({
-			id: "toggle-play",
-			name: "Toggle Play/Pause",
-			callback: async () => {
-				const audioPlayer = this.getCurrentlyPlayingAudioElement();
-				if (audioPlayer) {
-					if (audioPlayer.paused || audioPlayer.ended) {
-						audioPlayer.play();
-					} else {
-						audioPlayer.pause();
-					}
-				}
-			},
-		});
-
-		this.addCommand({
-			id: "skip-backward",
-			name: "Skip Backward",
-			callback: async () => {
-				const audioPlayer = this.getCurrentlyPlayingAudioElement();
-				if (audioPlayer) {
-					audioPlayer.currentTime -= this.settings.backwardStep;
-				}
-			},
-		});
-
-		this.addCommand({
-			id: "skip-forward",
-			name: "Skip Forward",
-			callback: async () => {
-				const audioPlayer = this.getCurrentlyPlayingAudioElement();
-				if (audioPlayer) {
-					audioPlayer.currentTime += this.settings.forwardStep;
-				}
-			},
-		});
-
-		this.addCommand({
-			id: "slow-down-playback",
-			name: "Slow Down Playback",
-			callback: async () => {
-				const audioPlayer = this.getCurrentlyPlayingAudioElement();
-				if (audioPlayer) {
-					audioPlayer.playbackRate -= 0.1;
-					new Notice(
-						`Set playback speed to ${Math.round(audioPlayer.playbackRate * 10) / 10
-						}`,
-						1000
-					);
-				}
-			},
-		});
-
-		this.addCommand({
-			id: "speed-up-playback",
-			name: "Speed Up Playback",
-			callback: async () => {
-				const audioPlayer = this.getCurrentlyPlayingAudioElement();
-				if (audioPlayer) {
-					audioPlayer.playbackRate += 0.1;
-					new Notice(
-						`Set playback speed to ${Math.round(audioPlayer.playbackRate * 10) / 10
-						}`,
-						1000
-					);
-				}
-			},
-		});
-
-		this.addCommand({
-			id: "reset-player",
-			name: "Reset Audio to Start",
-			callback: async () => {
-				const audioPlayer = this.getCurrentlyPlayingAudioElement();
-				if (audioPlayer) {
-					const audioLine = audioPlayer.src;
-					let start = 0;
-					if (audioLine.includes("#")) {
-						const timeInfo = audioLine.split("#")[1];
-						[start, ,] = getStartAndEndFromBracketString(timeInfo);
-					}
-					audioPlayer.currentTime = start;
-				}
-			},
-		});
-
-		this.addCommand({
-			id: "add-audio-file-to-queue",
-			name: "Transcribe mp3 file online",
-			callback: async () => {
-				new EnqueueAudioModal(
-					this.app,
-					this.settings.audioNotesApiKey,
-					this.settings.getInfoByApiKey(),
-					this.settings.DGApiKey,
-				).open();
-			},
-		});
-
-		this.addCommand({
-			id: "quick-audio-note",
-			name: "Generate quick audio recording with transcription",
-			callback: async () => {
-				if (
-					this.settings.DGApiKey === "" ||
-					this.settings.DGApiKey === undefined
-				) {
-					new Notice(
-						"Please set your Deepgram API key in the settings tab."
-					);
-				} else {
-					new DGQuickNoteModal(this).open();
-				}
-			},
-		});
+		registerAudioNoteCommands(this);
 
 		// Register the HTML renderer.
 		this.registerMarkdownCodeBlockProcessor(`audio-note`, (src, el, ctx) =>
@@ -712,7 +342,7 @@ export default class AutomaticAudioNotes extends Plugin {
 		console.info("Audio Notes: Obsidian Audio Notes loaded");
 	}
 
-	private async _updateCounts() {
+	public async incrementUsageCount() {
 		const data = await this.loadData();
 		data.counts = (data.counts || 0) + 1;
 		this.saveData(data);
@@ -951,7 +581,7 @@ export default class AutomaticAudioNotes extends Plugin {
 	 * Figures out the true audio src's path, and appends the player's start/end time to it.
 	 * The src can be an http(s) link, or a local file.
 	 */
-	private _getFullAudioSrcPath(audioNote: AudioNote): string | undefined {
+	public getFullAudioSrcPath(audioNote: AudioNote): string | undefined {
 		let audioSrcPath: string | undefined = undefined;
 		// If the filename is a link, don't look for it in the vault.
 		if (
@@ -1032,7 +662,7 @@ export default class AutomaticAudioNotes extends Plugin {
 			},
 			renderTimeDisplay: (el, current, duration) =>
 				this._renderTimeDisplay(el, current, duration),
-			resolveAudioSrc: (note) => this._getFullAudioSrcPath(note),
+			resolveAudioSrc: (note) => this.getFullAudioSrcPath(note),
 			registerCleanup: (cleanup) => this.register(cleanup),
 		};
 
@@ -1108,7 +738,7 @@ export default class AutomaticAudioNotes extends Plugin {
 		return allAudioNotes;
 	}
 
-	private async getFirstAudioNoteInFile(file: TFile): Promise<AudioNote> {
+	public async getFirstAudioNoteInFile(file: TFile): Promise<AudioNote> {
 		const fileContents = await this.app.vault.read(file);
 		const audioNotes: AudioNote[] = this.getAudioNoteBlocks(
 			fileContents,
@@ -1117,7 +747,7 @@ export default class AutomaticAudioNotes extends Plugin {
 		return audioNotes[0];
 	}
 
-	private async createNewAudioNoteAtEndOfFile(
+	public async createNewAudioNoteAtEndOfFile(
 		view: MarkdownView,
 		audioNote: AudioNote
 	): Promise<void> {
@@ -1146,7 +776,7 @@ export default class AutomaticAudioNotes extends Plugin {
 		return players;
 	}
 
-	private async regenerateAllAudioNotes(view: MarkdownView) {
+	public async regenerateAllAudioNotes(view: MarkdownView) {
 		new Notice("Regenerating All Audio Notes...");
 
 		// Get the file contents of the current markdown file.
@@ -1249,7 +879,7 @@ export default class AutomaticAudioNotes extends Plugin {
 		return [srcStart, srcEnd];
 	}
 
-	private async regenerateCurrentAudioNote(view: MarkdownView) {
+	public async regenerateCurrentAudioNote(view: MarkdownView) {
 		new Notice("Regenerating Current Audio Note...");
 
 		// Get the file contents of the current markdown file.
@@ -1330,7 +960,7 @@ export default class AutomaticAudioNotes extends Plugin {
 		new Notice("Audio Note generation complete!");
 	}
 
-	private async activateCalendarView() {
+	public async activateCalendarView() {
 		const { workspace } = this.app;
 		let leaf = workspace.getLeavesOfType(AUDIO_NOTES_CALENDAR_VIEW)[0];
 		if (!leaf) {

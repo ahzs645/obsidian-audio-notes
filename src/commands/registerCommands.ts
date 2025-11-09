@@ -1,0 +1,339 @@
+import { MarkdownView, Notice, WorkspaceLeaf, request } from "obsidian";
+import type AutomaticAudioNotes from "../main";
+import { ImportWhisperModal } from "../ImportWhisperModal";
+import { CreateNewAudioNoteInNewFileModal } from "../CreateNewAudioNoteInNewFileModal";
+import { EnqueueAudioModal } from "../EnqueueAudioModal";
+import { DGQuickNoteModal } from "../DGQuickNoteModal";
+import {
+	AudioNote,
+	getStartAndEndFromBracketString,
+} from "../AudioNotes";
+
+export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
+	const { app, settings } = plugin;
+
+	plugin.addCommand({
+		id: "open-audio-notes-calendar",
+		name: "Open Audio Notes calendar",
+		callback: () => {
+			void plugin.activateCalendarView();
+		},
+	});
+
+	plugin.addCommand({
+		id: "import-whisper-archive",
+		name: "Import Whisper transcription archive",
+		callback: () => {
+			new ImportWhisperModal(plugin).open();
+		},
+	});
+
+	plugin.addCommand({
+		id: "create-new-audio-note",
+		name: `Create new Audio Note at current time (-/+ ${settings.minusDuration}/${settings.plusDuration} seconds)`,
+		checkCallback: (checking: boolean) => {
+			const markdownView = app.workspace.getActiveViewOfType(MarkdownView);
+			if (!markdownView) {
+				return false;
+			}
+			if (checking) {
+				return true;
+			}
+			plugin
+				.getFirstAudioNoteInFile(markdownView.file)
+				.then((audioNote) => {
+					const audioSrcPath = plugin.getFullAudioSrcPath(audioNote);
+					if (!audioSrcPath) {
+						return;
+					}
+					let currentTime = plugin.knownCurrentTimes.get(audioSrcPath);
+					if (!currentTime) {
+						currentTime = audioNote.start;
+					}
+					audioNote.start = currentTime - settings.minusDuration;
+					audioNote.end = currentTime + settings.plusDuration;
+					plugin
+						.createNewAudioNoteAtEndOfFile(markdownView, audioNote)
+						.catch((error) => {
+							console.error(`Audio Notes: ${error}`);
+							new Notice(
+								"Coud not create audio note at end of file.",
+								10000
+							);
+						});
+					void plugin.incrementUsageCount();
+				})
+				.catch((error: Error) => {
+					console.error(`Audio Notes: ${error}`);
+					new Notice("Could not find audio note.", 10000);
+				});
+			return true;
+		},
+	});
+
+	plugin.addCommand({
+		id: "create-audio-note-from-media-extended-plugin",
+		name: `(Media Extended YouTube Video) Create new Audio Note at current time (-/+ ${settings.minusDuration}/${settings.plusDuration} seconds)`,
+		checkCallback: (checking: boolean) => {
+			// https://github.com/aidenlx/media-extended/blob/1e8f37756403423cd100e51f58d27ed961acf56b/src/mx-main.ts#L120
+			type MediaView = any;
+			const getMediaView = (group: string) =>
+				app.workspace
+					.getGroupLeaves(group)
+					.find(
+						(leaf) =>
+							(leaf.view as MediaView).getTimeStamp !== undefined
+					)?.view as MediaView | undefined;
+
+			const markdownView = app.workspace.getActiveViewOfType(MarkdownView);
+			let group: WorkspaceLeaf | undefined = undefined;
+			if (markdownView) {
+				group = (markdownView.leaf as any).group;
+			}
+			if (checking) {
+				return Boolean(group);
+			}
+			if (!group) {
+				new Notice(
+					"Use the command `Media Extended: Open Media from Link` to open a YouTube video."
+				);
+				return false;
+			}
+			const mediaView = getMediaView(group.toString());
+			if (!mediaView || !mediaView.getTimeStamp) {
+				new Notice(
+					"Use the command `Media Extended: Open Media from Link` to open a YouTube video."
+				);
+				return false;
+			}
+			const markdownViewInstance =
+				app.workspace.getActiveViewOfType(MarkdownView);
+			if (!markdownViewInstance) {
+				new Notice("Please focus your cursor on a markdown window.");
+				return false;
+			}
+			const notTimestamp = mediaView.getTimeStamp();
+			let url: string = mediaView.info.src.href;
+			if (!url.includes("youtube.com")) {
+				new Notice("Currently, only YouTube videos are supported.");
+				return false;
+			}
+			const urlParts = url.split("?");
+			const urlParams: Map<string, string> = new Map();
+			for (const param of urlParts[1].split("&")) {
+				const [key, value] = param.split("=");
+				urlParams.set(key, value);
+			}
+			url = `${urlParts[0]}?v=${urlParams.get("v")}`;
+			request({
+				url: `https://www.youtube.com/oembed?format=json&url=${url}`,
+				method: "GET",
+				contentType: "application/json",
+			}).then((result: string) => {
+				const videoInfo = JSON.parse(result);
+				const title = videoInfo.title;
+				const currentTime = parseFloat(
+					notTimestamp.split("#t=")[1].slice(0, -1)
+				);
+				const audioNote = new AudioNote(
+					title,
+					notTimestamp,
+					url,
+					currentTime - settings.minusDuration,
+					currentTime + settings.plusDuration,
+					1.0,
+					url,
+					undefined,
+					undefined,
+					undefined,
+					false,
+					false
+				);
+				plugin
+					.createNewAudioNoteAtEndOfFile(markdownViewInstance, audioNote)
+					.catch((error) => {
+						console.error(`Audio Notes: ${error}`);
+						new Notice(
+							"Coud not create audio note at end of file.",
+							10000
+						);
+					});
+				void plugin.incrementUsageCount();
+			});
+			return true;
+		},
+	});
+
+	plugin.addCommand({
+		id: "regenerate-current-audio-note",
+		name: "Regenerate Current Audio Note",
+		checkCallback: (checking: boolean) => {
+			const markdownView = app.workspace.getActiveViewOfType(MarkdownView);
+			if (!markdownView) return false;
+			if (!checking) {
+				plugin
+					.regenerateCurrentAudioNote(markdownView)
+					.catch(() =>
+						new Notice("Could not generate audio notes.", 10000)
+					);
+				void plugin.incrementUsageCount();
+			}
+			return true;
+		},
+	});
+
+	plugin.addCommand({
+		id: "regenerate-audio-notes",
+		name: "Regenerate All Audio Notes",
+		checkCallback: (checking: boolean) => {
+			const markdownView = app.workspace.getActiveViewOfType(MarkdownView);
+			if (!markdownView) return false;
+			if (!checking) {
+				plugin
+					.regenerateAllAudioNotes(markdownView)
+					.catch(() =>
+						new Notice("Could not generate audio notes.", 10000)
+					);
+				void plugin.incrementUsageCount();
+			}
+			return true;
+		},
+	});
+
+	plugin.addCommand({
+		id: "create-new-audio-note-with-new-file",
+		name: "Create new Audio Note in new file",
+		callback: async () => {
+			const allFiles = app.vault.getFiles();
+			const mp3Files = allFiles.filter(
+				(file) =>
+					file.extension === "mp3" ||
+					file.extension === "m4b" ||
+					file.extension === "m4a"
+			);
+			new CreateNewAudioNoteInNewFileModal(
+				app,
+				mp3Files,
+				settings.audioNotesApiKey,
+				settings.getInfoByApiKey(),
+				settings.DGApiKey
+			).open();
+			void plugin.incrementUsageCount();
+		},
+	});
+
+	plugin.addCommand({
+		id: "toggle-play",
+		name: "Toggle Play/Pause",
+		callback: async () => {
+			const audioPlayer = plugin.getCurrentlyPlayingAudioElement();
+			if (audioPlayer) {
+				if (audioPlayer.paused || audioPlayer.ended) {
+					audioPlayer.play();
+				} else {
+					audioPlayer.pause();
+				}
+			}
+		},
+	});
+
+	plugin.addCommand({
+		id: "skip-backward",
+		name: "Skip Backward",
+		callback: async () => {
+			const audioPlayer = plugin.getCurrentlyPlayingAudioElement();
+			if (audioPlayer) {
+				audioPlayer.currentTime -= settings.backwardStep;
+			}
+		},
+	});
+
+	plugin.addCommand({
+		id: "skip-forward",
+		name: "Skip Forward",
+		callback: async () => {
+			const audioPlayer = plugin.getCurrentlyPlayingAudioElement();
+			if (audioPlayer) {
+				audioPlayer.currentTime += settings.forwardStep;
+			}
+		},
+	});
+
+	plugin.addCommand({
+		id: "slow-down-playback",
+		name: "Slow Down Playback",
+		callback: async () => {
+			const audioPlayer = plugin.getCurrentlyPlayingAudioElement();
+			if (audioPlayer) {
+				audioPlayer.playbackRate -= 0.1;
+				new Notice(
+					`Set playback speed to ${Math.round(
+						audioPlayer.playbackRate * 10
+					) / 10}`,
+					1000
+				);
+			}
+		},
+	});
+
+	plugin.addCommand({
+		id: "speed-up-playback",
+		name: "Speed Up Playback",
+		callback: async () => {
+			const audioPlayer = plugin.getCurrentlyPlayingAudioElement();
+			if (audioPlayer) {
+				audioPlayer.playbackRate += 0.1;
+				new Notice(
+					`Set playback speed to ${Math.round(
+						audioPlayer.playbackRate * 10
+					) / 10}`,
+					1000
+				);
+			}
+		},
+	});
+
+	plugin.addCommand({
+		id: "reset-player",
+		name: "Reset Audio to Start",
+		callback: async () => {
+			const audioPlayer = plugin.getCurrentlyPlayingAudioElement();
+			if (audioPlayer) {
+				const audioLine = audioPlayer.src;
+				let start = 0;
+				if (audioLine.includes("#")) {
+					const timeInfo = audioLine.split("#")[1];
+					[start] = getStartAndEndFromBracketString(timeInfo);
+				}
+				audioPlayer.currentTime = start;
+			}
+		},
+	});
+
+	plugin.addCommand({
+		id: "add-audio-file-to-queue",
+		name: "Transcribe mp3 file online",
+		callback: async () => {
+			new EnqueueAudioModal(
+				app,
+				settings.audioNotesApiKey,
+				settings.getInfoByApiKey(),
+				settings.DGApiKey
+			).open();
+		},
+	});
+
+	plugin.addCommand({
+		id: "quick-audio-note",
+		name: "Generate quick audio recording with transcription",
+		callback: async () => {
+			if (!settings.DGApiKey) {
+				new Notice(
+					"Please set your Deepgram API key in the settings tab."
+				);
+			} else {
+				new DGQuickNoteModal(plugin).open();
+			}
+		},
+	});
+}
