@@ -7,6 +7,7 @@ import {
 	request,
 	WorkspaceLeaf,
 	MarkdownRenderer,
+	MarkdownRenderChild,
 } from "obsidian";
 
 import type { MarkdownPostProcessorContext } from "obsidian";
@@ -18,12 +19,11 @@ import { monkeyPatchConsole } from "./monkeyPatchConsole";
 import { CreateNewAudioNoteInNewFileModal } from "./CreateNewAudioNoteInNewFileModal";
 import { EnqueueAudioModal } from "./EnqueueAudioModal";
 import { ImportWhisperModal } from "./ImportWhisperModal";
-import {
-	generateRandomString,
-	getIcon,
-	secondsToTimeString,
-	getUniqueId,
-} from "./utils";
+import TranscriptDisplay from "./transcript-view/TranscriptDisplay.svelte";
+import type { TranscriptSegmentWithSpeaker } from "./transcript-view/types";
+import { createAudioPlayer } from "./audio/AudioPlayerFactory";
+import type { AudioPlayerEnvironment } from "./audio/AudioPlayerFactory";
+import { secondsToTimeString, getUniqueId } from "./utils";
 import {
 	AudioNotesSettings,
 	AudioNotesSettingsTab,
@@ -52,6 +52,32 @@ import { fas } from "@fortawesome/free-solid-svg-icons";
 import { fab } from "@fortawesome/free-brands-svg-icons";
 // Load the actual library so the icons render.
 library.add(fas, far, fab, faCopy);
+
+class TranscriptViewRenderChild extends MarkdownRenderChild {
+	private destroyed = false;
+
+	constructor(
+		containerEl: HTMLElement,
+		private component: TranscriptDisplay
+	) {
+		super(containerEl);
+	}
+
+	get isDestroyed(): boolean {
+		return this.destroyed;
+	}
+
+	public setProps(props: Record<string, unknown>) {
+		if (!this.destroyed) {
+			this.component.$set(props);
+		}
+	}
+
+	onunload(): void {
+		this.destroyed = true;
+		this.component.$destroy();
+	}
+}
 
 export default class AutomaticAudioNotes extends Plugin {
 	settings: AudioNotesSettings;
@@ -180,11 +206,16 @@ export default class AutomaticAudioNotes extends Plugin {
 				this.currentlyPlayingAudioFakeUuid !== knownPlayerFakeUuid
 			) {
 				knownAudio.currentTime = audio.currentTime;
-				const timeSpan = knownPlayer.querySelector(".time")!;
-				timeSpan.textContent =
-					secondsToTimeString(audio.currentTime, true) +
-					" / " +
-					secondsToTimeString(audio.duration, true);
+				const timeSpan = knownPlayer.querySelector(
+					".time"
+				) as HTMLElement;
+				if (timeSpan) {
+					this._renderTimeDisplay(
+						timeSpan,
+						audio.currentTime,
+						audio.duration
+					);
+				}
 				const seeker = knownPlayer.querySelector(
 					".seek-slider"
 				)! as any;
@@ -800,35 +831,6 @@ export default class AutomaticAudioNotes extends Plugin {
 			},
 		});
 
-		// Create the title div.
-		const titleEl = calloutDiv.createDiv({
-			cls: `audio-note-title ${""}`,
-		});
-		const iconEl = titleEl.createDiv("audio-note-icon");
-		const icon = getIcon("quote-right");
-		if (icon !== undefined) {
-			iconEl.appendChild(icon);
-		}
-		const formattedTitle = audioNote.getFormattedTitle();
-		const titleInnerEl = titleEl.createDiv("audio-note-title-inner");
-		MarkdownRenderer.renderMarkdown(
-			formattedTitle,
-			titleInnerEl,
-			currentMdFilename,
-			this
-		);
-		// The below if statement is useful because it takes the rendered text and inserts it directly into
-		// the title component as the `titleInnerEl.textContent`. If we just set the `.textContent` directly,
-		// the markdown text doesn't get rendered properly.
-		if (
-			titleInnerEl.firstElementChild &&
-			titleInnerEl.firstElementChild instanceof HTMLParagraphElement
-		) {
-			titleInnerEl.setChildrenInPlace(
-				Array.from(titleInnerEl.firstElementChild.childNodes)
-			);
-		}
-
 		// Add the quote to the div.
 		const contentEl: HTMLDivElement =
 			calloutDiv.createDiv("callout-content");
@@ -839,9 +841,40 @@ export default class AutomaticAudioNotes extends Plugin {
 				currentMdFilename,
 				this
 			);
-		} else {
-			contentEl.createEl("p"); // This won't get created if the quote is `""`, so we need to create it automatically for the liveUpdate to populate it.
 		}
+
+		const transcriptWrapper = contentEl.createDiv({
+			cls: "audio-note-transcript-wrapper",
+		});
+
+		const transcriptComponent = new TranscriptDisplay({
+			target: transcriptWrapper,
+			props: {
+				segments: [],
+				transcriptText: audioNote.quote ?? "",
+				metadataDuration: null,
+				isTranscribing: false,
+				syncWithAudio: audioNote.liveUpdate,
+				onSeekToTime: () => {},
+			},
+		});
+
+		let transcriptChild: TranscriptViewRenderChild | undefined = undefined;
+		if (ctx) {
+			transcriptChild = new TranscriptViewRenderChild(
+				transcriptWrapper,
+				transcriptComponent
+			);
+			ctx.addChild(transcriptChild);
+		}
+
+		const setTranscriptProps = (props: Record<string, unknown>) => {
+			if (transcriptChild) {
+				transcriptChild.setProps(props);
+			} else {
+				transcriptComponent.$set(props);
+			}
+		};
 
 		// Add the author to the div.
 		if (audioNote.author) {
@@ -861,7 +894,10 @@ export default class AutomaticAudioNotes extends Plugin {
 
 		// Create the audio player div.
 		if (!audioNote.audioFilename.includes("youtube.com")) {
-			const [audio, audioDiv] = this._createAudioPlayerDiv(audioNote, contentEl.firstChild as HTMLParagraphElement);
+			const [audio, audioDiv] = this._createAudioPlayerDiv(
+				audioNote,
+				setTranscriptProps
+			);
 			if (audioDiv === undefined || audio === undefined) {
 				return calloutDiv;
 			}
@@ -873,97 +909,42 @@ export default class AutomaticAudioNotes extends Plugin {
 				this
 			);
 
-			let quoteEl = contentEl.firstChild as HTMLParagraphElement;
 			this.transcriptDatastore
-			.getTranscript(audioNote.transcriptFilename)
-			.then((transcript: Transcript | undefined) => {
-				if (transcript) {
-					const entireTranscript = transcript.getEntireTranscript();
-					quoteEl.textContent = entireTranscript;
-				}
-			}
-			);
-
-			// Enable Live Update. This has to be here because we need access to both the HTML quote element and the audio div.
-			if (audioNote.liveUpdate) {
-				audio.addEventListener("play", () => {
-					this.liveUpdateTranscript(
-						contentEl.firstChild as HTMLParagraphElement,
-						audioNote,
-						audio
-					);
+				.getTranscript(audioNote.transcriptFilename)
+				.then((transcript: Transcript | undefined) => {
+					if (transcript) {
+						const transcriptSegments =
+							transcript.segments as TranscriptSegmentWithSpeaker[];
+						const duration =
+							transcriptSegments.length > 0
+								? Math.max(
+										...transcriptSegments.map((segment) =>
+											Number(
+												segment.end ??
+													segment.start ??
+													0
+											)
+										)
+								  )
+								: null;
+						setTranscriptProps({
+							segments: transcriptSegments,
+							transcriptText: transcript.getEntireTranscript(),
+							metadataDuration: duration,
+						});
+					} else if (audioNote.quote) {
+						setTranscriptProps({
+							transcriptText: audioNote.quote,
+						});
+					}
+				})
+				.catch((error) => {
+					console.error("Audio Notes: Failed to load transcript", error);
 				});
-			}
+
 		}
 
 		return calloutDiv;
-	}
-
-	private liveUpdateTranscript(
-		quoteEl: HTMLParagraphElement,
-		audioNote: AudioNote,
-		audioPlayer: HTMLMediaElement
-	) {
-		// Remove a listener if it exists
-		if ((audioPlayer as any).liveUpdateCallback !== undefined) {
-			audioPlayer.removeEventListener(
-				"timeupdate",
-				(audioPlayer as any).liveUpdateCallback
-			);
-		}
-		// Get the transcript, then add a new listener
-		this.transcriptDatastore
-			.getTranscript(audioNote.transcriptFilename)
-			.then((transcript: Transcript | undefined) => {
-				if (transcript) {
-					const currentTime = audioPlayer.currentTime;
-					const [i, segment] = transcript.getSegmentAt(currentTime);
-					if (i !== undefined && segment) {
-						const currentText = quoteEl.textContent ?? "";
-						const ind = currentText.indexOf(segment.text);
-						if (ind !== -1) {
-							const before = currentText.substring(0, ind);
-							const after = currentText.substring(ind + segment.text.length);
-							quoteEl.textContent = `${before}${segment.text.toUpperCase()}${after}`;
-						}
-						//Store transcript in object, configure which section is highglighted then call to string or something that concats and formats.
-						// Make a new callback
-						const makeCallback = (
-							transcript: Transcript,
-							i: number
-						) => {
-							const nextSegment = transcript.segments[i + 1]; // returns `undefined` if index is out of range
-							if (nextSegment !== undefined) {
-								const callback = () => {
-									if (audioPlayer.currentTime >= nextSegment.start) {
-										quoteEl.textContent = nextSegment.text;
-										audioPlayer.removeEventListener(
-											"timeupdate",
-											(audioPlayer as any).liveUpdateCallback
-										);
-										const newCallback = makeCallback(transcript, i + 1);
-										if (newCallback) {
-											newCallback();
-										}
-									}
-								};
-								(audioPlayer as any).liveUpdateCallback = callback;
-								audioPlayer.addEventListener(
-									"timeupdate",
-									callback
-								);
-								return callback;
-							}
-
-							return undefined;
-						};
-						const newCallback = makeCallback(transcript, i);
-						if (newCallback) {
-							newCallback();
-						}
-					} // end of if (i && segment) statement
-				}
-			});
 	}
 
 	/**
@@ -1001,424 +982,61 @@ export default class AutomaticAudioNotes extends Plugin {
 		return audioSrcPath;
 	}
 
+	private _renderTimeDisplay(
+		timeElement: HTMLElement,
+		currentSeconds: number,
+		durationSeconds: number
+	): void {
+		const currentLabel = timeElement.querySelector(
+			".time-current"
+		) as HTMLSpanElement | null;
+		const totalLabel = timeElement.querySelector(
+			".time-total"
+		) as HTMLSpanElement | null;
+
+		if (currentLabel && totalLabel) {
+			currentLabel.textContent = secondsToTimeString(
+				currentSeconds,
+				true
+			);
+			totalLabel.textContent = secondsToTimeString(
+				durationSeconds,
+				true
+			);
+		} else {
+			timeElement.textContent =
+				secondsToTimeString(currentSeconds, true) +
+				" / " +
+				secondsToTimeString(durationSeconds, true);
+		}
+	}
+
 	/**
 	 * Render the custom audio player itself, and hook up all the buttons to perform the correct functionality.
 	 */
 	private _createAudioPlayerDiv(
 		audioNote: AudioNote,
-		quoteElement: HTMLParagraphElement,
+		updateTranscript?: (props: Record<string, unknown>) => void
 	): [HTMLMediaElement | undefined, HTMLElement | undefined] {
-		const fakeUuid: string = generateRandomString(8);
-
-		const audioSrcPath = this._getFullAudioSrcPath(audioNote);
-		if (!audioSrcPath) {
-			return [undefined, undefined];
-		}
-
-		const audio = new Audio(audioSrcPath);
-		audio.id = `audio-player-${fakeUuid}`;
-		audio.playbackRate = audioNote.speed;
-		// If the start time isn't set, set it to the last known playback time to resume playback.
-		if (!audioNote.audioFilename.includes("#t=")) {
-			audio.currentTime = this.knownCurrentTimes.get(audio.src) || 0;
-		}
-
-		const playButton = createEl("button", {
-			attr: { id: `play-icon-${fakeUuid}` },
-			cls: "audio-note-play-button",
-		});
-		const playIcon = getIcon("play");
-		const pauseIcon = getIcon("pause");
-		if (playIcon !== undefined) {
-			playButton.appendChild(playIcon);
-		}
-
-		const seeker = createEl("input", {
-			attr: { id: `seek-slider-${fakeUuid}` },
-			type: "range",
-			value: "0",
-			cls: "seek-slider",
-		});
-		seeker.max = "100";
-
-		const timeSpan = createEl("span", {
-			attr: { id: `current-time-${fakeUuid}` },
-			cls: "time",
-			text: "0:00",
-		});
-
-		const volumeSlider = createEl("input", {
-			attr: { id: `volume-slider-${fakeUuid}` },
-			type: "range",
-			value: "100",
-			cls: "volume-slider",
-		});
-		volumeSlider.max = "100";
-
-		const muteButton = createEl("button", {
-			attr: { id: `mute-icon-${fakeUuid}` },
-			cls: "audio-note-mute-button",
-		});
-		const mutedIcon = getIcon("volume-off");
-		const unmutedIcon = getIcon("volume-up");
-		if (unmutedIcon !== undefined) {
-			muteButton.appendChild(unmutedIcon);
-		}
-
-		const forwardButton = createEl("button", {
-			attr: { id: `forward-button-${fakeUuid}` },
-			cls: "audio-note-forward-button",
-		});
-		const forwardIcon = getIcon("step-forward");
-		if (forwardIcon !== undefined) {
-			forwardButton.appendChild(forwardIcon);
-		}
-
-		const backwardButton = createEl("button", {
-			attr: { id: `backward-button-${fakeUuid}` },
-			cls: "audio-note-backward-button",
-		});
-		const backwardIcon = getIcon("step-backward");
-		if (backwardIcon !== undefined) {
-			backwardButton.appendChild(backwardIcon);
-		}
-
-		const resetTimeButton = createEl("button", {
-			attr: { id: `reset-button-${fakeUuid}` },
-			cls: "audio-note-reset-button",
-		});
-		const resetTimeIcon = getIcon("redo");
-		if (resetTimeIcon !== undefined) {
-			resetTimeButton.appendChild(resetTimeIcon);
-		}
-
-		// Event handlers
-
-		const togglePlayback = () => {
-			if (audio.paused) {
-				audio.play();
-			} else {
-				audio.pause();
-			}
-			if (audioNote.liveUpdate) {
-				this.liveUpdateTranscript(quoteElement, audioNote, audio); // Reset the live update transcript
-			}
-		};
-
-		playButton.addEventListener("click", togglePlayback);
-
-		muteButton.addEventListener("click", () => {
-			if (audio.muted) {
-				audio.muted = false;
-				if (mutedIcon !== undefined && unmutedIcon !== undefined) {
-					mutedIcon.parentNode?.replaceChild(unmutedIcon, mutedIcon);
-				}
-			} else {
-				audio.muted = true;
-				if (mutedIcon !== undefined && unmutedIcon !== undefined) {
-					unmutedIcon.parentNode?.replaceChild(
-						mutedIcon,
-						unmutedIcon
-					);
-				}
-			}
-		});
-
-		const updateTime = (
-			timeSpan: HTMLSpanElement,
-			audio: HTMLMediaElement
-		) => {
-			timeSpan.textContent =
-				secondsToTimeString(audio.currentTime, true) +
-				" / " +
-				secondsToTimeString(audio.duration, true);
-		};
-
-		const updateAudio = (
-			audio: HTMLMediaElement,
-			seeker: HTMLInputElement
-		) => {
-			audio.currentTime = parseFloat(seeker.value);
-		};
-
-		const updateSeeker = (
-			audio: HTMLMediaElement,
-			seeker: HTMLInputElement
-		) => {
-			seeker.max = Math.floor(audio.duration).toString();
-			seeker.value = audio.currentTime.toString();
-		};
-
-		// Create a function that, when the user presses and holds the forward or back button, the forward/back
-		// amount increases as the user holds it down, up to a maximum rate.
-		let holdForwardBackwardTimeout: NodeJS.Timeout;
-		const holdit = (
-			btn: HTMLButtonElement,
-			action: () => void,
-			start: number,
-			speedup: number,
-			forward: boolean
-		) => {
-			let mousedownTimeoutStarted = false;
-			let currentSpeed = start;
-
-			const repeat = function () {
-				action();
-				holdForwardBackwardTimeout = setTimeout(repeat, currentSpeed);
-				if (currentSpeed > 75) {
-					// don't go too fast!
-					currentSpeed = currentSpeed / speedup;
-				}
-			};
-
-			// Supposedly `onpointerup` and `onpointerdown` work on both touch and non touch devices, but I haven't tested.
-			if (this.isDesktop) {
-				// For Desktop
-				btn.onmousedown = function () {
-					mousedownTimeoutStarted = true;
-					repeat();
-				};
-
-				btn.onmouseup = function () {
-					if (holdForwardBackwardTimeout) {
-						clearTimeout(holdForwardBackwardTimeout);
-					}
-					currentSpeed = start;
-				};
-			} else {
-				// For Mobile
-				btn.onpointerdown = function () {
-					mousedownTimeoutStarted = true;
-					repeat();
-				};
-
-				btn.onpointerup = function () {
-					if (holdForwardBackwardTimeout) {
-						clearTimeout(holdForwardBackwardTimeout);
-					}
-					currentSpeed = start;
-				};
-				btn.onpointercancel = function () {
-					if (holdForwardBackwardTimeout) {
-						clearTimeout(holdForwardBackwardTimeout);
-					}
-					currentSpeed = start;
-				};
-			}
-
-			btn.onClickEvent(() => {
-				if (!mousedownTimeoutStarted) {
-					if (forward) {
-						audio.currentTime += this.settings.forwardStep;
-					} else {
-						audio.currentTime -= this.settings.backwardStep;
-					}
-					updateTime(timeSpan, audio);
-					updateSeeker(audio, seeker);
-				}
-				mousedownTimeoutStarted = false;
-			});
-		};
-
-		// Apply the `holdit` functionality to the forward button
-		holdit(
-			forwardButton,
-			() => {
-				audio.currentTime += this.settings.forwardStep;
-				updateTime(timeSpan, audio);
-				updateSeeker(audio, seeker);
-				this.updateCurrentTimeOfAudio(audio);
+		const env: AudioPlayerEnvironment = {
+			settings: this.settings,
+			getSavedCurrentTime: (src) => this.knownCurrentTimes.get(src),
+			updateKnownCurrentTime: (src, value) =>
+				this.knownCurrentTimes.set(src, value),
+			updateCurrentTimeOfAudio: (audio) =>
+				this.updateCurrentTimeOfAudio(audio),
+			saveCurrentPlayerPosition: (audio) =>
+				void this.saveCurrentPlayerPosition(audio),
+			setCurrentPlayerId: (id) => {
+				this.currentlyPlayingAudioFakeUuid = id;
 			},
-			500,
-			1.2,
-			true
-		);
-
-		// Apply the `holdit` functionality to the backward button
-		holdit(
-			backwardButton,
-			() => {
-				audio.currentTime -= this.settings.backwardStep;
-				updateTime(timeSpan, audio);
-				updateSeeker(audio, seeker);
-				this.updateCurrentTimeOfAudio(audio);
-			},
-			500,
-			1.2,
-			false
-		);
-
-		// Reset the audio player's state when the reset button is pressed.
-		resetTimeButton.addEventListener("click", () => {
-			if (!audio.paused) {
-				audio.pause();
-				if (playIcon !== undefined && pauseIcon !== undefined) {
-					pauseIcon.parentNode?.replaceChild(playIcon, pauseIcon);
-				}
-			}
-			audio.currentTime = audioNote.start;
-			updateTime(timeSpan, audio);
-			updateSeeker(audio, seeker);
-			this.updateCurrentTimeOfAudio(audio);
-			if (holdForwardBackwardTimeout) {
-				clearTimeout(holdForwardBackwardTimeout);
-			}
-			if (audioNote.liveUpdate) {
-				this.liveUpdateTranscript(quoteElement, audioNote, audio); // Reset the live update transcript
-			}
-			this.saveCurrentPlayerPosition(audio); // Persist the audio's time
-		});
-
-		// When the audio player is ready to play, update its seeker position and the note's current time.
-		if (audio.readyState > 0) {
-			updateSeeker(audio, seeker);
-			updateTime(timeSpan, audio);
-		} else {
-			audio.addEventListener("loadedmetadata", () => {
-				updateSeeker(audio, seeker);
-				updateTime(timeSpan, audio);
-			});
-		}
-
-		audio.addEventListener("play", (ev: Event) => {
-			this.currentlyPlayingAudioFakeUuid = fakeUuid;
-			// Flip the play/pause button.
-			if (playIcon !== undefined && pauseIcon !== undefined) {
-				playIcon.parentNode?.replaceChild(pauseIcon, playIcon);
-			}
-			if (holdForwardBackwardTimeout) {
-				clearTimeout(holdForwardBackwardTimeout);
-			}
-			this.saveCurrentPlayerPosition(audio); // Persist the audio's time
-		});
-
-		audio.addEventListener("pause", (ev: Event) => {
-			// this.currentlyPlayingAudioFakeUuid = null;
-			// Flip the play/pause button.
-			if (playIcon !== undefined && pauseIcon !== undefined) {
-				pauseIcon.parentNode?.replaceChild(playIcon, pauseIcon);
-			}
-			if (holdForwardBackwardTimeout) {
-				clearTimeout(holdForwardBackwardTimeout);
-			}
-			this.saveCurrentPlayerPosition(audio); // Persist the audio's time
-		});
-
-		audio.addEventListener("ended", (ev: Event) => {
-			// this.currentlyPlayingAudioFakeUuid = null;
-			if (playIcon !== undefined && pauseIcon !== undefined) {
-				pauseIcon.parentNode?.replaceChild(playIcon, pauseIcon);
-			}
-			this.saveCurrentPlayerPosition(audio); // Persist the audio's time
-		});
-
-		// When the audio player's time is updated, update the note's current time and the audio player's position.
-		audio.addEventListener("timeupdate", (ev: Event) => {
-			updateTime(timeSpan, audio);
-			updateSeeker(audio, seeker);
-			this.updateCurrentTimeOfAudio(audio);
-		});
-
-		seeker.addEventListener("input", () => {
-			updateTime(timeSpan, audio);
-			updateAudio(audio, seeker);
-			this.updateCurrentTimeOfAudio(audio);
-		});
-
-		seeker.addEventListener("change", (ev: Event) => {
-			updateTime(timeSpan, audio);
-			updateAudio(audio, seeker);
-			this.updateCurrentTimeOfAudio(audio);
-		});
-
-		// Always make the space bar toggle the playback
-		const overrideSpaceKey = (event: any) => {
-			if (event.keyCode === 32) {
-				event.preventDefault();
-				togglePlayback();
-			}
+			renderTimeDisplay: (el, current, duration) =>
+				this._renderTimeDisplay(el, current, duration),
+			resolveAudioSrc: (note) => this._getFullAudioSrcPath(note),
+			registerCleanup: (cleanup) => this.register(cleanup),
 		};
-		playButton.onkeydown = overrideSpaceKey;
-		backwardButton.onkeydown = overrideSpaceKey;
-		forwardButton.onkeydown = overrideSpaceKey;
-		resetTimeButton.onkeydown = overrideSpaceKey;
 
-		// Hook into the media session. https://developer.mozilla.org/en-US/docs/Web/API/MediaSession/setActionHandler
-		if ("mediaSession" in navigator) {
-			let title = audioNote.audioFilename;
-			title = title.split(".")[title.split(".").length - 2];
-			title = title.split("/")[title.split("/").length - 1];
-			title = title.split("\\")[title.split("\\").length - 1];
-			navigator.mediaSession.metadata = new MediaMetadata({
-				title: title,
-			});
-
-			navigator.mediaSession.setActionHandler("play", () => {
-				audio.play();
-			});
-			navigator.mediaSession.setActionHandler("pause", () => {
-				audio.pause();
-			});
-			navigator.mediaSession.setActionHandler("stop", () => {
-				audio.pause();
-			});
-			navigator.mediaSession.setActionHandler("seekbackward", () => {
-				audio.currentTime -= this.settings.backwardStep;
-				updateTime(timeSpan, audio);
-				updateSeeker(audio, seeker);
-			});
-			navigator.mediaSession.setActionHandler("seekforward", () => {
-				audio.currentTime += this.settings.forwardStep;
-				updateTime(timeSpan, audio);
-				updateSeeker(audio, seeker);
-			});
-			navigator.mediaSession.setActionHandler("seekto", (ev: any) => {
-				audio.currentTime = ev.seekTime;
-				updateTime(timeSpan, audio);
-				updateSeeker(audio, seeker);
-			});
-		}
-
-		// Create the container div.
-		let audioPlayerContainerClasses = "audio-player-container";
-		if (this.isDesktop) {
-			// desktop
-			const audioPlayerContainer = createDiv({
-				attr: { id: `audio-player-container-${fakeUuid}` },
-				cls: audioPlayerContainerClasses,
-			});
-			audioPlayerContainer.appendChild(audio);
-			audioPlayerContainer.appendChild(playButton);
-			audioPlayerContainer.appendChild(seeker);
-			audioPlayerContainer.appendChild(timeSpan);
-			audioPlayerContainer.appendChild(backwardButton);
-			audioPlayerContainer.appendChild(forwardButton);
-			audioPlayerContainer.appendChild(resetTimeButton);
-			audioPlayerContainer.appendChild(muteButton);
-			return [audio, audioPlayerContainer];
-		} else {
-			// mobile
-			audioPlayerContainerClasses += " audio-player-container-mobile";
-			const audioPlayerContainer = createDiv({
-				attr: { id: `audio-player-container-${fakeUuid}` },
-				cls: audioPlayerContainerClasses,
-			});
-			const topDiv = createDiv({ cls: "audio-player-container-top" });
-			const bottomDiv = createDiv({
-				cls: "audio-player-container-bottom",
-			});
-			topDiv.appendChild(audio);
-			topDiv.appendChild(playButton);
-			topDiv.appendChild(seeker);
-			bottomDiv.appendChild(timeSpan);
-			bottomDiv.appendChild(backwardButton);
-			bottomDiv.appendChild(forwardButton);
-			bottomDiv.appendChild(resetTimeButton);
-			topDiv.appendChild(muteButton);
-			audioPlayerContainer.appendChild(topDiv);
-			audioPlayerContainer.appendChild(bottomDiv);
-			return [audio, audioPlayerContainer];
-		}
+		return createAudioPlayer(env, audioNote, updateTranscript);
 	}
 
 	/* Look through the .md file's contents and parse out any audio notes in it. */

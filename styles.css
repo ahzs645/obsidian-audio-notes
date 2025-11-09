@@ -15,27 +15,6 @@ If your plugin does not need CSS, delete this file.
 	margin-top: 16px;
 }
 
-.audio-note .audio-note-title {
-	padding: var(--callout-title-padding);
-	display: flex;
-	gap: var(--size-4-1);
-	font-size: var(--callout-title-size);
-	color: rgb(var(--callout-color));
-	line-height: var(--line-height-tight);
-	margin-bottom: 0px;
-}
-
-.audio-note .audio-note-title .audio-note-icon {
-	flex: 0 0 auto;
-	display: flex;
-	align-self: center;
-}
-
-.audio-note .audio-note-title .audio-note-title-inner {
-	font-weight: var(--bold-weight);
-	color: var(--callout-title-color);
-}
-
 .audio-note p {
 	margin-top: 16px;
 	margin-bottom: 0px;
@@ -51,11 +30,531 @@ If your plugin does not need CSS, delete this file.
 	margin-bottom: 0px;
 }
 
+.audio-note-transcript-wrapper {
+	margin-top: 16px;
+}
+
+.audio-note-transcript-panel {
+	width: 100%;
+}
+
+.audio-note-transcript-card {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 12px;
+	padding: 16px;
+	box-shadow: var(--shadow-s);
+}
+
+.audio-note-transcript-header {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.audio-note-transcript-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-weight: 600;
+}
+
+.audio-note-transcript-title-icon {
+	font-size: 1.1em;
+}
+
+.audio-note-transcript-pill {
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.15);
+	border: 1px solid rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.3);
+	border-radius: 999px;
+	padding: 2px 8px;
+	font-size: 0.8em;
+	color: var(--interactive-accent);
+}
+
+.audio-note-transcript-meta {
+	margin: 4px 0 0 0;
+	color: var(--text-muted);
+	font-size: 0.85em;
+}
+
+.audio-note-transcript-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.aan-transcript-btn {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 4px 10px;
+	background: transparent;
+	color: var(--text-normal);
+	cursor: pointer;
+	font-size: 0.9em;
+}
+
+.aan-transcript-btn:hover:not(:disabled) {
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.12);
+}
+
+.aan-transcript-btn:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.audio-note-transcript-toolbar {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+	margin-top: 12px;
+}
+
+.aan-transcript-view-toggle {
+	display: inline-flex;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.aan-transcript-view-toggle button {
+	border: none;
+	background: transparent;
+	padding: 4px 10px;
+	cursor: pointer;
+	font-size: 0.9em;
+}
+
+.aan-transcript-view-toggle button.selected {
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.15);
+	color: var(--interactive-accent);
+	font-weight: 600;
+}
+
+.aan-transcript-search-controls {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.aan-transcript-match-count {
+	font-size: 0.85em;
+	color: var(--text-muted);
+}
+
+.aan-transcript-match-nav {
+	display: inline-flex;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	overflow: hidden;
+}
+
+.aan-transcript-match-nav button {
+	background: transparent;
+	border: none;
+	padding: 2px 6px;
+	cursor: pointer;
+}
+
+.aan-transcript-search-bar {
+	margin-top: 10px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.aan-transcript-search-bar input {
+	flex: 1;
+	padding: 6px 8px;
+	border-radius: 8px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+}
+
+.aan-transcript-no-match {
+	color: var(--text-error);
+	font-size: 0.9em;
+}
+
+.audio-note-transcript-scroll {
+	max-height: 450px;
+	overflow-y: auto;
+	margin-top: 12px;
+	padding-right: 4px;
+}
+
+.audio-note-transcript-empty {
+	text-align: center;
+	color: var(--text-muted);
+	padding: 24px;
+}
+
+.audio-note-transcript-plain-text {
+	padding: 12px;
+	border-radius: 8px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	line-height: 1.5;
+	font-size: 0.95em;
+}
+
+.audio-note-transcript-groups {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.aan-transcript-group {
+	border-left: 3px solid var(--background-modifier-border);
+	padding-left: 12px;
+}
+
+.aan-transcript-group.is-active {
+	border-left-color: var(--interactive-accent);
+}
+
+.aan-transcript-group-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.aan-transcript-speaker-badge {
+	font-size: 0.9em;
+	font-weight: 600;
+	padding: 2px 10px;
+	border-radius: 999px;
+	border: 1px solid transparent;
+}
+
+.aan-transcript-speaker-icon {
+	width: 32px;
+	height: 32px;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: 600;
+	font-size: 0.9em;
+	margin-right: 8px;
+	border: 1px solid transparent;
+}
+
+.speaker-blue {
+	background: rgba(64, 120, 242, 0.15);
+	border-color: rgba(64, 120, 242, 0.4);
+	color: #3b6de0;
+}
+
+.speaker-green {
+	background: rgba(16, 185, 129, 0.15);
+	border-color: rgba(16, 185, 129, 0.35);
+	color: #0f9d68;
+}
+
+.speaker-purple {
+	background: rgba(138, 92, 246, 0.18);
+	border-color: rgba(138, 92, 246, 0.4);
+	color: #7b5cc9;
+}
+
+.speaker-orange {
+	background: rgba(251, 146, 60, 0.2);
+	border-color: rgba(251, 146, 60, 0.45);
+	color: #cc6c20;
+}
+
+.speaker-pink {
+	background: rgba(236, 72, 153, 0.18);
+	border-color: rgba(236, 72, 153, 0.4);
+	color: #c73883;
+}
+
+.speaker-cyan {
+	background: rgba(6, 182, 212, 0.18);
+	border-color: rgba(6, 182, 212, 0.4);
+	color: #0891b2;
+}
+
+.aan-transcript-time-button {
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	border-radius: 999px;
+	font-size: 0.8rem;
+	padding: 2px 12px;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	cursor: pointer;
+	transition: background 0.15s ease, border-color 0.15s ease,
+		color 0.15s ease;
+}
+
+.aan-transcript-time-button:hover {
+	border-color: var(--interactive-accent);
+	color: var(--text-normal);
+}
+
+.aan-transcript-time-arrow {
+	opacity: 0.5;
+}
+
+.aan-transcript-group-body {
+	margin-top: 6px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.aan-transcript-group-text {
+	margin: 0;
+	line-height: 1.5;
+	font-size: 0.95em;
+}
+
+.audio-note-transcript-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.audio-note-transcript-segment {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	padding: 12px;
+	background: var(--background-secondary);
+}
+
+.audio-note-transcript-segment.is-active {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 1px rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.2);
+}
+
+.audio-note-transcript-segment.is-current-match {
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.08);
+}
+
+.aan-transcript-segment-header {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.aan-transcript-speaker {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+}
+
+.aan-transcript-speaker-details {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.aan-transcript-speaker-name {
+	font-weight: 600;
+}
+
+.aan-transcript-confidence {
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
+.aan-transcript-timestamp {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 0.85em;
+}
+
+.aan-transcript-timestamp button {
+	border: none;
+	background: transparent;
+	color: var(--interactive-accent);
+	cursor: pointer;
+}
+
+.aan-transcript-text {
+	margin-top: 8px;
+	line-height: 1.5;
+	font-size: 0.95em;
+}
+
+.aan-transcript-highlight {
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.2);
+	border-radius: 4px;
+	padding: 0 2px;
+}
+
+.aan-transcript-highlight-current {
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.4);
+	color: var(--background-primary);
+}
+
+.audio-note-transcript-plain-text .aan-transcript-highlight,
+.aan-transcript-group-text .aan-transcript-highlight {
+	display: inline;
+}
+
+/* Modern audio player */
+.audio-player-container {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	margin: 16px 8px 4px;
+	padding: 16px;
+	border-radius: 16px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	box-shadow: var(--shadow-s);
+}
+
+.audio-player-container audio {
+	display: none;
+}
+
+.audio-player-container .audio-note-play-button,
+.audio-player-container .audio-note-mute-button,
+.audio-player-container .audio-note-reset-button {
+	width: 44px;
+	height: 44px;
+	border-radius: 999px;
+	background: var(--background-secondary);
+	border: 1px solid transparent;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	transition: background 0.15s ease;
+}
+
+.audio-player-container .audio-note-play-button:hover,
+.audio-player-container .audio-note-mute-button:hover,
+.audio-player-container .audio-note-reset-button:hover {
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.15);
+}
+
+.audio-player-container .audio-note-speed-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 44px;
+	min-width: 72px;
+	padding: 0 16px;
+	border-radius: 999px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	font-weight: 600;
+	font-size: 0.9rem;
+	color: var(--text-normal);
+	cursor: pointer;
+	transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.audio-player-container .audio-note-speed-button:hover {
+	border-color: var(--interactive-accent);
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.15);
+}
+
+.aan-player-speed-wrapper {
+	position: relative;
+	display: inline-flex;
+}
+
+.aan-player-speed-menu {
+	position: absolute;
+	top: calc(100% + 6px);
+	right: 0;
+	display: none;
+	flex-direction: column;
+	gap: 2px;
+	padding: 6px;
+	border-radius: var(--radius-m);
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	box-shadow: var(--shadow-s);
+	z-index: 10;
+	min-width: 120px;
+}
+
+.aan-player-speed-menu.open {
+	display: flex;
+}
+
+.aan-player-speed-option {
+	border: none;
+	background: transparent;
+	border-radius: var(--radius-s);
+	padding: 6px 10px;
+	text-align: left;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.aan-player-speed-option:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.aan-player-speed-option.active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.aan-player-compact {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	width: 100%;
+}
+
+.aan-player-compact-buttons {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-shrink: 0;
+}
+
+.aan-player-compact-slider {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+}
+
+.aan-player-compact-slider .seek-slider {
+	flex: 1;
+	width: 100% !important;
+}
+
+.time {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 0.9rem;
+	font-weight: 600;
+	color: var(--text-normal);
+	font-variant-numeric: tabular-nums;
+}
+
+.time-divider {
+	opacity: 0.5;
+}
+
 /* */
 .audio-note-play-button,
 .audio-note-mute-button,
-.audio-note-forward-button,
-.audio-note-backward-button,
 .audio-note-reset-button {
 	padding: 0 !important;
 	border: 0;
@@ -75,15 +574,7 @@ If your plugin does not need CSS, delete this file.
 	margin-right: 8px;
 }
 
-.audio-note-backward-button {
-	margin-left: 16px;
-	margin-right: 0px;
-}
 
-.audio-note-forward-button {
-	margin-left: 12px;
-	margin-right: 0px;
-}
 
 .audio-note-reset-button {
 	margin-left: 12px;
@@ -196,10 +687,12 @@ If your plugin does not need CSS, delete this file.
 }
 
 .audio-player-container input[type="range"]::-webkit-slider-runnable-track {
-	height: 3px;
+	height: 4px;
 	cursor: pointer;
-	background: rgba(255, 255, 255, 0.5);
+	background: var(--background-modifier-border);
+	border-radius: 999px;
 }
+
 
 .audio-player-container input[type="range"]::before {
 	position: absolute;
@@ -207,23 +700,27 @@ If your plugin does not need CSS, delete this file.
 	top: 8px;
 	left: 0;
 	width: var(--seek-before-width);
-	height: 3px;
-	background-color: #007db5;
+	height: 4px;
+	background-color: var(--interactive-accent);
+	border-radius: 999px;
 	cursor: pointer;
 }
+
 
 .audio-player-container input[type="range"]::-webkit-slider-thumb {
 	position: relative;
 	-webkit-appearance: none;
 	box-sizing: content-box;
-	height: 15px;
-	width: 15px;
+	height: 16px;
+	width: 16px;
 	border-radius: 50%;
 	outline: none;
-	border: none;
-	background-color: #fff;
+	border: 2px solid var(--background-primary);
+	background-color: var(--interactive-accent);
 	cursor: pointer;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
+
 
 .audio-player-container input[type="range"]::-webkit-slider-thumb {
 	margin: -1px 0 0 0;
@@ -235,10 +732,12 @@ If your plugin does not need CSS, delete this file.
 
 .audio-player-container input[type="range"]::-moz-range-track {
 	width: 100%;
-	height: 3px;
+	height: 4px;
 	cursor: pointer;
-	background: #fff;
+	background: var(--background-modifier-border);
+	border-radius: 999px;
 }
+
 
 .audio-player-container input[type="range"]::-moz-focus-outer {
 	border: 0;
@@ -246,39 +745,39 @@ If your plugin does not need CSS, delete this file.
 
 .audio-player-container input[type="range"]::-moz-range-thumb {
 	box-sizing: content-box;
-	height: 15px;
-	width: 15px;
+	height: 16px;
+	width: 16px;
 	border-radius: 50%;
 	outline: none;
-	border: none;
-	background-color: #fff;
+	border: 2px solid var(--background-primary);
+	background-color: var(--interactive-accent);
 	cursor: pointer;
 }
 
+
 .audio-player-container input[type="range"]::-ms-track {
 	width: 100%;
-	height: 3px;
+	height: 4px;
 	cursor: pointer;
 	background: transparent;
 	border: solid transparent;
 	color: transparent;
 }
 
+
 .audio-player-container input[type="range"]::-ms-thumb {
 	box-sizing: content-box;
-	height: 15px;
-	width: 15px;
+	height: 16px;
+	width: 16px;
 	border-radius: 50%;
 	outline: none;
-	border: none;
-	background-color: #fff;
+	border: 2px solid var(--background-primary);
+	background-color: var(--interactive-accent);
 	cursor: pointer;
-	margin: 2.5px 0 0 0;
+	margin: 1px 0 0 0;
 }
 
-.audio-player-container input[type="range"]::before {
-	background-color: transparent;
-}
+
 
 select.select-model-accuracy {
 	margin-left: auto;
@@ -522,6 +1021,7 @@ input.title-input {
 	gap: var(--size-4-4);
 	flex-wrap: wrap;
 	grid-column: 1 / -1;
+	padding: 0 var(--size-4-1);
 }
 
 .aan-calendar-toolbar__label {
@@ -542,23 +1042,27 @@ input.title-input {
 .aan-calendar-toolbar__group {
 	display: inline-flex;
 	gap: var(--size-2-2);
+	align-items: center;
+	flex-wrap: wrap;
 }
 
 .aan-calendar-toolbar button {
-	border: 1px solid var(--background-modifier-border);
-	background: var(--background-secondary);
+	border: none;
+	background: transparent;
 	color: var(--text-muted);
-	border-radius: var(--radius-m);
-	padding: 4px 10px;
-	font-size: var(--font-ui-smaller);
+	border-radius: 999px;
+	padding: 6px 12px;
+	font-size: var(--font-ui-small);
+	font-weight: 500;
 	cursor: pointer;
+	transition: color 0.15s ease, background-color 0.15s ease;
+	box-shadow: none;
 }
 
 .aan-calendar-toolbar button.selected,
 .aan-calendar-toolbar button:hover {
-	background: var(--interactive-accent);
-	color: var(--text-on-accent);
-	border-color: var(--interactive-accent);
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
 }
 
 .aan-calendar-day-view {
@@ -678,6 +1182,20 @@ input.title-input {
 	gap: var(--size-2-1);
 }
 
+.aan-calendar-job-row {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.aan-calendar-job-label {
+	text-transform: uppercase;
+	font-size: var(--font-ui-tiny, 10px);
+	letter-spacing: 0.08em;
+}
+
 .aan-calendar-tag-row {
 	display: flex;
 	flex-wrap: wrap;
@@ -697,6 +1215,12 @@ input.title-input {
 	color: var(--text-on-accent);
 }
 
+.aan-calendar-chip--job {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	font-weight: 600;
+}
+
 .aan-calendar-chip--soft {
 	background: var(--background-modifier-hover);
 	color: var(--text-muted);
@@ -708,17 +1232,25 @@ input.title-input {
 	flex-wrap: wrap;
 }
 
-.aan-calendar-day-actions button {
+.aan-calendar-icon-button {
 	border: 1px solid var(--background-modifier-border);
-	background: transparent;
-	border-radius: var(--radius-s);
-	padding: 2px 8px;
-	font-size: var(--font-ui-smaller);
+	background: var(--background-primary);
+	border-radius: var(--radius-m);
+	width: 32px;
+	height: 32px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-muted);
 	cursor: pointer;
+	transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+	padding: 0;
 }
 
-.aan-calendar-day-actions button:hover {
+.aan-calendar-icon-button:hover {
 	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+	border-color: var(--background-modifier-border-hover, var(--interactive-accent));
 }
 
 .aan-calendar-empty {
@@ -740,33 +1272,62 @@ input.title-input {
 	border-color: var(--background-modifier-border);
 }
 
+.aan-calendar-grid .fc-col-header-cell {
+	background: var(--background-secondary);
+	padding: 10px 0;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	font-weight: 600;
+	font-size: 11px;
+}
+
 .aan-calendar-view .fc-day-today {
 	background: var(--background-modifier-hover);
+}
+
+.aan-calendar-grid .fc-daygrid-day {
+	background: var(--background-primary);
 }
 
 .aan-calendar-grid .fc-daygrid-day-frame {
 	border-radius: var(--radius-s);
 	transition: background-color 0.2s ease;
+	padding: var(--size-2-2);
 }
 
 .aan-calendar-grid .fc-daygrid-day:hover .fc-daygrid-day-frame {
 	background: var(--background-modifier-hover);
 }
 
-.aan-calendar-grid .fc .fc-col-header-cell-cushion,
-.aan-calendar-grid .fc .fc-daygrid-day-number,
-.aan-calendar-grid .fc .fc-daygrid-day-number:hover,
-.aan-calendar-grid .fc a.fc-daygrid-day-number {
-	color: var(--text-muted);
+.aan-calendar-grid .fc-col-header-cell-cushion,
+.aan-calendar-grid .fc-daygrid-day-number,
+.aan-calendar-grid .fc-daygrid-day-number:hover,
+.aan-calendar-grid a.fc-daygrid-day-number {
+	color: var(--text-muted) !important;
 	text-decoration: none !important;
+	text-decoration-line: none !important;
+	text-decoration-color: transparent !important;
+	text-decoration-thickness: 0 !important;
+	border-bottom: none !important;
+	box-shadow: none !important;
 	cursor: default;
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	padding: 2px 6px;
+	border-radius: var(--radius-s);
 }
 
-.aan-calendar-grid .fc a {
+.aan-calendar-grid a {
 	text-decoration: none !important;
+	text-decoration-line: none !important;
+	text-decoration-color: transparent !important;
+	text-decoration-thickness: 0 !important;
+	border-bottom: none !important;
+	box-shadow: none !important;
+	color: inherit !important;
 }
 
-.aan-calendar-grid .fc .fc-daygrid-event {
+.aan-calendar-grid .fc-daygrid-event {
 	border: none;
 	background: var(--background-secondary);
 	border-radius: var(--radius-s);
@@ -777,16 +1338,16 @@ input.title-input {
 	color: var(--text-normal);
 }
 
-.aan-calendar-grid .fc .fc-daygrid-event .fc-event-time,
-.aan-calendar-grid .fc .fc-daygrid-event .fc-event-title {
+.aan-calendar-grid .fc-daygrid-event .fc-event-time,
+.aan-calendar-grid .fc-daygrid-event .fc-event-title {
 	color: inherit;
 }
 
-.aan-calendar-grid .fc .fc-daygrid-event:hover {
+.aan-calendar-grid .fc-daygrid-event:hover {
 	background: var(--background-modifier-hover);
 }
 
-.aan-calendar-grid .fc .fc-col-header-cell-cushion:hover {
+.aan-calendar-grid .fc-col-header-cell-cushion:hover {
 	text-decoration: none !important;
 }
 
@@ -795,11 +1356,22 @@ input.title-input {
 	box-shadow: inset 0 0 0 2px var(--interactive-accent);
 }
 
-.aan-calendar-grid .fc .aan-calendar-day-selected .fc-daygrid-day-number {
+.aan-calendar-grid .aan-calendar-day-selected .fc-daygrid-day-number {
 	background: var(--interactive-accent);
 	color: var(--text-on-accent);
 	border-radius: var(--radius-s);
-	padding: 0 var(--size-2-2);
+	font-weight: 600;
+}
+
+.aan-calendar-grid .fc-day-today .fc-daygrid-day-number {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-radius: var(--radius-s);
+	font-weight: 600;
+}
+
+.theme-light .aan-calendar-grid .aan-calendar-day-selected .fc-daygrid-day-number {
+	color: #fff !important;
 }
 
 .aan-calendar-view .fc .fc-button {

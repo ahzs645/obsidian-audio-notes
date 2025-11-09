@@ -4,6 +4,7 @@
 	import dayGridPlugin from "@fullcalendar/daygrid";
 	import interactionPlugin from "@fullcalendar/interaction";
 	import timeGridPlugin from "@fullcalendar/timegrid";
+	import { ExternalLink, FileText } from "lucide-svelte";
 	import type { MeetingEvent } from "./meeting-events";
 	import { localDateKey } from "./meeting-events";
 
@@ -93,7 +94,6 @@
 		if (calendar) {
 			calendar.changeView(view, parseDateString(selectedDate));
 			currentLabel = calendar.view.title;
-			calendar.rerenderDates();
 			scheduleSelectedDayHighlight();
 		}
 	};
@@ -108,34 +108,29 @@
 			}
 		});
 		currentLabel = calendar?.view?.title ?? "";
-		calendar?.rerenderDates();
 		scheduleSelectedDayHighlight();
 	};
 
 	const setSelectedDate = (value: string) => {
 		selectedDate = value;
-		calendar?.rerenderDates();
 		scheduleSelectedDayHighlight();
 		onSelectDate?.(selectedDate);
 	};
 
 	const handleDatesSet = () => {
 		currentLabel = calendar?.view?.title ?? "";
-		calendar?.rerenderDates();
 		scheduleSelectedDayHighlight();
 	};
 
 	const gotoPrev = () => {
 		calendar?.prev();
 		currentLabel = calendar?.view?.title ?? "";
-		calendar?.rerenderDates();
 		scheduleSelectedDayHighlight();
 	};
 
 	const gotoNext = () => {
 		calendar?.next();
 		currentLabel = calendar?.view?.title ?? "";
-		calendar?.rerenderDates();
 		scheduleSelectedDayHighlight();
 	};
 
@@ -167,6 +162,7 @@
 		});
 		calendar.render();
 		syncCalendar();
+		scheduleSelectedDayHighlight();
 
 		return () => {
 			calendar?.destroy();
@@ -248,7 +244,15 @@
 							</div>
 							<div class="aan-calendar-day-meta">
 								{#if event.jobTag}
-									<span class="aan-calendar-chip">{jobLabel(event.jobTag)}</span>
+									<div class="aan-calendar-job-row">
+										<span class="aan-calendar-job-label">Job</span>
+										<span
+											class="aan-calendar-chip aan-calendar-chip--job"
+											title={event.jobTag}
+										>
+											{jobLabel(event.jobTag)}
+										</span>
+									</div>
 								{/if}
 								{#if event.tags?.length}
 									<div class="aan-calendar-tag-row">
@@ -259,8 +263,22 @@
 								{/if}
 							</div>
 							<div class="aan-calendar-day-actions">
-								<button on:click={() => onOpenNote?.(event.path, false)}>Open note</button>
-								<button on:click={() => onOpenNote?.(event.path, true)}>Open in new pane</button>
+								<button
+									class="aan-calendar-icon-button"
+									title="Open note"
+									aria-label="Open note"
+									on:click={() => onOpenNote?.(event.path, false)}
+								>
+									<FileText size={16} />
+								</button>
+								<button
+									class="aan-calendar-icon-button"
+									title="Open in new pane"
+									aria-label="Open in new pane"
+									on:click={() => onOpenNote?.(event.path, true)}
+								>
+									<ExternalLink size={16} />
+								</button>
 							</div>
 						</div>
 					</li>
