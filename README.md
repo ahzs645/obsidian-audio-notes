@@ -40,9 +40,16 @@ Audio Notes is still in beta, so the easiest way to try it is through the commun
 
 Remove the entry inside BRAT's settings if you ever want to uninstall the beta.
 
-## Calendar Bases Integration
+## Calendar view and Bases
 
-Each Whisper import now stamps the generated note with both ISO timestamps and separate date/time fields:
+You can see meetings in two places:
+
+- **Bases view**: inside any Base, add the “Audio Notes Calendar” view (it appears alongside the stock table/board views). This gives you a full-width calendar with the integrated day panel.
+- **Standalone command**: run **Audio Notes: Open Audio Notes calendar** from the command palette to pop the same UI into a side pane if you’re not inside Bases.
+
+Both versions show meetings color-coded by tag, support month/week/day views, and expose a right-hand panel listing every meeting for the selected day (with links to open the note in the current or a new pane). Configure tag colors in **Settings → Audio Notes → Calendar view** using entries like `job/williams:#4f46e5`.
+
+Every Whisper import now stamps the note frontmatter with both ISO and split date/time fields:
 
 ```yaml
 start_date: 2025-10-25
@@ -53,12 +60,12 @@ start: 2025-10-25T19:33:51.962Z
 end: 2025-10-25T21:10:12.000Z
 ```
 
-In [Obsidian Bases](https://help.obsidian.md/bases), configure your Calendar view with:
+If you still want to pipe the data into [Obsidian Bases](https://help.obsidian.md/bases), configure the Calendar view with:
 
 - **Start date property:** `start_date`
 - **End date property:** `end_date`
 
-Use the `start_time` / `end_time` fields for Dataview tables or templates, while the ISO `start` / `end` fields remain available if/when Calendar Bases begins supporting full datetime properties. Dragging events on the calendar continues to update note frontmatter automatically, and `tags: [meeting]` stay in place for filtering by job/project.
+`start_time` / `end_time` remain available for Dataview tables or templates, and the ISO `start` / `end` values are there for future integrations. Dragging events inside Bases continues to update note frontmatter automatically, while the built-in Audio Notes calendar stays in sync whenever metadata changes.
 
 ## How to Use the Plugin
 

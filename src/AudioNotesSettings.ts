@@ -240,6 +240,23 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					})
 			);
 
+		containerEl.createEl("h3", { text: "Calendar view" });
+		new Setting(containerEl)
+			.setName("Tag colors")
+			.setDesc(
+				"One entry per line using the format tag:#color. Tags are matched case-insensitively."
+			)
+			.addTextArea((text) => {
+				text.inputEl.rows = 4;
+				text.setPlaceholder("job/williams:#4f46e5")
+					.setValue(formatColorMap(this.plugin.settings.calendarTagColors))
+					.onChange(async (value) => {
+						this.plugin.settings.calendarTagColors =
+							parseColorMap(value);
+						await this.plugin.saveSettings();
+					});
+			});
+
 		containerEl.createEl("hr");
 		containerEl.createDiv(
 			"p"
@@ -295,6 +312,32 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 	}
 }
 
+function formatColorMap(map: Record<string, string> = {}): string {
+	return Object.entries(map)
+		.map(([tag, color]) => `${tag}:${color}`)
+		.join("\n");
+}
+
+function parseColorMap(input: string): Record<string, string> {
+	const result: Record<string, string> = {};
+	if (!input) {
+		return result;
+	}
+	for (const rawLine of input.split("\n")) {
+		const line = rawLine.trim();
+		if (!line || line.startsWith("#")) {
+			continue;
+		}
+		const [tag, color] = line.split(":");
+		if (!tag || !color) continue;
+		const normalizedTag = tag.trim().toLowerCase();
+		const normalizedColor = color.trim();
+		if (!normalizedTag || !normalizedColor) continue;
+		result[normalizedTag] = normalizedColor;
+	}
+	return result;
+}
+
 export interface StringifiedAudioNotesSettings {
 	plusDuration: string;
 	minusDuration: string;
@@ -309,6 +352,7 @@ export interface StringifiedAudioNotesSettings {
 	whisperUseDateFolders: boolean;
 	whisperCreateNote: boolean;
 	whisperNoteFolder: string;
+	calendarTagColors: Record<string, string>;
 }
 
 const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
@@ -325,6 +369,7 @@ const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	whisperUseDateFolders: true,
 	whisperCreateNote: true,
 	whisperNoteFolder: "02-meetings",
+	calendarTagColors: {},
 };
 
 export class AudioNotesSettings {
@@ -342,6 +387,7 @@ export class AudioNotesSettings {
 		private _whisperUseDateFolders: boolean,
 		private _whisperCreateNote: boolean,
 		private _whisperNoteFolder: string,
+		private _calendarTagColors: Record<string, string>,
 	) {}
 
 	static fromDefaultSettings(): AudioNotesSettings {
@@ -359,6 +405,7 @@ export class AudioNotesSettings {
 			DEFAULT_SETTINGS.whisperUseDateFolders,
 			DEFAULT_SETTINGS.whisperCreateNote,
 			DEFAULT_SETTINGS.whisperNoteFolder,
+			DEFAULT_SETTINGS.calendarTagColors,
 		);
 	}
 
@@ -434,6 +481,12 @@ export class AudioNotesSettings {
 			data.whisperNoteFolder !== undefined
 		) {
 			settings.whisperNoteFolder = data.whisperNoteFolder!;
+		}
+		if (
+			data.calendarTagColors !== null &&
+			data.calendarTagColors !== undefined
+		) {
+			settings.calendarTagColors = data.calendarTagColors!;
 		}
 		return settings;
 	}
@@ -552,6 +605,14 @@ export class AudioNotesSettings {
 
 	set whisperNoteFolder(value: string) {
 		this._whisperNoteFolder = value;
+	}
+
+	get calendarTagColors(): Record<string, string> {
+		return this._calendarTagColors || {};
+	}
+
+	set calendarTagColors(value: Record<string, string>) {
+		this._calendarTagColors = value || {};
 	}
 
 	async getInfoByApiKey(): Promise<ApiKeyInfo | undefined> {

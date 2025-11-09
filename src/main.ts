@@ -36,6 +36,14 @@ import {
 	getStartAndEndFromBracketString,
 } from "./AudioNotes";
 import { Transcript, parseTranscript, TranscriptsCache } from "./Transcript";
+import {
+	AUDIO_NOTES_CALENDAR_VIEW,
+	MeetingCalendarView,
+} from "./MeetingCalendarView";
+import {
+	AUDIO_NOTES_BASES_CALENDAR_VIEW,
+	BasesCalendarView,
+} from "./BasesCalendarView";
 
 // Load Font-Awesome stuff
 import { library } from "@fortawesome/fontawesome-svg-core";
@@ -110,12 +118,14 @@ export default class AutomaticAudioNotes extends Plugin {
 			loadedData["_whisperUseDateFolders"],
 			loadedData["_whisperCreateNote"],
 			loadedData["_whisperNoteFolder"],
+			loadedData["_calendarTagColors"],
 		);
 		this.settings = AudioNotesSettings.overrideDefaultSettings(newSettings);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		this.app.workspace.trigger("audio-notes:settings-updated");
 	}
 
 	private getCurrentlyPlayingAudioElement(): HTMLMediaElement | null {
@@ -207,6 +217,7 @@ export default class AutomaticAudioNotes extends Plugin {
 			data["_whisperUseDateFolders"] = this.settings.whisperUseDateFolders;
 			data["_whisperCreateNote"] = this.settings.whisperCreateNote;
 			data["_whisperNoteFolder"] = this.settings.whisperNoteFolder;
+			data["_calendarTagColors"] = this.settings.calendarTagColors;
 			data.positions[audio.currentSrc] = [
 				audio.currentTime,
 				new Date().getTime(),
@@ -219,6 +230,13 @@ export default class AutomaticAudioNotes extends Plugin {
 		// Load Settings
 		await this.loadSettings();
 		this.addSettingTab(new AudioNotesSettingsTab(this.app, this));
+		this.registerView(AUDIO_NOTES_CALENDAR_VIEW, (leaf) => new MeetingCalendarView(leaf, this));
+		this.registerBasesView(AUDIO_NOTES_BASES_CALENDAR_VIEW, {
+			name: "Audio Notes Calendar",
+			icon: "lucide-calendar",
+			factory: (controller, containerEl) =>
+				new BasesCalendarView(controller, containerEl, this),
+		});
 		const ribbonIconEl = this.addRibbonIcon(
 			"microphone",
 			"Quick Audio Note with Transcription",
@@ -276,6 +294,13 @@ export default class AutomaticAudioNotes extends Plugin {
 		}
 
 		// Add all the commands
+		this.addCommand({
+			id: "open-audio-notes-calendar",
+			name: "Open Audio Notes calendar",
+			callback: () => {
+				void this.activateCalendarView();
+			},
+		});
 		this.addCommand({
 			id: "import-whisper-archive",
 			name: "Import Whisper transcription archive",
@@ -1687,7 +1712,21 @@ export default class AutomaticAudioNotes extends Plugin {
 		new Notice("Audio Note generation complete!");
 	}
 
+	private async activateCalendarView() {
+		const { workspace } = this.app;
+		let leaf = workspace.getLeavesOfType(AUDIO_NOTES_CALENDAR_VIEW)[0];
+		if (!leaf) {
+			leaf = workspace.getRightLeaf(false) ?? workspace.getLeaf(true);
+			await leaf.setViewState({
+				type: AUDIO_NOTES_CALENDAR_VIEW,
+				active: true,
+			});
+		}
+		workspace.revealLeaf(leaf);
+	}
+
 	public onunload() {
+		this.app.workspace.detachLeavesOfType(AUDIO_NOTES_CALENDAR_VIEW);
 		this.knownCurrentTimes.clear();
 		this.knownAudioPlayers.clear();
 		this.currentlyPlayingAudioFakeUuid = null;
