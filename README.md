@@ -30,6 +30,36 @@ To create an Audio Note you must specify an audio file, and you may set a few ot
 * `author`: (optional) The text to be used as the author of the quote.
 * `liveUpdate: true`: (optional) If you add the `liveUpdate: true` attribute to the codeblock, the quote will automatically update in the codeblock as the audio plays (see below for more info).
 
+## Install the Beta with BRAT
+
+Audio Notes is still in beta, so the easiest way to try it is through the community-maintained Beta Reviewers Auto-update Tester (BRAT) plugin. BRAT installs this repo directly and keeps it updated whenever we publish a new build.
+
+1. In Obsidian, open Settings → Community plugins and install/enable BRAT.
+2. Run the command palette action `BRAT: Add Beta plugin`, then enter `ahmadjalil/obsidian-audio-notes`.
+3. BRAT downloads the plugin into your vault and can auto-check for updates whenever you sync.
+
+Remove the entry inside BRAT's settings if you ever want to uninstall the beta.
+
+## Calendar Bases Integration
+
+Each Whisper import now stamps the generated note with both ISO timestamps and separate date/time fields:
+
+```yaml
+start_date: 2025-10-25
+start_time: 19:33:51
+end_date: 2025-10-25
+end_time: 21:10:12
+start: 2025-10-25T19:33:51.962Z
+end: 2025-10-25T21:10:12.000Z
+```
+
+In [Obsidian Bases](https://help.obsidian.md/bases), configure your Calendar view with:
+
+- **Start date property:** `start_date`
+- **End date property:** `end_date`
+
+Use the `start_time` / `end_time` fields for Dataview tables or templates, while the ISO `start` / `end` fields remain available if/when Calendar Bases begins supporting full datetime properties. Dragging events on the calendar continues to update note frontmatter automatically, and `tags: [meeting]` stay in place for filtering by job/project.
+
 ## How to Use the Plugin
 
 Find the .mp3 (or .m4a or .m4b) file you want to take notes on and move it into your vault. You may want to generate a transcript file to allow <strong>Audio Notes</strong> to automatically insert the transcript of the audio (see below).

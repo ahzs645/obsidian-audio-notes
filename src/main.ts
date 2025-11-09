@@ -17,6 +17,7 @@ import { DGQuickNoteModal } from "./DGQuickNoteModal";
 import { monkeyPatchConsole } from "./monkeyPatchConsole";
 import { CreateNewAudioNoteInNewFileModal } from "./CreateNewAudioNoteInNewFileModal";
 import { EnqueueAudioModal } from "./EnqueueAudioModal";
+import { ImportWhisperModal } from "./ImportWhisperModal";
 import {
 	generateRandomString,
 	getIcon,
@@ -104,6 +105,11 @@ export default class AutomaticAudioNotes extends Plugin {
 			loadedData["_debugMode"],
 			loadedData["_DGApiKey"],
 			loadedData["_DGTranscriptFolder"],
+			loadedData["_whisperAudioFolder"],
+			loadedData["_whisperTranscriptFolder"],
+			loadedData["_whisperUseDateFolders"],
+			loadedData["_whisperCreateNote"],
+			loadedData["_whisperNoteFolder"],
 		);
 		this.settings = AudioNotesSettings.overrideDefaultSettings(newSettings);
 	}
@@ -196,6 +202,11 @@ export default class AutomaticAudioNotes extends Plugin {
 			if (!data.positions) {
 				data.positions = new Object();
 			}
+			data["_whisperAudioFolder"] = this.settings.whisperAudioFolder;
+			data["_whisperTranscriptFolder"] = this.settings.whisperTranscriptFolder;
+			data["_whisperUseDateFolders"] = this.settings.whisperUseDateFolders;
+			data["_whisperCreateNote"] = this.settings.whisperCreateNote;
+			data["_whisperNoteFolder"] = this.settings.whisperNoteFolder;
 			data.positions[audio.currentSrc] = [
 				audio.currentTime,
 				new Date().getTime(),
@@ -218,8 +229,9 @@ export default class AutomaticAudioNotes extends Plugin {
 					this.settings.DGApiKey === undefined
 				) {
 					new Notice(
-						"Please set your Deepgram API key in the settings tab."
+						"No Deepgram API key found. Use Whisper import instead or set a key in settings."
 					);
+					new ImportWhisperModal(this).open();
 				} else {
 					new DGQuickNoteModal(this).open();
 				}
@@ -264,6 +276,13 @@ export default class AutomaticAudioNotes extends Plugin {
 		}
 
 		// Add all the commands
+		this.addCommand({
+			id: "import-whisper-archive",
+			name: "Import Whisper transcription archive",
+			callback: () => {
+				new ImportWhisperModal(this).open();
+			},
+		});
 		this.addCommand({
 			id: "create-new-audio-note",
 			name: `Create new Audio Note at current time (-/+ ${this.settings.minusDuration}/${this.settings.plusDuration} seconds)`,
@@ -873,11 +892,15 @@ export default class AutomaticAudioNotes extends Plugin {
 			.then((transcript: Transcript | undefined) => {
 				if (transcript) {
 					const currentTime = audioPlayer.currentTime;
-					const [i, segment] = transcript.getSegmentAt(currentTime);					
-					if (i && segment) {
-						const ind = quoteEl.textContent?.indexOf(segment.text);
-						const quote = quoteEl.textContent?.substring(0, ind) + segment.text.toUpperCase() + quoteEl.textContent?.substring(ind + segment.text.length);
-						quoteEl.textContent = quote;
+					const [i, segment] = transcript.getSegmentAt(currentTime);
+					if (i !== undefined && segment) {
+						const currentText = quoteEl.textContent ?? "";
+						const ind = currentText.indexOf(segment.text);
+						if (ind !== -1) {
+							const before = currentText.substring(0, ind);
+							const after = currentText.substring(ind + segment.text.length);
+							quoteEl.textContent = `${before}${segment.text.toUpperCase()}${after}`;
+						}
 						//Store transcript in object, configure which section is highglighted then call to string or something that concats and formats.
 						// Make a new callback
 						const makeCallback = (

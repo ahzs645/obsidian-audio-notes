@@ -167,6 +167,79 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					})
 			);
 
+		containerEl.createEl("h2", {
+			text: "Whisper archive imports",
+		});
+		new Setting(containerEl)
+			.setName("Audio destination folder")
+			.setDesc(
+				"Relative path inside your vault where imported Whisper audio files will be stored."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("MediaArchive/audio")
+					.setValue(this.plugin.settings.whisperAudioFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.whisperAudioFolder = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+		new Setting(containerEl)
+			.setName("Transcript destination folder")
+			.setDesc(
+				"Relative path inside your vault where imported Whisper transcript JSON files will be stored."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("transcripts")
+					.setValue(this.plugin.settings.whisperTranscriptFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.whisperTranscriptFolder =
+							value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+		new Setting(containerEl)
+			.setName("Use year/month subfolders")
+			.setDesc(
+				"Organize imported files into YYYY/MM folders based on the recording date."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.whisperUseDateFolders)
+					.onChange(async (value) => {
+						this.plugin.settings.whisperUseDateFolders = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Auto-create note")
+			.setDesc(
+				"After importing, create a Markdown note with an audio-note block referencing the files."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.whisperCreateNote)
+					.onChange(async (value) => {
+						this.plugin.settings.whisperCreateNote = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Note destination folder")
+			.setDesc("Relative path for the Markdown note created after import.")
+			.addText((text) =>
+				text
+					.setPlaceholder("02-meetings")
+					.setValue(this.plugin.settings.whisperNoteFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.whisperNoteFolder = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
 		containerEl.createEl("hr");
 		containerEl.createDiv(
 			"p"
@@ -231,6 +304,11 @@ export interface StringifiedAudioNotesSettings {
 	debugMode: boolean;
 	DGApiKey: string;
 	DGTranscriptFolder: string;
+	whisperAudioFolder: string;
+	whisperTranscriptFolder: string;
+	whisperUseDateFolders: boolean;
+	whisperCreateNote: boolean;
+	whisperNoteFolder: string;
 }
 
 const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
@@ -242,6 +320,11 @@ const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	debugMode: false,
 	DGApiKey: "",
 	DGTranscriptFolder: "transcripts/",
+	whisperAudioFolder: "MediaArchive/audio",
+	whisperTranscriptFolder: "transcripts",
+	whisperUseDateFolders: true,
+	whisperCreateNote: true,
+	whisperNoteFolder: "02-meetings",
 };
 
 export class AudioNotesSettings {
@@ -254,6 +337,11 @@ export class AudioNotesSettings {
 		private _debugMode: boolean,
 		private _DGApiKey: string,
 		private _DGTranscriptFolder: string,
+		private _whisperAudioFolder: string,
+		private _whisperTranscriptFolder: string,
+		private _whisperUseDateFolders: boolean,
+		private _whisperCreateNote: boolean,
+		private _whisperNoteFolder: string,
 	) {}
 
 	static fromDefaultSettings(): AudioNotesSettings {
@@ -266,6 +354,11 @@ export class AudioNotesSettings {
 			DEFAULT_SETTINGS.debugMode,
 			DEFAULT_SETTINGS.DGApiKey,
 			DEFAULT_SETTINGS.DGTranscriptFolder,
+			DEFAULT_SETTINGS.whisperAudioFolder,
+			DEFAULT_SETTINGS.whisperTranscriptFolder,
+			DEFAULT_SETTINGS.whisperUseDateFolders,
+			DEFAULT_SETTINGS.whisperCreateNote,
+			DEFAULT_SETTINGS.whisperNoteFolder,
 		);
 	}
 
@@ -305,6 +398,42 @@ export class AudioNotesSettings {
 		}
 		if (data.DGApiKey !== null && data.DGApiKey !== undefined) {
 			settings.DGApiKey = data.DGApiKey!;
+		}
+		if (
+			data.DGTranscriptFolder !== null &&
+			data.DGTranscriptFolder !== undefined
+		) {
+			settings.DGTranscriptFolder = data.DGTranscriptFolder!;
+		}
+		if (
+			data.whisperAudioFolder !== null &&
+			data.whisperAudioFolder !== undefined
+		) {
+			settings.whisperAudioFolder = data.whisperAudioFolder!;
+		}
+		if (
+			data.whisperTranscriptFolder !== null &&
+			data.whisperTranscriptFolder !== undefined
+		) {
+			settings.whisperTranscriptFolder = data.whisperTranscriptFolder!;
+		}
+		if (
+			data.whisperUseDateFolders !== null &&
+			data.whisperUseDateFolders !== undefined
+		) {
+			settings.whisperUseDateFolders = data.whisperUseDateFolders!;
+		}
+		if (
+			data.whisperCreateNote !== null &&
+			data.whisperCreateNote !== undefined
+		) {
+			settings.whisperCreateNote = data.whisperCreateNote!;
+		}
+		if (
+			data.whisperNoteFolder !== null &&
+			data.whisperNoteFolder !== undefined
+		) {
+			settings.whisperNoteFolder = data.whisperNoteFolder!;
 		}
 		return settings;
 	}
@@ -383,6 +512,46 @@ export class AudioNotesSettings {
 
 	set DGTranscriptFolder(value: string) {
 		this._DGTranscriptFolder = value;
+	}
+
+	get whisperAudioFolder(): string {
+		return this._whisperAudioFolder;
+	}
+
+	set whisperAudioFolder(value: string) {
+		this._whisperAudioFolder = value;
+	}
+
+	get whisperTranscriptFolder(): string {
+		return this._whisperTranscriptFolder;
+	}
+
+	set whisperTranscriptFolder(value: string) {
+		this._whisperTranscriptFolder = value;
+	}
+
+	get whisperUseDateFolders(): boolean {
+		return this._whisperUseDateFolders;
+	}
+
+	set whisperUseDateFolders(value: boolean) {
+		this._whisperUseDateFolders = value;
+	}
+
+	get whisperCreateNote(): boolean {
+		return this._whisperCreateNote;
+	}
+
+	set whisperCreateNote(value: boolean) {
+		this._whisperCreateNote = value;
+	}
+
+	get whisperNoteFolder(): string {
+		return this._whisperNoteFolder;
+	}
+
+	set whisperNoteFolder(value: string) {
+		this._whisperNoteFolder = value;
 	}
 
 	async getInfoByApiKey(): Promise<ApiKeyInfo | undefined> {

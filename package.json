@@ -12,6 +12,8 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "adm-zip": "^0.5.12",
+    "@types/adm-zip": "^0.5.7",
     "@fortawesome/fontawesome-svg-core": "^1.2.32",
     "@fortawesome/free-regular-svg-icons": "^5.15.3",
     "@fortawesome/free-solid-svg-icons": "^5.15.1",
