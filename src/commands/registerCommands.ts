@@ -8,6 +8,7 @@ import {
 	AudioNote,
 	getStartAndEndFromBracketString,
 } from "../AudioNotes";
+import { ensureDashboardNote } from "../dashboard";
 
 export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 	const { app, settings } = plugin;
@@ -17,6 +18,20 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 		name: "Open Audio Notes calendar",
 		callback: () => {
 			void plugin.activateCalendarView();
+		},
+	});
+
+	plugin.addCommand({
+		id: "create-audio-notes-dashboard",
+		name: "Create or refresh Audio Notes dashboard",
+		callback: async () => {
+			try {
+				const message = await ensureDashboardNote(plugin, true);
+				new Notice(message);
+			} catch (error) {
+				console.error(error);
+				new Notice("Could not update dashboard note.", 8000);
+			}
 		},
 	});
 
@@ -213,13 +228,7 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 					file.extension === "m4b" ||
 					file.extension === "m4a"
 			);
-			new CreateNewAudioNoteInNewFileModal(
-				app,
-				mp3Files,
-				settings.audioNotesApiKey,
-				settings.getInfoByApiKey(),
-				settings.DGApiKey
-			).open();
+			new CreateNewAudioNoteInNewFileModal(plugin, mp3Files).open();
 			void plugin.incrementUsageCount();
 		},
 	});
@@ -316,12 +325,7 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 		id: "add-audio-file-to-queue",
 		name: "Transcribe mp3 file online",
 		callback: async () => {
-			new EnqueueAudioModal(
-				app,
-				settings.audioNotesApiKey,
-				settings.getInfoByApiKey(),
-				settings.DGApiKey
-			).open();
+			new EnqueueAudioModal(plugin).open();
 		},
 	});
 
@@ -329,9 +333,12 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 		id: "quick-audio-note",
 		name: "Generate quick audio recording with transcription",
 		callback: async () => {
-			if (!settings.DGApiKey) {
+			if (
+				!settings.DGApiKey &&
+				!settings.hasScriberrCredentials
+			) {
 				new Notice(
-					"Please set your Deepgram API key in the settings tab."
+					"Please set a Deepgram API key or Scriberr credentials in the settings tab."
 				);
 			} else {
 				new DGQuickNoteModal(plugin).open();

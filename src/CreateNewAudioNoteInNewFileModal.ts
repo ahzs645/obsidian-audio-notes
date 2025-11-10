@@ -1,16 +1,48 @@
-import { FuzzySuggestModal, App, TFile, Notice, MarkdownView, request } from "obsidian";
+import { FuzzySuggestModal, TFile, Notice, MarkdownView, request } from "obsidian";
 import queryString from "query-string";
 
 import type { ApiKeyInfo } from "./AudioNotesSettings";
-import { createAudioNoteFilenameFromUrl, createAudioNoteTitleFromUrl, createDeepgramQueryParams, createNewAudioNoteFile } from "./AudioNotesUtils";
+import {
+	createAudioNoteFilenameFromUrl,
+	createAudioNoteTitleFromUrl,
+	createDeepgramQueryParams,
+	createNewAudioNoteFile,
+	ensureFolderExists,
+	normalizeFolderPath,
+} from "./AudioNotesUtils";
 import type { DeepgramTranscriptionResponse } from "./Deepgram";
-import { getTranscriptFromDGResponse } from "./Transcript";
+import {
+	getTranscriptFromDGResponse,
+	getTranscriptFromScriberrResponse,
+	Transcript,
+} from "./Transcript";
 import { createSelect, DG_LANGUAGE_CODES, Podcast, PodcastEpisode, WHISPER_LANGUAGE_CODES } from "./utils";
+import type AutomaticAudioNotes from "./main";
+import {
+	ScriberrClient,
+	type ScriberrConfig,
+	downloadAudioToArrayBuffer,
+} from "./ScriberrClient";
 
 
 export class CreateNewAudioNoteInNewFileModal extends FuzzySuggestModal<TFile> {
-	constructor(app: App, private mp3Files: TFile[], private audioNotesApiKey: string, private apiKeyInfo: Promise<ApiKeyInfo | undefined>, private DGApiKey: string) {
-		super(app);
+	private audioNotesApiKey: string;
+	private apiKeyInfo: Promise<ApiKeyInfo | undefined>;
+	private DGApiKey: string;
+	private scriberrConfig: ScriberrConfig | undefined;
+
+	constructor(private plugin: AutomaticAudioNotes, private mp3Files: TFile[]) {
+		super(plugin.app);
+		this.audioNotesApiKey = plugin.settings.audioNotesApiKey;
+		this.apiKeyInfo = plugin.settings.getInfoByApiKey();
+		this.DGApiKey = plugin.settings.DGApiKey;
+		if (plugin.settings.hasScriberrCredentials) {
+			this.scriberrConfig = {
+				baseUrl: plugin.settings.scriberrBaseUrl,
+				apiKey: plugin.settings.scriberrApiKey,
+				profileName: plugin.settings.scriberrProfileName || undefined,
+			};
+		}
 		// this.setInstructions([{ "command": "Select mp3 file from vault or enter a URL to an mp3 file online", "purpose": "" }]);
 		this.setPlaceholder("or select an mp3 file from your vault using the dropdown below:")
 	}
@@ -121,6 +153,95 @@ export class CreateNewAudioNoteInNewFileModal extends FuzzySuggestModal<TFile> {
 			const text = createEl("span");
 			text.textContent = "Submit for transcription?";
 			transcriptionOptionsContainer.setChildrenInPlace([text, transcribeCheckbox!, selectModel!, selectLanguage!]);
+		} else if (this.scriberrConfig) {
+			submitTranscription = async (
+				url: string,
+				noteTitle: string,
+				noteFilename: string
+			) => {
+				if (selectLanguage && selectLanguage.value && url && transcribeCheckbox!.checked) {
+					if (!this.isSupportedAudioUrl(url)) {
+						new Notice(
+							"Make sure your URL is an .mp3, .m4b, or .m4a file. It should end in one of those extensions (excluding everything after an optional question mark).",
+							10000
+						);
+						return;
+					}
+					try {
+						new Notice("Downloading audio before sending to Scriberr...");
+						const audioBuffer = await downloadAudioToArrayBuffer(url);
+						const client = new ScriberrClient(this.scriberrConfig!);
+						const job = await client.submitJob({
+							audio: audioBuffer,
+							filename: this.buildFilenameFromUrl(url),
+							mimeType: this.guessMimeTypeFromUrl(url),
+							language: selectLanguage.value,
+							title: noteTitle,
+							profileName: this.scriberrConfig?.profileName,
+						});
+						new Notice("Transcribing audio using Scriberr...");
+						const completed = await client.waitForJob(job.id);
+						const transcriptResponse = await client.fetchTranscript(
+							completed.id
+						);
+						const transcript = getTranscriptFromScriberrResponse(
+							transcriptResponse
+						);
+						const transcriptFilename = await this.saveTranscriptFile(
+							noteFilename,
+							transcript
+						);
+						createNewAudioNoteFile(
+							this.app,
+							this.plugin.settings,
+							url,
+							transcriptFilename,
+							noteFilename,
+							noteTitle
+						);
+					} catch (error) {
+						console.error("Could not transcribe audio:", error);
+						new Notice(
+							"Scriberr transcription failed. See console for details.",
+							10000
+						);
+					} finally {
+						this.close();
+					}
+				} else {
+					new Notice("Please specify a .mp3 URL and a language.");
+				}
+			};
+
+			transcribeCheckbox = createEl("input", { type: "checkbox" });
+			transcribeCheckbox.checked = false;
+
+			const selectLanguage = createEl("select", {
+				cls: "select-model-accuracy",
+			});
+			for (const langs of WHISPER_LANGUAGE_CODES) {
+				const langCode = langs[0];
+				const langName = langs[1];
+				const option = selectLanguage.createEl("option");
+				option.value = langCode;
+				option.textContent = langName;
+			}
+
+			transcribeCheckbox.onclick = () => {
+				selectLanguage!.disabled = !transcribeCheckbox!.checked;
+				createFileOnSubmit = !transcribeCheckbox!.checked;
+			};
+
+			transcriptionOptionsContainer = createDiv({
+				cls: "transcription-options-container-for-new-audio-note",
+			});
+			const text = createEl("span");
+			text.textContent = "Submit for transcription using Scriberr?";
+			transcriptionOptionsContainer.setChildrenInPlace([
+				text,
+				transcribeCheckbox!,
+				selectLanguage!,
+			]);
 		} else if (this.DGApiKey) {
 			submitTranscription = (url: string, noteTitle: string, noteFilename: string) => {
 				if (selectLanguage && selectLanguage.value && url && transcribeCheckbox!.checked) {
@@ -145,30 +266,12 @@ export class CreateNewAudioNoteInNewFileModal extends FuzzySuggestModal<TFile> {
 						};
 						request(req).then(async (dgResponseString: string) => {
 							const dgResponse: DeepgramTranscriptionResponse = JSON.parse(dgResponseString);
-							const folder = "transcripts";
-							try {
-								await app.vault.createFolder(folder);
-							} catch (err) {
-								console.info("Audio Notes: Folder exists. Skipping creation.");
-							}
-							// Create the file that contains the transcript.
-							const transcriptFilename = `${folder}/${noteFilename}`.replace(/.md/, ".json");
-							const transcriptFileExists = await app.vault.adapter.exists(transcriptFilename);
-							if (!transcriptFileExists) { // only send the request if the file doesn't exist
-								const transcript = getTranscriptFromDGResponse(dgResponse);
-								const transcriptFile = await app.vault.create(
-									transcriptFilename,
-									`{"segments": ${transcript.toJSON()}}`,
-								);
-								console.log(`${noteFilename} saved!`);
-								new Notice(`${noteFilename} saved!`);
-							} else {
-								console.warn(`${transcriptFilename} already exists! Did not re-submit for transcription.`)
-								new Notice(`${transcriptFilename} already exists! Did not re-submit for transcription.`)
-							}
-							// Create the file with the actual Audio Note.
-							createNewAudioNoteFile(app, url, transcriptFilename, noteFilename, noteTitle);
-							// await navigator.clipboard.writeText(`![[${newNoteFilename}]]`);
+							const transcript = getTranscriptFromDGResponse(dgResponse);
+							const transcriptFilename = await this.saveTranscriptFile(
+								noteFilename,
+								transcript
+							);
+							createNewAudioNoteFile(this.app, this.plugin.settings, url, transcriptFilename, noteFilename, noteTitle);
 						}).catch((error) => {
 							console.error("Could not transcribe audio:")
 							console.error(error);
@@ -223,7 +326,7 @@ export class CreateNewAudioNoteInNewFileModal extends FuzzySuggestModal<TFile> {
 				if (createFileOnSubmit) {
 					const title = createAudioNoteTitleFromUrl(url);
 					const newNoteFilename = createAudioNoteFilenameFromUrl(url);
-					createNewAudioNoteFile(app, url, undefined, newNoteFilename, title);
+					createNewAudioNoteFile(this.app, this.plugin.settings, url, undefined, newNoteFilename, title);
 				}
 				if (transcribeCheckbox && transcribeCheckbox.checked && submitTranscription) {
 					const title = createAudioNoteTitleFromUrl(url);
@@ -343,7 +446,7 @@ export class CreateNewAudioNoteInNewFileModal extends FuzzySuggestModal<TFile> {
 
 	onChooseItem(file: TFile, evt: MouseEvent | KeyboardEvent) {
 		const [title, newNoteFilename] = this.getTitleAndNoteFilenameFromFilePath(file);
-		createNewAudioNoteFile(app, file.path, undefined, newNoteFilename, title);
+		createNewAudioNoteFile(this.app, this.plugin.settings, file.path, undefined, newNoteFilename, title);
 	}
 
 	getTitleAndNoteFilenameFromFilePath(file: TFile): [string, string] {
@@ -355,5 +458,71 @@ export class CreateNewAudioNoteInNewFileModal extends FuzzySuggestModal<TFile> {
 		title = title.replace(/_/g, " ");
 		title = title.split(" ").map((part: string) => part.charAt(0).toUpperCase() + part.slice(1, undefined)).join(" ");
 		return [title, newNoteFilename];
+	}
+
+	private get transcriptFolder(): string {
+		const folder = normalizeFolderPath(
+			this.plugin.settings.DGTranscriptFolder,
+			"transcripts"
+		);
+		return folder || "transcripts";
+	}
+
+	private async saveTranscriptFile(
+		noteFilename: string,
+		transcript: Transcript
+	): Promise<string> {
+		const folder = this.transcriptFolder;
+		await ensureFolderExists(this.app, folder);
+		const transcriptFilename = `${folder}/${noteFilename}`.replace(
+			/.md/,
+			".json"
+		);
+		const transcriptFileExists = await this.app.vault.adapter.exists(
+			transcriptFilename
+		);
+		if (transcriptFileExists) {
+			new Notice(
+				`${transcriptFilename} already exists! Did not re-submit for transcription.`
+			);
+			return transcriptFilename;
+		}
+		await this.app.vault.create(
+			transcriptFilename,
+			`{"segments": ${transcript.toJSON()}}`
+		);
+		new Notice(`${noteFilename} saved!`);
+		return transcriptFilename;
+	}
+
+	private isSupportedAudioUrl(url: string): boolean {
+		const sanitized = this.stripQueryFromUrl(url).toLowerCase();
+		return (
+			sanitized.endsWith(".mp3") ||
+			sanitized.endsWith(".m4b") ||
+			sanitized.endsWith(".m4a")
+		);
+	}
+
+	private stripQueryFromUrl(url: string): string {
+		return url.split("?")[0];
+	}
+
+	private buildFilenameFromUrl(url: string): string {
+		const base = this.stripQueryFromUrl(url);
+		const parts = base.split("/");
+		const last = parts[parts.length - 1] || "audio.mp3";
+		if (last.includes(".")) {
+			return last;
+		}
+		return `${last}.mp3`;
+	}
+
+	private guessMimeTypeFromUrl(url: string): string {
+		const lower = this.stripQueryFromUrl(url).toLowerCase();
+		if (lower.endsWith(".m4a") || lower.endsWith(".m4b")) {
+			return "audio/mp4";
+		}
+		return "audio/mpeg";
 	}
 }

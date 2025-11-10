@@ -67,6 +67,30 @@ If you still want to pipe the data into [Obsidian Bases](https://help.obsidian.m
 
 `start_time` / `end_time` remain available for Dataview tables or templates, and the ISO `start` / `end` values are there for future integrations. Dragging events inside Bases continues to update note frontmatter automatically, while the built-in Audio Notes calendar stays in sync whenever metadata changes.
 
+## Structured meeting templates & Periodic Notes bridges
+
+Enable **Settings → Audio Notes → Meeting note template** to give every auto-created meeting note a consistent Rainbell-style scaffold:
+
+- YAML frontmatter now includes `cssclasses: [aan-meeting-note]`, `start_date`, `start_time`, `end_date`, `end_time`, and — when enabled — `daily_note` / `weekly_note`. The bundled CSS hides properties in reading mode so the note opens directly on the content.
+- The body includes an overview callout, agenda/timeline/decision blocks, and the audio-note callout at the bottom. Cursor focus drops into the “Notes” section to keep typing frictionless.
+- Periodic Notes users can toggle daily/weekly links and set custom formats (tokens `YYYY`, `MM`, `DD`, `WW`, `gggg`) so the template produces links such as `[[2025-02-14]]` or `[[2025年07周记录]]`. Disable the template entirely if you prefer the legacy one-block output.
+
+Manual “Create new Audio Note in new file” commands and Whisper imports both respect the template settings, so every recording lands on a dated page with the same sections.
+
+## Right-sidebar calendar toggle
+
+Pin the Audio Notes calendar in the right side bar with **Settings → Audio Notes → Calendar view → Pin calendar in right sidebar**. The plugin will create/destroy the view for you (you can still open extra calendar panes manually via the command palette).
+
+## Audio Notes dashboard
+
+Need a quick control center for your meetings? Run the new command **Audio Notes: Create or refresh Audio Notes dashboard** (or use the button in the settings tab). The plugin creates/updates the Markdown note you specify with:
+
+- A Dataview table of upcoming meetings (`#meeting`) sorted by `start_date` / `start_time`.
+- A grouped Dataview task list that surfaces every incomplete action item inside meeting notes.
+- A “recent recordings” table that lists the latest captures.
+
+Re-run the command anytime to refresh the blocks; the plugin only replaces the section between `<!-- AUDIO-NOTES-DASHBOARD:START/END -->` markers so you can keep additional context above or below. (Requires the Dataview community plugin.)
+
 ## How to Use the Plugin
 
 Find the .mp3 (or .m4a or .m4b) file you want to take notes on and move it into your vault. You may want to generate a transcript file to allow <strong>Audio Notes</strong> to automatically insert the transcript of the audio (see below).
@@ -163,6 +187,10 @@ You can use <a href="https://dpgr.am/obsidian">Deepgram AI</a> to transcribe you
 You can use the `Transcribe mp3 file online` command or the `Create new Audio Note in new file` command to transcribe your podcast or audio. The transcript will be saved in JSON format in your vault and can be used for future Audio Notes.
 
 First, you'll need an API Key from [Deepgram AI](https://dpgr.am/obsidian). It does cost money, but it is really affordable. They also give you up to 12,000 minutes of transcription *for free* as part of the trial period, depending on which additional options you select. After you create a Deepgram API key, add it to your Audio Notes plugin settings.
+
+### Use Scriberr (self-hosted WhisperX) for Local Transcription
+
+Audio Notes also supports the [Scriberr](https://scriberr.app/api.html) API for people running a local WhisperX server. Head to the **Scriberr Settings** section inside the plugin options, point the base URL at your server (defaults to `https://localhost:8080/api/v1`), and paste an `X-API-Key`. Once configured, the same commands listed above—quick recordings, mp3 URL transcription, and the queue uploader—can route audio through Scriberr without leaving your machine.
 
 ### Use an Existing .srt File
 

@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { Mic, Pause, Square, Info } from "lucide-svelte";
 	import { deepgramPrerecorded } from "./DeepgramPrerecorded";
+	import { ScriberrClient } from "./ScriberrClient";
 	import { Modal, Notice } from "obsidian";
 	import PoweredBy from "./PoweredBy.svelte";
 	import type AutomaticAudioNotes from "./main";
 	export let plugin: AutomaticAudioNotes;
+	const usingScriberr = plugin.settings.hasScriberrCredentials;
+	const providerName = usingScriberr ? "Scriberr" : "Deepgram";
 	export let transcript: string | undefined;
 	export let audioSaveLocation = "";
 	export let noteTitle: string;
@@ -158,7 +161,7 @@
 	}
 	function stopRecording() {
 		recordingState = "stopped";
-		saveButtonText = "Getting Transcript from Deepgram";
+		saveButtonText = `Getting transcript from ${providerName}`;
 		//tell the recorder to stop the recording
 		recorder!.stop();
 
@@ -179,17 +182,10 @@
 			optionsToPass[key] = options[key];
 		});
 		try {
-			const dgResponse = await deepgramPrerecorded(
-				plugin.settings.DGApiKey,
-				{
-					buffer: buffer,
-					mimetype: "audio/webm",
-				},
-				// @ts-ignore
-				optionsToPass
-			);
-			transcript =
-				dgResponse?.results?.channels[0].alternatives[0].transcript;
+			const transcriptText = usingScriberr
+				? await transcribeWithScriberr(buffer, optionsToPass)
+				: await transcribeWithDeepgram(buffer, optionsToPass);
+			transcript = transcriptText;
 			console.info(`Audio Notes: transcript: ${transcript}`);
 			saveButtonState = true;
 			saveButtonText = "Save Note with Transcription";
@@ -201,6 +197,56 @@
 				"Error getting transcription. Please try again, or see developer console for errors when reporting.";
 		}
 	}
+
+	async function transcribeWithDeepgram(
+		buffer: Buffer | ArrayBuffer,
+		options: Record<string, any>
+	): Promise<string> {
+		if (!plugin.settings.DGApiKey) {
+			throw new Error("Deepgram API key is not configured.");
+		}
+		const dgResponse = await deepgramPrerecorded(
+			plugin.settings.DGApiKey,
+			{
+				buffer: buffer,
+				mimetype: "audio/webm",
+			},
+			// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+			// @ts-ignore
+			options
+		);
+		const transcriptText =
+			dgResponse?.results?.channels[0].alternatives[0].transcript;
+		if (!transcriptText) {
+			throw new Error("Deepgram returned an empty transcript.");
+		}
+		return transcriptText;
+	}
+
+	async function transcribeWithScriberr(
+		buffer: Buffer | ArrayBuffer,
+		options: Record<string, any>
+	): Promise<string> {
+		const client = new ScriberrClient({
+			baseUrl: plugin.settings.scriberrBaseUrl,
+			apiKey: plugin.settings.scriberrApiKey,
+			profileName: plugin.settings.scriberrProfileName || undefined,
+		});
+		const quickJob = await client.submitQuickJob({
+			audio: buffer,
+			filename: `quick-note.${extension}`,
+			mimeType: `audio/${extension}`,
+			parameters: {
+				language: options.language,
+			},
+			profileName: plugin.settings.scriberrProfileName || undefined,
+		});
+		const completedJob = await client.waitForQuickJob(quickJob.id);
+		if (!completedJob.transcript) {
+			throw new Error("Scriberr returned an empty transcript.");
+		}
+		return completedJob.transcript;
+	}
 </script>
 
 <div class="number">
@@ -208,7 +254,11 @@
 		<h2>Quick Audio Note</h2>
 		<!-- <img src="/DG-powered-by-logo.svg" alt="Powered By Deepgram" /> -->
 		<div class="powered-by">
-			<PoweredBy />
+			{#if usingScriberr}
+				<span>Powered by Scriberr</span>
+			{:else}
+				<PoweredBy />
+			{/if}
 		</div>
 	</div>
 	<div class="main-container">

@@ -8,6 +8,7 @@ import {
 	App,
 } from "obsidian";
 import { secondsToTimeString } from "./utils";
+import { ensureDashboardNote } from "./dashboard";
 
 export class ApiKeyInfo {
 	constructor(
@@ -139,6 +140,103 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 				});
 			});
 
+		containerEl.createEl("h2", { text: "Meeting note template" });
+		new Setting(containerEl)
+			.setName("Enable structured template")
+			.setDesc(
+				"Adds Rainbell-style frontmatter, quick links, and agenda blocks whenever the plugin creates a meeting note. Disable to fall back to the classic single callout."
+			)
+			.addToggle((toggle: ToggleComponent) =>
+				toggle
+					.setValue(this.plugin.settings.meetingTemplateEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.meetingTemplateEnabled = value;
+						await this.plugin.saveSettings();
+						this.display();
+					})
+			);
+
+		const templateDisabled = !this.plugin.settings.meetingTemplateEnabled;
+
+		new Setting(containerEl)
+			.setName("Link to daily note")
+			.setDesc(
+				`Insert a [[${this.plugin.settings.periodicDailyNoteFormat}]] shortcut (matches Periodic Notes).`
+			)
+			.setDisabled(templateDisabled)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.periodicDailyNoteEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.periodicDailyNoteEnabled = value;
+						await this.plugin.saveSettings();
+						this.display();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Daily note format")
+			.setDesc("Tokens: YYYY, MM, DD, WW (ISO week), gggg (ISO week-year).")
+			.setDisabled(
+				templateDisabled || !this.plugin.settings.periodicDailyNoteEnabled
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("YYYY-MM-DD")
+					.setValue(this.plugin.settings.periodicDailyNoteFormat)
+					.setDisabled(
+						templateDisabled ||
+							!this.plugin.settings.periodicDailyNoteEnabled
+					)
+					.onChange(async (value) => {
+						this.plugin.settings.periodicDailyNoteFormat =
+							value || "YYYY-MM-DD";
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Link to weekly note")
+			.setDesc(
+				`Insert a weekly [[${this.plugin.settings.periodicWeeklyNoteFormat}]] reference so recordings land inside your periodic review.`
+			)
+			.setDisabled(templateDisabled)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.periodicWeeklyNoteEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.periodicWeeklyNoteEnabled = value;
+						await this.plugin.saveSettings();
+						this.display();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Weekly note format")
+			.setDesc("Tokens: YYYY, MM, DD, WW, gggg. Example: gggg-'W'WW")
+			.setDisabled(
+				templateDisabled || !this.plugin.settings.periodicWeeklyNoteEnabled
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("gggg-'W'WW")
+					.setValue(this.plugin.settings.periodicWeeklyNoteFormat)
+					.setDisabled(
+						templateDisabled ||
+							!this.plugin.settings.periodicWeeklyNoteEnabled
+					)
+					.onChange(async (value) => {
+						this.plugin.settings.periodicWeeklyNoteFormat =
+							value || "gggg-'W'WW";
+						await this.plugin.saveSettings();
+					})
+			);
+
+		const templateHint = containerEl.createEl("p");
+		templateHint.createSpan({
+			text: `Need different formats? Match them to your Periodic Notes plugin names (e.g. "YYYY年WW周记录").`,
+		});
+
 		containerEl.createEl("h2", {
 			text: "Deepgram Settings",
 		});
@@ -155,14 +253,63 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					})
 			);
 		new Setting(containerEl)
-			.setName("Deepgram Transcript Folder")
-			.setDesc("The folder your transcripts will be saved in when transcribing audio files.")
+			.setName("Transcript Folder (Deepgram / Scriberr)")
+			.setDesc(
+				"The folder your transcripts will be saved in when using Deepgram or Scriberr."
+			)
 			.addText((text) =>
 				text
 					.setPlaceholder("transcripts/")
 					.setValue(this.plugin.settings.DGTranscriptFolder)
 					.onChange(async (value) => {
 						this.plugin.settings.DGTranscriptFolder = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		containerEl.createEl("h2", {
+			text: "Scriberr Settings",
+		});
+		new Setting(containerEl)
+			.setName("Scriberr Base URL")
+			.setDesc(
+				"Defaults to https://localhost:8080/api/v1 when running Scriberr locally."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("https://localhost:8080/api/v1")
+					.setValue(this.plugin.settings.scriberrBaseUrl)
+					.onChange(async (value) => {
+						this.plugin.settings.scriberrBaseUrl =
+							value || DEFAULT_SETTINGS.scriberrBaseUrl;
+						await this.plugin.saveSettings();
+					})
+			);
+		new Setting(containerEl)
+			.setName("Scriberr API Key")
+			.setDesc(
+				"Create an API key inside Scriberr and paste it here to authenticate via X-API-Key."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("Enter your API key…")
+					.setValue(this.plugin.settings.scriberrApiKey)
+					.onChange(async (value) => {
+						this.plugin.settings.scriberrApiKey = value;
+						await this.plugin.saveSettings();
+					})
+			);
+		new Setting(containerEl)
+			.setName("Default Scriberr Profile")
+			.setDesc(
+				"Optional profile name to apply when submitting jobs (matches Scriberr transcription profiles)."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("leave blank to use server defaults")
+					.setValue(this.plugin.settings.scriberrProfileName)
+					.onChange(async (value) => {
+						this.plugin.settings.scriberrProfileName = value;
 						await this.plugin.saveSettings();
 					})
 			);
@@ -242,6 +389,20 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 
 		containerEl.createEl("h3", { text: "Calendar view" });
 		new Setting(containerEl)
+			.setName("Pin calendar in right sidebar")
+			.setDesc(
+				"Keep the Audio Notes calendar docked next to your working notes. Disable if you prefer to open it manually."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.calendarSidebarPinned)
+					.onChange(async (value) => {
+						this.plugin.settings.calendarSidebarPinned = value;
+						await this.plugin.saveSettings();
+						await this.plugin.syncCalendarSidebar(value);
+					})
+			);
+		new Setting(containerEl)
 			.setName("Tag colors")
 			.setDesc(
 				"One entry per line using the format tag:#color. Tags are matched case-insensitively."
@@ -256,6 +417,37 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			});
+
+		containerEl.createEl("h3", { text: "Dashboard" });
+		new Setting(containerEl)
+			.setName("Dashboard note path")
+			.setDesc(
+				"Path to the Dataview dashboard that lists upcoming meetings and open tasks."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("Audio Notes Dashboard.md")
+					.setValue(this.plugin.settings.dashboardNotePath)
+					.onChange(async (value) => {
+						this.plugin.settings.dashboardNotePath =
+							value?.trim() || "Audio Notes Dashboard.md";
+						await this.plugin.saveSettings();
+					})
+			)
+			.addExtraButton((button) =>
+				button
+					.setIcon("refresh-ccw")
+					.setTooltip("Create or refresh the dashboard note now")
+					.onClick(async () => {
+						try {
+							const result = await ensureDashboardNote(this.plugin, true);
+							new Notice(result);
+						} catch (error) {
+							console.error(error);
+							new Notice("Could not update dashboard note");
+						}
+					})
+			);
 
 		containerEl.createEl("hr");
 		containerEl.createDiv(
@@ -347,12 +539,22 @@ export interface StringifiedAudioNotesSettings {
 	debugMode: boolean;
 	DGApiKey: string;
 	DGTranscriptFolder: string;
+	scriberrBaseUrl: string;
+	scriberrApiKey: string;
+	scriberrProfileName: string;
 	whisperAudioFolder: string;
 	whisperTranscriptFolder: string;
 	whisperUseDateFolders: boolean;
 	whisperCreateNote: boolean;
 	whisperNoteFolder: string;
 	calendarTagColors: Record<string, string>;
+	meetingTemplateEnabled: boolean;
+	periodicDailyNoteEnabled: boolean;
+	periodicDailyNoteFormat: string;
+	periodicWeeklyNoteEnabled: boolean;
+	periodicWeeklyNoteFormat: string;
+	calendarSidebarPinned: boolean;
+	dashboardNotePath: string;
 }
 
 const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
@@ -364,12 +566,22 @@ const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	debugMode: false,
 	DGApiKey: "",
 	DGTranscriptFolder: "transcripts/",
+	scriberrBaseUrl: "https://localhost:8080/api/v1",
+	scriberrApiKey: "",
+	scriberrProfileName: "",
 	whisperAudioFolder: "MediaArchive/audio",
 	whisperTranscriptFolder: "transcripts",
 	whisperUseDateFolders: true,
 	whisperCreateNote: true,
 	whisperNoteFolder: "02-meetings",
 	calendarTagColors: {},
+	meetingTemplateEnabled: true,
+	periodicDailyNoteEnabled: true,
+	periodicDailyNoteFormat: "YYYY-MM-DD",
+	periodicWeeklyNoteEnabled: true,
+	periodicWeeklyNoteFormat: "gggg-'W'WW",
+	calendarSidebarPinned: false,
+	dashboardNotePath: "Audio Notes Dashboard.md",
 };
 
 export class AudioNotesSettings {
@@ -382,12 +594,22 @@ export class AudioNotesSettings {
 		private _debugMode: boolean,
 		private _DGApiKey: string,
 		private _DGTranscriptFolder: string,
+		private _scriberrBaseUrl: string,
+		private _scriberrApiKey: string,
+		private _scriberrProfileName: string,
 		private _whisperAudioFolder: string,
 		private _whisperTranscriptFolder: string,
 		private _whisperUseDateFolders: boolean,
 		private _whisperCreateNote: boolean,
 		private _whisperNoteFolder: string,
 		private _calendarTagColors: Record<string, string>,
+		private _meetingTemplateEnabled: boolean,
+		private _periodicDailyNoteEnabled: boolean,
+		private _periodicDailyNoteFormat: string,
+		private _periodicWeeklyNoteEnabled: boolean,
+		private _periodicWeeklyNoteFormat: string,
+		private _calendarSidebarPinned: boolean,
+		private _dashboardNotePath: string,
 	) {}
 
 	static fromDefaultSettings(): AudioNotesSettings {
@@ -400,12 +622,22 @@ export class AudioNotesSettings {
 			DEFAULT_SETTINGS.debugMode,
 			DEFAULT_SETTINGS.DGApiKey,
 			DEFAULT_SETTINGS.DGTranscriptFolder,
+			DEFAULT_SETTINGS.scriberrBaseUrl,
+			DEFAULT_SETTINGS.scriberrApiKey,
+			DEFAULT_SETTINGS.scriberrProfileName,
 			DEFAULT_SETTINGS.whisperAudioFolder,
 			DEFAULT_SETTINGS.whisperTranscriptFolder,
 			DEFAULT_SETTINGS.whisperUseDateFolders,
 			DEFAULT_SETTINGS.whisperCreateNote,
 			DEFAULT_SETTINGS.whisperNoteFolder,
 			DEFAULT_SETTINGS.calendarTagColors,
+			DEFAULT_SETTINGS.meetingTemplateEnabled,
+			DEFAULT_SETTINGS.periodicDailyNoteEnabled,
+			DEFAULT_SETTINGS.periodicDailyNoteFormat,
+			DEFAULT_SETTINGS.periodicWeeklyNoteEnabled,
+			DEFAULT_SETTINGS.periodicWeeklyNoteFormat,
+			DEFAULT_SETTINGS.calendarSidebarPinned,
+			DEFAULT_SETTINGS.dashboardNotePath,
 		);
 	}
 
@@ -453,6 +685,24 @@ export class AudioNotesSettings {
 			settings.DGTranscriptFolder = data.DGTranscriptFolder!;
 		}
 		if (
+			data.scriberrBaseUrl !== null &&
+			data.scriberrBaseUrl !== undefined
+		) {
+			settings.scriberrBaseUrl = data.scriberrBaseUrl!;
+		}
+		if (
+			data.scriberrApiKey !== null &&
+			data.scriberrApiKey !== undefined
+		) {
+			settings.scriberrApiKey = data.scriberrApiKey!;
+		}
+		if (
+			data.scriberrProfileName !== null &&
+			data.scriberrProfileName !== undefined
+		) {
+			settings.scriberrProfileName = data.scriberrProfileName!;
+		}
+		if (
 			data.whisperAudioFolder !== null &&
 			data.whisperAudioFolder !== undefined
 		) {
@@ -487,6 +737,48 @@ export class AudioNotesSettings {
 			data.calendarTagColors !== undefined
 		) {
 			settings.calendarTagColors = data.calendarTagColors!;
+		}
+		if (
+			data.meetingTemplateEnabled !== null &&
+			data.meetingTemplateEnabled !== undefined
+		) {
+			settings.meetingTemplateEnabled = data.meetingTemplateEnabled!;
+		}
+		if (
+			data.periodicDailyNoteEnabled !== null &&
+			data.periodicDailyNoteEnabled !== undefined
+		) {
+			settings.periodicDailyNoteEnabled = data.periodicDailyNoteEnabled!;
+		}
+		if (
+			data.periodicDailyNoteFormat !== null &&
+			data.periodicDailyNoteFormat !== undefined
+		) {
+			settings.periodicDailyNoteFormat = data.periodicDailyNoteFormat!;
+		}
+		if (
+			data.periodicWeeklyNoteEnabled !== null &&
+			data.periodicWeeklyNoteEnabled !== undefined
+		) {
+			settings.periodicWeeklyNoteEnabled = data.periodicWeeklyNoteEnabled!;
+		}
+		if (
+			data.periodicWeeklyNoteFormat !== null &&
+			data.periodicWeeklyNoteFormat !== undefined
+		) {
+			settings.periodicWeeklyNoteFormat = data.periodicWeeklyNoteFormat!;
+		}
+		if (
+			data.calendarSidebarPinned !== null &&
+			data.calendarSidebarPinned !== undefined
+		) {
+			settings.calendarSidebarPinned = data.calendarSidebarPinned!;
+		}
+		if (
+			data.dashboardNotePath !== null &&
+			data.dashboardNotePath !== undefined
+		) {
+			settings.dashboardNotePath = data.dashboardNotePath!;
 		}
 		return settings;
 	}
@@ -567,6 +859,34 @@ export class AudioNotesSettings {
 		this._DGTranscriptFolder = value;
 	}
 
+	get scriberrBaseUrl(): string {
+		return this._scriberrBaseUrl || DEFAULT_SETTINGS.scriberrBaseUrl;
+	}
+
+	set scriberrBaseUrl(value: string) {
+		this._scriberrBaseUrl = (value || "").trim();
+	}
+
+	get scriberrApiKey(): string {
+		return this._scriberrApiKey || "";
+	}
+
+	set scriberrApiKey(value: string) {
+		this._scriberrApiKey = value?.trim() || "";
+	}
+
+	get scriberrProfileName(): string {
+		return this._scriberrProfileName || "";
+	}
+
+	set scriberrProfileName(value: string) {
+		this._scriberrProfileName = value?.trim() || "";
+	}
+
+	get hasScriberrCredentials(): boolean {
+		return Boolean(this.scriberrBaseUrl && this.scriberrApiKey);
+	}
+
 	get whisperAudioFolder(): string {
 		return this._whisperAudioFolder;
 	}
@@ -613,6 +933,62 @@ export class AudioNotesSettings {
 
 	set calendarTagColors(value: Record<string, string>) {
 		this._calendarTagColors = value || {};
+	}
+
+	get meetingTemplateEnabled(): boolean {
+		return this._meetingTemplateEnabled;
+	}
+
+	set meetingTemplateEnabled(value: boolean) {
+		this._meetingTemplateEnabled = value;
+	}
+
+	get periodicDailyNoteEnabled(): boolean {
+		return this._periodicDailyNoteEnabled;
+	}
+
+	set periodicDailyNoteEnabled(value: boolean) {
+		this._periodicDailyNoteEnabled = value;
+	}
+
+	get periodicDailyNoteFormat(): string {
+		return this._periodicDailyNoteFormat;
+	}
+
+	set periodicDailyNoteFormat(value: string) {
+		this._periodicDailyNoteFormat = value || "YYYY-MM-DD";
+	}
+
+	get periodicWeeklyNoteEnabled(): boolean {
+		return this._periodicWeeklyNoteEnabled;
+	}
+
+	set periodicWeeklyNoteEnabled(value: boolean) {
+		this._periodicWeeklyNoteEnabled = value;
+	}
+
+	get periodicWeeklyNoteFormat(): string {
+		return this._periodicWeeklyNoteFormat;
+	}
+
+	set periodicWeeklyNoteFormat(value: string) {
+		this._periodicWeeklyNoteFormat = value || "gggg-'W'WW";
+	}
+
+	get calendarSidebarPinned(): boolean {
+		return this._calendarSidebarPinned;
+	}
+
+	set calendarSidebarPinned(value: boolean) {
+		this._calendarSidebarPinned = value;
+	}
+
+	get dashboardNotePath(): string {
+		return this._dashboardNotePath;
+	}
+
+	set dashboardNotePath(value: string) {
+		this._dashboardNotePath = value || "Audio Notes Dashboard.md";
 	}
 
 	async getInfoByApiKey(): Promise<ApiKeyInfo | undefined> {

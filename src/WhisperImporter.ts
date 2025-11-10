@@ -1,6 +1,7 @@
 import AdmZip from "adm-zip";
 import { Notice, normalizePath, Vault } from "obsidian";
 import type AutomaticAudioNotes from "./main";
+import { generateMeetingNoteContent } from "./MeetingNoteTemplate";
 
 interface WhisperMetadata {
 	dateCreated?: number | string;
@@ -394,40 +395,13 @@ async function maybeCreateNote(
 	const endDateObj = new Date(endTimestamp);
 	const startIso = startDateObj.toISOString();
 	const endIso = endDateObj.toISOString();
-	const dateString = startIso.slice(0, 10);
-	const startDateString = startIso.slice(0, 10);
-	const endDateString = endIso.slice(0, 10);
-	const formatTime = (iso: string) => iso.slice(11, 19);
-	const startTimeString = formatTime(startIso);
-	const endTimeString = formatTime(endIso);
-
-	const frontmatter = [
-		"---",
-		`title: ${title}`,
-		`date: ${dateString}`,
-		`media_uri: ${audioPath}`,
-		`transcript_uri: ${transcriptPath}`,
-		`start: ${startIso}`,
-		`end: ${endIso}`,
-		`start_date: ${startDateString}`,
-		`start_time: ${startTimeString}`,
-		`end_date: ${endDateString}`,
-		`end_time: ${endTimeString}`,
-		"tags: [meeting]",
-		"---",
-	].join("\n");
-
-	const audioBlock = [
-		"```audio-note",
-		`title: ${title}`,
-		`audio: ${audioPath}`,
-		`transcript: ${transcriptPath}`,
-		"liveUpdate: true",
-		"---",
-		"```",
-	].join("\n");
-
-	const content = `${frontmatter}\n\n${audioBlock}\n`;
+	const content = generateMeetingNoteContent(plugin.settings, {
+		title,
+		audioPath,
+		transcriptPath,
+		start: startDateObj,
+		end: endDateObj,
+	});
 	await plugin.app.vault.adapter.write(notePath, content);
 	return notePath;
 }

@@ -34,6 +34,10 @@ If your plugin does not need CSS, delete this file.
 	margin-top: 16px;
 }
 
+.markdown-preview-view.aan-meeting-note .metadata-container {
+	display: none;
+}
+
 .audio-note-transcript-panel {
 	width: 100%;
 }

@@ -1,7 +1,14 @@
 import { Notice, request } from "obsidian";
 import { XMLParser } from 'fast-xml-parser';
 import type { AudioNotesSettings } from "./AudioNotesSettings";
-import type { DeepgramAlternative, DeepgramTranscriptionResponse } from "./Deepgram";
+import type {
+	DeepgramAlternative,
+	DeepgramTranscriptionResponse,
+} from "./Deepgram";
+import type {
+	ScriberrTranscriptResponse,
+	ScriberrTranscriptSegment,
+} from "./ScriberrClient";
 
 
 export class Transcript {
@@ -145,10 +152,62 @@ export function getTranscriptFromDGResponse(response: DeepgramTranscriptionRespo
         }
     }
     const lastWord = bestAlternative!.words[bestAlternative!.words.length - 1];
-    const lastSegment = segments[segments.length - 1];
-    lastSegment.text += " " + lastWord.punctuated_word;
-    lastSegment.end = lastWord.end;
-    return new Transcript(segments);
+	const lastSegment = segments[segments.length - 1];
+	lastSegment.text += " " + lastWord.punctuated_word;
+	lastSegment.end = lastWord.end;
+	return new Transcript(segments);
+}
+
+export function getTranscriptFromScriberrResponse(
+	response: ScriberrTranscriptResponse
+): Transcript {
+	const segments = response?.segments;
+	if (!segments || !Array.isArray(segments) || segments.length === 0) {
+		throw new Error("Scriberr transcript response did not include segments.");
+	}
+	const parsedSegments: TranscriptSegment[] = [];
+	let fallbackId = 0;
+		for (const segment of segments) {
+			const normalized = normalizeScriberrSegment(segment, fallbackId);
+			if (normalized) {
+				parsedSegments.push(normalized);
+				fallbackId += 1;
+			}
+		}
+	if (parsedSegments.length === 0) {
+		throw new Error("Could not parse any segments from Scriberr transcript.");
+	}
+	return new Transcript(parsedSegments);
+}
+
+function normalizeScriberrSegment(
+	segment: ScriberrTranscriptSegment,
+	defaultId: number
+): TranscriptSegment | undefined {
+	if (!segment) {
+		return undefined;
+	}
+	const text = (segment.text || "").trim();
+	if (!text) {
+		return undefined;
+	}
+	const start = parseNumber(segment.start);
+	const end = parseNumber(segment.end ?? start);
+	const id = typeof segment.id === "number" ? segment.id : defaultId;
+	return new TranscriptSegment(id, start, end, text);
+}
+
+function parseNumber(value: number | string | undefined): number {
+	if (typeof value === "number") {
+		return value;
+	}
+	if (typeof value === "string") {
+		const parsed = parseFloat(value);
+		if (!Number.isNaN(parsed)) {
+			return parsed;
+		}
+	}
+	return 0;
 }
 
 

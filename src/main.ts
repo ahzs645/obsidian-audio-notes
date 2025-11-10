@@ -106,6 +106,30 @@ export default class AutomaticAudioNotes extends Plugin {
 		if (_forwardStep === undefined) {
 			_forwardStep = 15;
 		}
+		let _meetingTemplateEnabled = loadedData["_meetingTemplateEnabled"];
+		if (_meetingTemplateEnabled === undefined) {
+			_meetingTemplateEnabled = true;
+		}
+		let _periodicDailyNoteEnabled =
+			loadedData["_periodicDailyNoteEnabled"];
+		if (_periodicDailyNoteEnabled === undefined) {
+			_periodicDailyNoteEnabled = true;
+		}
+		let _periodicDailyNoteFormat =
+			loadedData["_periodicDailyNoteFormat"] || "YYYY-MM-DD";
+		let _periodicWeeklyNoteEnabled =
+			loadedData["_periodicWeeklyNoteEnabled"];
+		if (_periodicWeeklyNoteEnabled === undefined) {
+			_periodicWeeklyNoteEnabled = true;
+		}
+		let _periodicWeeklyNoteFormat =
+			loadedData["_periodicWeeklyNoteFormat"] || "gggg-'W'WW";
+		let _calendarSidebarPinned = loadedData["_calendarSidebarPinned"];
+		if (_calendarSidebarPinned === undefined) {
+			_calendarSidebarPinned = false;
+		}
+		let _dashboardNotePath =
+			loadedData["_dashboardNotePath"] || "Audio Notes Dashboard.md";
 		const newSettings = new AudioNotesSettings(
 			_plusDuration,
 			_minusDuration,
@@ -115,12 +139,22 @@ export default class AutomaticAudioNotes extends Plugin {
 			loadedData["_debugMode"],
 			loadedData["_DGApiKey"],
 			loadedData["_DGTranscriptFolder"],
+			loadedData["_scriberrBaseUrl"],
+			loadedData["_scriberrApiKey"],
+			loadedData["_scriberrProfileName"],
 			loadedData["_whisperAudioFolder"],
 			loadedData["_whisperTranscriptFolder"],
 			loadedData["_whisperUseDateFolders"],
 			loadedData["_whisperCreateNote"],
 			loadedData["_whisperNoteFolder"],
 			loadedData["_calendarTagColors"],
+			_meetingTemplateEnabled,
+			_periodicDailyNoteEnabled,
+			_periodicDailyNoteFormat,
+			_periodicWeeklyNoteEnabled,
+			_periodicWeeklyNoteFormat,
+			_calendarSidebarPinned,
+			_dashboardNotePath
 		);
 		this.settings = AudioNotesSettings.overrideDefaultSettings(newSettings);
 	}
@@ -225,6 +259,19 @@ export default class AutomaticAudioNotes extends Plugin {
 			data["_whisperCreateNote"] = this.settings.whisperCreateNote;
 			data["_whisperNoteFolder"] = this.settings.whisperNoteFolder;
 			data["_calendarTagColors"] = this.settings.calendarTagColors;
+			data["_meetingTemplateEnabled"] =
+				this.settings.meetingTemplateEnabled;
+			data["_periodicDailyNoteEnabled"] =
+				this.settings.periodicDailyNoteEnabled;
+			data["_periodicDailyNoteFormat"] =
+				this.settings.periodicDailyNoteFormat;
+			data["_periodicWeeklyNoteEnabled"] =
+				this.settings.periodicWeeklyNoteEnabled;
+			data["_periodicWeeklyNoteFormat"] =
+				this.settings.periodicWeeklyNoteFormat;
+			data["_calendarSidebarPinned"] =
+				this.settings.calendarSidebarPinned;
+			data["_dashboardNotePath"] = this.settings.dashboardNotePath;
 			data.positions[audio.currentSrc] = [
 				audio.currentTime,
 				new Date().getTime(),
@@ -250,11 +297,11 @@ export default class AutomaticAudioNotes extends Plugin {
 			(evt: MouseEvent) => {
 				// Called when the user clicks the icon.
 				if (
-					this.settings.DGApiKey === "" ||
-					this.settings.DGApiKey === undefined
+					!this.settings.DGApiKey &&
+					!this.settings.hasScriberrCredentials
 				) {
 					new Notice(
-						"No Deepgram API key found. Use Whisper import instead or set a key in settings."
+						"No transcription provider configured. Use Whisper import instead or set Deepgram/Scriberr credentials in settings."
 					);
 					new ImportWhisperModal(this).open();
 				} else {
@@ -316,6 +363,10 @@ export default class AutomaticAudioNotes extends Plugin {
 		);
 		// Done!
 		console.info("Audio Notes: Obsidian Audio Notes loaded");
+
+		if (this.settings.calendarSidebarPinned) {
+			await this.syncCalendarSidebar(true);
+		}
 	}
 
 	public async incrementUsageCount() {
@@ -442,6 +493,30 @@ export default class AutomaticAudioNotes extends Plugin {
 			});
 		}
 		workspace.revealLeaf(leaf);
+	}
+
+	public async syncCalendarSidebar(pin: boolean, reveal: boolean = false) {
+		if (pin) {
+			await this.ensurePinnedCalendarView(reveal);
+		} else {
+			this.app.workspace.detachLeavesOfType(AUDIO_NOTES_CALENDAR_VIEW);
+		}
+	}
+
+	private async ensurePinnedCalendarView(reveal: boolean) {
+		const { workspace } = this.app;
+		workspace.detachLeavesOfType(AUDIO_NOTES_CALENDAR_VIEW);
+		let rightLeaf = workspace.getRightLeaf(false);
+		if (!rightLeaf) {
+			rightLeaf = workspace.getLeaf(true);
+		}
+		await rightLeaf.setViewState({
+			type: AUDIO_NOTES_CALENDAR_VIEW,
+			active: reveal,
+		});
+		if (reveal) {
+			workspace.revealLeaf(rightLeaf);
+		}
 	}
 
 	public onunload() {
