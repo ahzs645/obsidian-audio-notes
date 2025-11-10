@@ -82,7 +82,16 @@ let showSearch = false;
 		? findActiveSegmentIndex(segments, currentTime ?? null)
 		: null;
 
-	$: attachPlayerToHost();
+	$: if (playerHost && mountedPlayerEl !== playerContainer) {
+		while (playerHost.firstChild) {
+			playerHost.removeChild(playerHost.firstChild);
+		}
+		mountedPlayerEl = null;
+		if (playerContainer) {
+			playerHost.appendChild(playerContainer);
+			mountedPlayerEl = playerContainer;
+		}
+	}
 
 	$: if (
 		autoScroll &&
@@ -132,21 +141,6 @@ let showSearch = false;
 	onDestroy(() => {
 		segmentRefs.clear();
 	});
-
-	function attachPlayerToHost() {
-		if (!playerHost) return;
-		if (mountedPlayerEl === playerContainer) {
-			return;
-		}
-		while (playerHost.firstChild) {
-			playerHost.removeChild(playerHost.firstChild);
-		}
-		mountedPlayerEl = null;
-		if (playerContainer) {
-			playerHost.appendChild(playerContainer);
-			mountedPlayerEl = playerContainer;
-		}
-	}
 
 	function registerSegmentRef(index: number, el: HTMLElement | null) {
 		if (el) {

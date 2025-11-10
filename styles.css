@@ -555,13 +555,18 @@ If your plugin does not need CSS, delete this file.
 }
 
 .seek-slider {
+	--seek-progress: 0%;
+	--slider-track-height: 6px;
+	--slider-thumb-size: 16px;
 	-webkit-appearance: none;
 	appearance: none;
+	width: 100%;
+	height: var(--slider-track-height);
+	margin: 8px 0;
 	background: transparent;
-	height: 4px;
-	margin: 0;
 	cursor: pointer;
 	accent-color: var(--interactive-accent);
+	display: block;
 }
 
 .seek-slider:focus-visible {
@@ -570,37 +575,46 @@ If your plugin does not need CSS, delete this file.
 }
 
 .seek-slider::-webkit-slider-runnable-track {
-	height: 4px;
-	background: var(--background-modifier-border);
+	height: var(--slider-track-height);
 	border-radius: 999px;
+	background: linear-gradient(
+		90deg,
+		var(--interactive-accent) 0%,
+		var(--interactive-accent) var(--seek-progress, 0%),
+		var(--background-modifier-border) var(--seek-progress, 0%),
+		var(--background-modifier-border) 100%
+	);
+	transition: background 0.1s linear;
 }
 
 .seek-slider::-webkit-slider-thumb {
 	-webkit-appearance: none;
-	height: 16px;
-	width: 16px;
+	height: var(--slider-thumb-size);
+	width: var(--slider-thumb-size);
 	border-radius: 50%;
 	border: 2px solid var(--background-primary);
 	background-color: var(--interactive-accent);
 	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-	margin-top: -6px;
+	margin-top: calc(
+		(var(--slider-track-height) - var(--slider-thumb-size)) / 2
+	);
 }
 
 .seek-slider::-moz-range-track {
-	height: 4px;
+	height: var(--slider-track-height);
 	background: var(--background-modifier-border);
 	border-radius: 999px;
 }
 
 .seek-slider::-moz-range-progress {
-	height: 4px;
+	height: var(--slider-track-height);
 	background: var(--interactive-accent);
 	border-radius: 999px;
 }
 
 .seek-slider::-moz-range-thumb {
-	height: 16px;
-	width: 16px;
+	height: var(--slider-thumb-size);
+	width: var(--slider-thumb-size);
 	border-radius: 50%;
 	border: 2px solid var(--background-primary);
 	background-color: var(--interactive-accent);
@@ -608,7 +622,7 @@ If your plugin does not need CSS, delete this file.
 }
 
 .seek-slider::-ms-track {
-	height: 4px;
+	height: var(--slider-track-height);
 	background: transparent;
 	border-color: transparent;
 	color: transparent;
@@ -625,8 +639,8 @@ If your plugin does not need CSS, delete this file.
 }
 
 .seek-slider::-ms-thumb {
-	height: 16px;
-	width: 16px;
+	height: var(--slider-thumb-size);
+	width: var(--slider-thumb-size);
 	border-radius: 50%;
 	border: 2px solid var(--background-primary);
 	background-color: var(--interactive-accent);

@@ -129,9 +129,26 @@ export function createAudioPlayer(
 		env.renderTimeDisplay(timeElement, audio.currentTime, audio.duration);
 	};
 
+	const updateSeekFill = () => {
+		if (!isFinite(audio.duration) || audio.duration <= 0) {
+			seeker.style.setProperty("--seek-progress", "0%");
+			return;
+		}
+		const percent = Math.min(
+			100,
+			Math.max((audio.currentTime / audio.duration) * 100, 0)
+		);
+		seeker.style.setProperty("--seek-progress", `${percent}%`);
+	};
+
 	const updateSeeker = () => {
-		seeker.max = Math.floor(audio.duration).toString();
+		if (!isNaN(audio.duration) && audio.duration > 0) {
+			seeker.max = Math.floor(audio.duration).toString();
+		} else {
+			seeker.max = Math.floor(audio.currentTime || 0).toString();
+		}
 		seeker.value = audio.currentTime.toString();
+		updateSeekFill();
 	};
 
 	const updateAudioFromSeeker = () => {
@@ -195,6 +212,7 @@ export function createAudioPlayer(
 		updateAudioFromSeeker();
 		env.updateCurrentTimeOfAudio(audio);
 		env.updateKnownCurrentTime(audio.src, audio.currentTime);
+		updateSeekFill();
 	});
 
 	seeker.addEventListener("change", () => {
@@ -202,6 +220,7 @@ export function createAudioPlayer(
 		updateAudioFromSeeker();
 		env.updateCurrentTimeOfAudio(audio);
 		env.updateKnownCurrentTime(audio.src, audio.currentTime);
+		updateSeekFill();
 	});
 
 	const overrideSpaceKey = (event: KeyboardEvent) => {
