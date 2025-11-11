@@ -28,7 +28,6 @@ export class TranscriptSidebarView extends ItemView {
 	private playerHost: HTMLDivElement | null = null;
 	private transcriptWrapper: HTMLDivElement | null = null;
 	private headerEl: HTMLDivElement | null = null;
-	private metaEl: HTMLDivElement | null = null;
 	private meetingContainer: HTMLDivElement | null = null;
 	private dashboardContainer: HTMLDivElement | null = null;
 	private dashboardPlaceholder: HTMLParagraphElement | null = null;
@@ -128,7 +127,6 @@ export class TranscriptSidebarView extends ItemView {
 				? transcriptPath
 				: null;
 
-		this.renderMetaSummary(frontmatter);
 
 		if (!audioPath) {
 			this.renderEmpty(
@@ -242,10 +240,6 @@ export class TranscriptSidebarView extends ItemView {
 		});
 		titleEl.classList.add("aan-transcript-title");
 
-		this.metaEl = this.meetingContainer.createDiv({
-			cls: "aan-transcript-sidebar-meta",
-		});
-
 		this.playerHost = this.meetingContainer.createDiv({
 			cls: "audio-note-player-host",
 		});
@@ -281,46 +275,6 @@ export class TranscriptSidebarView extends ItemView {
 		this.headerEl
 			.querySelector(".aan-transcript-title")
 			?.setText(file.basename);
-	}
-
-	private renderMetaSummary(frontmatter: Record<string, unknown>) {
-		if (!this.metaEl) return;
-		this.metaEl.empty();
-		const dateValue = frontmatterString(frontmatter, "date");
-		const startTime = frontmatterString(frontmatter, "start_time");
-		const endTime = frontmatterString(frontmatter, "end_time");
-		const tagsValue = frontmatter["tags"];
-		const metaPairs: { label: string; value?: string }[] = [
-			{ label: "Date", value: dateValue },
-			{
-				label: "Time",
-				value:
-					startTime && endTime
-						? `${startTime} → ${endTime}`
-						: undefined,
-			},
-			{
-				label: "Tags",
-				value: Array.isArray(tagsValue)
-					? (tagsValue as string[]).join(", ")
-					: frontmatterString(frontmatter, "tags"),
-			},
-		];
-
-		for (const pair of metaPairs) {
-			if (!pair.value) continue;
-			const row = this.metaEl.createDiv({
-				cls: "aan-transcript-meta-row",
-			});
-			row.createSpan({
-				cls: "aan-transcript-meta-label",
-				text: pair.label,
-			});
-			row.createSpan({
-				cls: "aan-transcript-meta-value",
-				text: pair.value,
-			});
-		}
 	}
 
 	private renderEmpty(message: string) {
@@ -433,12 +387,4 @@ export class TranscriptSidebarView extends ItemView {
 		const leaf = this.plugin.app.workspace.getLeaf(newLeaf);
 		await leaf.openFile(file);
 	}
-}
-
-function frontmatterString(
-	data: Record<string, unknown>,
-	key: string
-): string | undefined {
-	const value = data[key];
-	return typeof value === "string" ? value : undefined;
 }

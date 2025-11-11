@@ -196,35 +196,6 @@ If your plugin does not need CSS, delete this file.
 	gap: 8px;
 }
 
-.aan-transcript-sidebar-meta {
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
-	padding: 10px 12px;
-	background: var(--background-secondary);
-	border-radius: 10px;
-}
-
-
-.aan-transcript-meta-row {
-	display: flex;
-	justify-content: space-between;
-	gap: 12px;
-	font-size: 0.9rem;
-}
-
-.aan-transcript-meta-label {
-	text-transform: uppercase;
-	letter-spacing: 0.05em;
-	font-size: 0.75rem;
-	color: var(--text-muted);
-}
-
-.aan-transcript-meta-value {
-	font-weight: 500;
-	text-align: right;
-}
-
 .aan-transcript-empty-state {
 	color: var(--text-muted);
 	font-style: italic;
@@ -318,6 +289,7 @@ If your plugin does not need CSS, delete this file.
 }
 
 .aan-transcript-btn {
+	--aan-transcript-btn-size: 36px;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 8px;
 	padding: 4px 10px;
@@ -325,6 +297,11 @@ If your plugin does not need CSS, delete this file.
 	color: var(--text-normal);
 	cursor: pointer;
 	font-size: 0.9em;
+	min-height: var(--aan-transcript-btn-size);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
 }
 
 .aan-transcript-btn:hover:not(:disabled) {
@@ -337,8 +314,8 @@ If your plugin does not need CSS, delete this file.
 }
 
 .aan-transcript-btn.icon-only {
-	width: 36px;
-	height: 36px;
+	width: var(--aan-transcript-btn-size);
+	height: var(--aan-transcript-btn-size);
 	padding: 0;
 	border-radius: 999px;
 	display: inline-flex;

@@ -31,8 +31,6 @@ interface ResolvedMeetingContext {
 const TEMPLATE_CSS_CLASS = "aan-meeting-note";
 const TEMPLATE_HIDE_PROPERTIES_CLASS = "aan-hide-properties";
 const TEMPLATE_HIDE_INLINE_PLAYER_CLASS = "aan-hide-inline-player";
-const TRANSCRIPT_SIDEBAR_COMMAND_URI =
-	"obsidian://run-command?commandId=custom-obsidian-audio-notes%3Aopen-transcript-sidebar";
 
 export function generateMeetingNoteContent(
 	settings: AudioNotesSettings,
@@ -59,29 +57,27 @@ function resolveContext(
 
 	const startIso = start.toISOString();
 	const endIso = end.toISOString();
-	const startDate = startIso.slice(0, 10);
-	const endDate = endIso.slice(0, 10);
-	const startTime = startIso.slice(11, 19);
-	const endTime = endIso.slice(11, 19);
+	const timezone =
+		Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+	const startParts = formatDateTimeParts(start, timezone);
+	const endParts = formatDateTimeParts(end, timezone);
+	const startDate = startParts.date;
+	const endDate = endParts.date;
+	const startTime = startParts.time;
+	const endTime = endParts.time;
 	const dateFormatter = new Intl.DateTimeFormat(undefined, {
 		weekday: "short",
 		month: "short",
 		day: "numeric",
 		year: "numeric",
-	});
-	const timeFormatter = new Intl.DateTimeFormat(undefined, {
-		hour: "2-digit",
-		minute: "2-digit",
+		timeZone: timezone,
 	});
 	const sameDay = startDate === endDate;
 	const dateLabel = sameDay
 		? dateFormatter.format(start)
 		: `${dateFormatter.format(start)} → ${dateFormatter.format(end)}`;
-	const timeLabel = `${timeFormatter.format(start)} → ${timeFormatter.format(
-		end
-	)}`;
+	const timeLabel = formatTimeRange(start, end, timezone);
 	const durationLabel = formatDuration(end.getTime() - start.getTime());
-	const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 	const periodicDaily = settings.periodicDailyNoteEnabled
 		? formatPeriodicName(start, settings.periodicDailyNoteFormat)
 		: undefined;
@@ -165,50 +161,99 @@ function buildTemplateBody(context: ResolvedMeetingContext): string {
 			  }`
 			: "- ",
 		"- Drag & drop any supporting docs below.",
-		"",
-		"## Recording",
-		buildAudioBlock(context),
 	];
 	return sections.join("\n");
 }
 
 function buildOverview(context: ResolvedMeetingContext): string {
-	const playbackLink = `[Open playback sidebar](${TRANSCRIPT_SIDEBAR_COMMAND_URI})`;
-	const recordingLink = formatResourceMarkdown(
-		context.audioPath,
-		"Open recording file"
-	);
-	const transcriptLink = formatResourceMarkdown(
-		context.transcriptPath,
-		"Open transcript file"
-	);
-
 	return [
 		"> [!info] Schedule",
 		`> - **When:** ${context.dateLabel}`,
 		`> - **Time:** ${context.timeLabel}`,
 		`> - **Duration:** ${context.durationLabel}`,
 		`> - **Timezone:** ${context.timezone}`,
-		"",
-		"> [!abstract] Resources",
-		`> - **Playback:** ${playbackLink}`,
-		`> - **Recording file:** ${recordingLink}`,
-		`> - **Transcript file:** ${transcriptLink}`,
 	].join("\n");
 }
 
-function formatResourceMarkdown(
-	target: string | undefined,
-	label: string
+function formatTimeRange(
+	start: Date,
+	end: Date,
+	timezone: string
 ): string {
-	if (!target) {
-		return "—";
+	const formatter = new Intl.DateTimeFormat(undefined, {
+		hour: "2-digit",
+		minute: "2-digit",
+		timeZone: timezone,
+	});
+	const startLabel = formatter.format(start);
+	const endLabel = formatter.format(end);
+	const tzAbbr = formatTimezoneAbbreviation(timezone, start);
+	return tzAbbr
+		? `${startLabel} → ${endLabel} (${tzAbbr})`
+		: `${startLabel} → ${endLabel}`;
+}
+
+function formatTimezoneAbbreviation(
+	timezone: string,
+	reference: Date
+): string | undefined {
+	try {
+		const formatter = new Intl.DateTimeFormat(undefined, {
+			timeZone: timezone,
+			hour: "2-digit",
+			minute: "2-digit",
+			timeZoneName: "short",
+		});
+		const parts = formatter.formatToParts(reference);
+		return parts.find((part) => part.type === "timeZoneName")?.value;
+	} catch {
+		return undefined;
 	}
-	if (target.startsWith("http://") || target.startsWith("https://")) {
-		return `[${label}](${target})`;
+}
+
+function formatDateTimeParts(
+	date: Date,
+	timezone: string
+): { date: string; time: string } {
+	try {
+		const dateFormatter = new Intl.DateTimeFormat("en-CA", {
+			timeZone: timezone,
+			year: "numeric",
+			month: "2-digit",
+			day: "2-digit",
+		});
+		const timeFormatter = new Intl.DateTimeFormat("en-CA", {
+			timeZone: timezone,
+			hour: "2-digit",
+			minute: "2-digit",
+			second: "2-digit",
+			hour12: false,
+		});
+		const dateParts = dateFormatter.formatToParts(date);
+		const timeParts = timeFormatter.formatToParts(date);
+		const year =
+			dateParts.find((part) => part.type === "year")?.value ?? "0000";
+		const month =
+			dateParts.find((part) => part.type === "month")?.value ?? "00";
+		const day =
+			dateParts.find((part) => part.type === "day")?.value ?? "00";
+		const hour =
+			timeParts.find((part) => part.type === "hour")?.value ?? "00";
+		const minute =
+			timeParts.find((part) => part.type === "minute")?.value ?? "00";
+		const second =
+			timeParts.find((part) => part.type === "second")?.value ?? "00";
+		return {
+			date: `${year}-${month}-${day}`,
+			time: `${hour}:${minute}:${second}`,
+		};
+	} catch {
+		const iso = date.toISOString();
+		return {
+			date: iso.slice(0, 10),
+			time: iso.slice(11, 19),
+		};
 	}
-	const safeLabel = label.replace(/\[/g, "\\[").replace(/\]/g, "\\]");
-	return `[[${target}|${safeLabel}]]`;
 }
 
 function buildAudioBlock(context: ResolvedMeetingContext): string {
