@@ -682,12 +682,6 @@ let collapsed = false;
 						</li>
 					{/each}
 				</ul>
-			{:else}
-				<p class="aan-attachments-empty">
-					{attachmentsEnabled
-						? "No attachments yet."
-						: "Attachments will appear once a recording is linked."}
-				</p>
 			{/if}
 		{/if}
 		<input

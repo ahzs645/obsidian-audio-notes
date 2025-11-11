@@ -19,11 +19,24 @@ import {
 	collectMeetingEvents,
 	localDateKey,
 } from "../meeting-events";
+import { generateRandomString } from "../utils";
 
 export const AUDIO_NOTES_TRANSCRIPT_VIEW = "audio-notes-transcript-view";
 
 interface TranscriptSidebarState {
 	file?: string;
+}
+
+type MeetingDateParts = {
+	year?: string;
+	month?: string;
+	day?: string;
+};
+
+interface MeetingFolderResult {
+	audioPath: string;
+	meetingFolder: string | null;
+	dateParts: MeetingDateParts;
 }
 
 export class TranscriptSidebarView extends ItemView {
@@ -44,6 +57,7 @@ export class TranscriptSidebarView extends ItemView {
 	private currentAttachments: SidebarAttachment[] = [];
 	private attachmentFolderPath: string | null = null;
 	private currentAudioPath: string | null = null;
+	private currentAudioFileName: string | null = null;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -109,8 +123,9 @@ export class TranscriptSidebarView extends ItemView {
 	}
 
 	public async showMeetingFile(file: TFile): Promise<void> {
+		let activeFile = file;
 		this.setMode("meeting");
-		this.currentFilePath = file.path;
+		this.currentFilePath = activeFile.path;
 		this.currentAudioPath = null;
 		this.resetAttachments();
 		if (!this.transcriptComponent) {
@@ -118,15 +133,26 @@ export class TranscriptSidebarView extends ItemView {
 		}
 		this.dashboardContainer?.addClass("is-hidden");
 		this.meetingContainer?.removeClass("is-hidden");
-		this.renderHeader(file);
+		this.renderHeader(activeFile);
 
-		const cache =
-			this.plugin.app.metadataCache.getFileCache(file);
+		let cache =
+			this.plugin.app.metadataCache.getFileCache(activeFile);
 		const frontmatter = (cache?.frontmatter ??
 			{}) as Record<string, unknown>;
-		const audioPath = (frontmatter["media_uri"] ??
-			frontmatter["audio"] ??
-			frontmatter["media"]) as string | undefined;
+		const noteTitle =
+			(frontmatter["title"] as string | undefined) ||
+			activeFile.basename;
+		const audioFieldKeys = ["media_uri", "audio", "media"];
+		let audioPath: string | undefined;
+		let audioFieldKey: string | null = null;
+		for (const key of audioFieldKeys) {
+			const value = frontmatter[key];
+			if (typeof value === "string") {
+				audioPath = value;
+				audioFieldKey = key;
+				break;
+			}
+		}
 		const transcriptPath = (frontmatter["transcript_uri"] ??
 			frontmatter["transcript"]) as string | undefined;
 
@@ -143,15 +169,40 @@ export class TranscriptSidebarView extends ItemView {
 			return;
 		}
 
+		const meetingFolderResult = await this.ensureMeetingFolderForAudio(
+			activeFile,
+			audioPath,
+			audioFieldKey,
+			noteTitle
+		);
+		if (meetingFolderResult) {
+			audioPath = meetingFolderResult.audioPath;
+			this.attachmentFolderPath = meetingFolderResult.meetingFolder ?? null;
+			if (meetingFolderResult.dateParts) {
+				const relocated = await this.ensureMeetingNoteFolder(
+					activeFile,
+					meetingFolderResult.dateParts
+				);
+				if (relocated) {
+					activeFile = relocated;
+					this.currentFilePath = relocated.path;
+					cache =
+						this.plugin.app.metadataCache.getFileCache(relocated);
+				}
+			}
+		} else {
+			this.attachmentFolderPath = null;
+		}
 		this.currentAudioPath = audioPath;
-		await this.prepareAttachmentFolder(audioPath);
+		const resolvedAudioFile = audioPath
+			? this.plugin.app.vault.getAbstractFileByPath(audioPath)
+			: null;
+		this.currentAudioFileName =
+			resolvedAudioFile instanceof TFile ? resolvedAudioFile.name : null;
 		await this.refreshAttachmentsList();
 
-		const title =
-			(frontmatter["title"] as string | undefined) ||
-			file.basename;
 		const audioNote = new AudioNote(
-			title,
+			noteTitle,
 			undefined,
 			audioPath,
 			0,
@@ -395,47 +446,147 @@ export class TranscriptSidebarView extends ItemView {
 			attachments: [],
 			attachmentsEnabled: false,
 		});
+		this.currentAudioFileName = null;
 	}
 
-	private async prepareAttachmentFolder(audioPath: string): Promise<void> {
+	private async ensureMeetingFolderForAudio(
+		meetingFile: TFile,
+		audioPath: string,
+		audioFieldKey: string | null,
+		meetingTitle: string
+	): Promise<MeetingFolderResult | null> {
+		if (!audioPath || audioPath.includes("://")) {
+			return { audioPath, meetingFolder: null, dateParts: {} };
+		}
 		const audioFile =
 			this.plugin.app.vault.getAbstractFileByPath(audioPath);
 		if (!(audioFile instanceof TFile)) {
-			this.attachmentFolderPath = null;
-			return;
+			return { audioPath, meetingFolder: null, dateParts: {} };
 		}
-		const parentPath = audioFile.parent?.path;
-		if (!parentPath) {
-			this.attachmentFolderPath = null;
-			return;
+
+		const dateParts = this.extractDateParts(
+			audioFile.basename,
+			audioFile
+		);
+		const parentFolder = audioFile.parent;
+		const currentParentPath = parentFolder?.path ?? "";
+		const baseParentPath = this.getMeetingBasePath(audioFile);
+
+		if (baseParentPath) {
+			const baseReady = await this.ensureFolder(baseParentPath);
+			if (!baseReady) {
+				return {
+					audioPath: audioFile.path,
+					meetingFolder: currentParentPath || null,
+					dateParts,
+				};
+			}
 		}
-		const meetingFolder = `${parentPath}/${audioFile.basename}`;
-		const attachmentsFolder = `${meetingFolder}/attachments`;
-		const meetingReady = await this.ensureFolder(meetingFolder);
-		const attachmentsReady =
-			meetingReady && (await this.ensureFolder(attachmentsFolder));
-		this.attachmentFolderPath = attachmentsReady ? attachmentsFolder : null;
+
+		const parentSegments = currentParentPath
+			? currentParentPath.split("/").filter(Boolean)
+			: [];
+		const baseSegments = baseParentPath
+			? baseParentPath.split("/").filter(Boolean)
+			: [];
+		const hashedFolderRegex = /^[a-z0-9]{4}-/;
+		const basePrefix = baseParentPath ? `${baseParentPath}/` : "";
+		const hasHashedFolder =
+			parentFolder && hashedFolderRegex.test(parentFolder.name);
+		const isDirectChildOfBase =
+			Boolean(baseParentPath) &&
+			currentParentPath.startsWith(basePrefix) &&
+			parentSegments.length === baseSegments.length + 1 &&
+			hasHashedFolder;
+		const isStandaloneHashedParent = !baseParentPath && hasHashedFolder;
+
+		let meetingFolderPath: string;
+		if ((isDirectChildOfBase || isStandaloneHashedParent) && currentParentPath) {
+			meetingFolderPath = currentParentPath;
+		} else {
+			meetingFolderPath = this.buildMeetingFolderPath(
+				baseParentPath,
+				meetingTitle,
+				audioFile.basename
+			);
+			const folderReady = await this.ensureFolder(meetingFolderPath);
+			if (!folderReady) {
+				return {
+					audioPath: audioFile.path,
+					meetingFolder: currentParentPath || null,
+					dateParts,
+				};
+			}
+		}
+
+		const originalParentPath = currentParentPath;
+		let targetPath = `${meetingFolderPath}/${audioFile.name}`;
+		if (audioFile.path !== targetPath) {
+			await this.plugin.app.fileManager.renameFile(
+				audioFile,
+				targetPath
+			);
+		}
+
+		if (audioFieldKey && targetPath !== audioPath) {
+			await this.plugin.app.fileManager.processFrontMatter(
+				meetingFile,
+				(fm) => {
+					fm[audioFieldKey] = targetPath;
+				}
+			);
+		}
+
+		const updatedAudioFile =
+			this.plugin.app.vault.getAbstractFileByPath(targetPath);
+		if (!(updatedAudioFile instanceof TFile)) {
+			targetPath = audioFile.path;
+		}
+
+		if (meetingFolderPath !== originalParentPath) {
+			await this.cleanupLegacyAudioAncestors(originalParentPath);
+		}
+
+			return {
+				audioPath: targetPath,
+				meetingFolder: meetingFolderPath,
+				dateParts,
+			};
 	}
 
 	private async ensureFolder(path: string): Promise<boolean> {
 		if (!path) return false;
+		const normalizedPath = path.replace(/^\/+|\/+$/g, "");
+		if (!normalizedPath.length) return false;
 		const existingFile =
-			this.plugin.app.vault.getAbstractFileByPath(path);
+			this.plugin.app.vault.getAbstractFileByPath(normalizedPath);
 		if (existingFile instanceof TFolder) {
 			return true;
 		}
 		if (existingFile instanceof TFile) {
 			console.warn(
-				`Audio Notes: Attachment path ${path} already exists as a file`
+				`Audio Notes: Folder path ${normalizedPath} already exists as a file`
 			);
 			return false;
 		}
+		const parentPath = normalizedPath
+			.split("/")
+			.slice(0, -1)
+			.join("/");
+		if (parentPath && !(await this.ensureFolder(parentPath))) {
+			return false;
+		}
 		try {
-			await this.plugin.app.vault.createFolder(path);
+			await this.plugin.app.vault.createFolder(normalizedPath);
 			return true;
 		} catch (error) {
+			const retry =
+				this.plugin.app.vault.getAbstractFileByPath(normalizedPath);
+			if (retry instanceof TFolder) {
+				return true;
+			}
 			console.error(
-				"Audio Notes: Failed to create attachments folder",
+				"Audio Notes: Failed to create folder",
 				error
 			);
 			return false;
@@ -451,6 +602,7 @@ export class TranscriptSidebarView extends ItemView {
 			if (folder instanceof TFolder) {
 				attachments = folder.children
 					.filter((child): child is TFile => child instanceof TFile)
+					.filter((file) => file.path !== this.currentAudioPath)
 					.map((file) => ({
 						path: file.path,
 						name: file.name,
@@ -529,8 +681,13 @@ export class TranscriptSidebarView extends ItemView {
 		if (!this.currentAudioPath) {
 			return null;
 		}
-		await this.prepareAttachmentFolder(this.currentAudioPath);
-		return this.attachmentFolderPath;
+		const audioFile =
+			this.plugin.app.vault.getAbstractFileByPath(this.currentAudioPath);
+		if (audioFile instanceof TFile && audioFile.parent) {
+			this.attachmentFolderPath = audioFile.parent.path;
+			return this.attachmentFolderPath;
+		}
+		return null;
 	}
 
 	private async getAvailableAttachmentPath(
@@ -613,5 +770,162 @@ export class TranscriptSidebarView extends ItemView {
 		}
 		const leaf = this.plugin.app.workspace.getLeaf(newLeaf);
 		await leaf.openFile(file);
+	}
+
+	private getMeetingBasePath(audioFile: TFile): string {
+		const segments = audioFile.path.split("/").filter(Boolean);
+		const audioIndex = segments.indexOf("audio");
+		const dateParts = this.extractDateParts(
+			audioFile.basename,
+			audioFile
+		);
+		let baseSegments: string[] =
+			audioIndex === -1
+				? audioFile.parent?.path?.split("/").filter(Boolean) ?? []
+				: segments.slice(0, audioIndex);
+		if (audioIndex === -1 && baseSegments.length) {
+			const last = baseSegments[baseSegments.length - 1];
+			if (/^[a-z0-9]{4}-/.test(last)) {
+				baseSegments = baseSegments.slice(0, -1);
+			}
+		}
+
+		const pushSegment = (value?: string) => {
+			if (!value) return;
+			if (baseSegments[baseSegments.length - 1] === value) return;
+			if (baseSegments.includes(value)) return;
+			baseSegments.push(value);
+		};
+
+		if (audioIndex !== -1) {
+			const yearSegment = segments[audioIndex + 1] ?? dateParts.year;
+			const monthSegment = segments[audioIndex + 2] ?? dateParts.month;
+			pushSegment(yearSegment);
+			pushSegment(monthSegment);
+		} else {
+			pushSegment(dateParts.year);
+			pushSegment(dateParts.month);
+		}
+
+		pushSegment(dateParts.day);
+
+		return baseSegments.join("/");
+	}
+
+	private buildMeetingFolderPath(
+		baseParentPath: string,
+		meetingTitle: string,
+		fallback: string
+	): string {
+		const slugBase = meetingTitle?.trim() || fallback || "meeting";
+		const slug = slugBase
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-+|-+$/g, "")
+			.slice(0, 20) || "meeting";
+		let folderName = "";
+		let fullPath = "";
+		do {
+			const hash = generateRandomString(4).toLowerCase();
+			folderName = `${hash}-${slug}`;
+			fullPath = baseParentPath
+				? `${baseParentPath}/${folderName}`
+				: folderName;
+		} while (
+			this.plugin.app.vault.getAbstractFileByPath(fullPath) instanceof
+			TFolder
+		);
+		return fullPath;
+	}
+
+	private extractDateParts(value: string, file?: TFile): {
+		year?: string;
+		month?: string;
+		day?: string;
+	} {
+		const match = value.match(/(\d{4})-(\d{2})-(\d{2})/);
+		if (match) {
+			return {
+				year: match[1],
+				month: match[2],
+				day: match[3],
+			};
+		}
+		const timestamp =
+			file?.stat?.ctime ??
+			file?.stat?.mtime ??
+			Date.now();
+		const date = new Date(timestamp);
+		if (isNaN(date.getTime())) {
+			return {};
+		}
+		const year = date.getFullYear().toString();
+		const month = (date.getMonth() + 1).toString().padStart(2, "0");
+		const day = date.getDate().toString().padStart(2, "0");
+		return { year, month, day };
+	}
+
+	private async cleanupLegacyAudioAncestors(path: string | null) {
+		let current = path;
+		while (current) {
+			const folder = this.plugin.app.vault.getAbstractFileByPath(current);
+			if (!(folder instanceof TFolder)) break;
+			if (folder.children.length > 0) break;
+			const segments = current.split("/").filter(Boolean);
+			if (!segments.length) break;
+			const removedSegment = segments[segments.length - 1];
+			await this.plugin.app.vault.delete(folder);
+			segments.pop();
+			if (!segments.length) break;
+			if (removedSegment === "audio") {
+				break;
+			}
+			current = segments.join("/");
+		}
+	}
+
+	private async ensureMeetingNoteFolder(
+		meetingFile: TFile,
+		dateParts: MeetingDateParts
+	): Promise<TFile | null> {
+		const { year, month, day } = dateParts;
+		if (!year || !month || !day) {
+			return null;
+		}
+		const parentPath = meetingFile.parent?.path ?? "";
+		if (!parentPath) {
+			return null;
+		}
+		const segments = parentPath.split("/").filter(Boolean);
+		if (!segments.length) {
+			return null;
+		}
+
+		const lastThreeAreDate =
+			segments.length >= 3 &&
+			/^\d{4}$/.test(segments[segments.length - 3]) &&
+			/^\d{2}$/.test(segments[segments.length - 2]) &&
+			/^\d{2}$/.test(segments[segments.length - 1]);
+		const baseSegments = lastThreeAreDate
+			? segments.slice(0, -3)
+			: segments;
+		if (!baseSegments.length) {
+			return null;
+		}
+		const basePath = baseSegments.join("/");
+		const desiredParent = `${basePath}/${year}/${month}/${day}`;
+		if (parentPath === desiredParent) {
+			return null;
+		}
+		const ready = await this.ensureFolder(desiredParent);
+		if (!ready) {
+			return null;
+		}
+		const targetPath = `${desiredParent}/${meetingFile.name}`;
+		await this.plugin.app.fileManager.renameFile(meetingFile, targetPath);
+		const updatedFile = this.plugin.app.vault.getAbstractFileByPath(
+			targetPath
+		);
+		return updatedFile instanceof TFile ? updatedFile : meetingFile;
 	}
 }
