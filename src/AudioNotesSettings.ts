@@ -403,6 +403,19 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					})
 			);
 		new Setting(containerEl)
+			.setName("Store meeting attachments with the note")
+			.setDesc(
+				"When enabled, new attachments dropped into a meeting note are automatically moved into the same folder as that note."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.storeAttachmentsWithMeeting)
+					.onChange(async (value) => {
+						this.plugin.settings.storeAttachmentsWithMeeting = value;
+						await this.plugin.saveSettings();
+					})
+			);
+		new Setting(containerEl)
 			.setName("Tag colors")
 			.setDesc(
 				"One entry per line using the format tag:#color. Tags are matched case-insensitively."
@@ -542,6 +555,7 @@ export interface StringifiedAudioNotesSettings {
 	scriberrBaseUrl: string;
 	scriberrApiKey: string;
 	scriberrProfileName: string;
+	storeAttachmentsWithMeeting: boolean;
 	whisperAudioFolder: string;
 	whisperTranscriptFolder: string;
 	whisperUseDateFolders: boolean;
@@ -569,6 +583,7 @@ const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	scriberrBaseUrl: "https://localhost:8080/api/v1",
 	scriberrApiKey: "",
 	scriberrProfileName: "",
+	storeAttachmentsWithMeeting: false,
 	whisperAudioFolder: "MediaArchive/audio",
 	whisperTranscriptFolder: "transcripts",
 	whisperUseDateFolders: true,
@@ -597,6 +612,7 @@ export class AudioNotesSettings {
 		private _scriberrBaseUrl: string,
 		private _scriberrApiKey: string,
 		private _scriberrProfileName: string,
+		private _storeAttachmentsWithMeeting: boolean,
 		private _whisperAudioFolder: string,
 		private _whisperTranscriptFolder: string,
 		private _whisperUseDateFolders: boolean,
@@ -625,6 +641,7 @@ export class AudioNotesSettings {
 			DEFAULT_SETTINGS.scriberrBaseUrl,
 			DEFAULT_SETTINGS.scriberrApiKey,
 			DEFAULT_SETTINGS.scriberrProfileName,
+			DEFAULT_SETTINGS.storeAttachmentsWithMeeting,
 			DEFAULT_SETTINGS.whisperAudioFolder,
 			DEFAULT_SETTINGS.whisperTranscriptFolder,
 			DEFAULT_SETTINGS.whisperUseDateFolders,
@@ -701,6 +718,13 @@ export class AudioNotesSettings {
 			data.scriberrProfileName !== undefined
 		) {
 			settings.scriberrProfileName = data.scriberrProfileName!;
+		}
+		if (
+			data.storeAttachmentsWithMeeting !== null &&
+			data.storeAttachmentsWithMeeting !== undefined
+		) {
+			settings.storeAttachmentsWithMeeting =
+				data.storeAttachmentsWithMeeting!;
 		}
 		if (
 			data.whisperAudioFolder !== null &&
@@ -881,6 +905,14 @@ export class AudioNotesSettings {
 
 	set scriberrProfileName(value: string) {
 		this._scriberrProfileName = value?.trim() || "";
+	}
+
+	get storeAttachmentsWithMeeting(): boolean {
+		return this._storeAttachmentsWithMeeting;
+	}
+
+	set storeAttachmentsWithMeeting(value: boolean) {
+		this._storeAttachmentsWithMeeting = Boolean(value);
 	}
 
 	get hasScriberrCredentials(): boolean {

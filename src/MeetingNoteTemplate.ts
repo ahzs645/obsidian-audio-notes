@@ -29,6 +29,10 @@ interface ResolvedMeetingContext {
 }
 
 const TEMPLATE_CSS_CLASS = "aan-meeting-note";
+const TEMPLATE_HIDE_PROPERTIES_CLASS = "aan-hide-properties";
+const TEMPLATE_HIDE_INLINE_PLAYER_CLASS = "aan-hide-inline-player";
+const TRANSCRIPT_SIDEBAR_COMMAND_URI =
+	"obsidian://run-command?commandId=custom-obsidian-audio-notes%3Aopen-transcript-sidebar";
 
 export function generateMeetingNoteContent(
 	settings: AudioNotesSettings,
@@ -132,6 +136,8 @@ function buildFrontmatter(
 	if (settings.meetingTemplateEnabled) {
 		lines.push("cssclasses:");
 		lines.push(`  - ${TEMPLATE_CSS_CLASS}`);
+		lines.push(`  - ${TEMPLATE_HIDE_PROPERTIES_CLASS}`);
+		lines.push(`  - ${TEMPLATE_HIDE_INLINE_PLAYER_CLASS}`);
 	}
 	if (context.periodicDaily) {
 		lines.push(`daily_note: ${yamlQuote(context.periodicDaily)}`);
@@ -144,59 +150,67 @@ function buildFrontmatter(
 }
 
 function buildTemplateBody(context: ResolvedMeetingContext): string {
-	const quickLinks: string[] = [];
-	if (context.periodicDaily) {
-		quickLinks.push(`- [[${context.periodicDaily}]] — Daily log`);
-	}
-	if (context.periodicWeekly) {
-		quickLinks.push(`- [[${context.periodicWeekly}]] — Weekly recap`);
-	}
-	quickLinks.push("- Command palette → Audio Notes: Open Audio Notes calendar");
-
 	const sections = [
 		`# ${context.title}`,
 		"",
 		buildOverview(context),
-	];
-	if (quickLinks.length) {
-		sections.push("", "## Quick links", ...quickLinks);
-	}
-	sections.push(
-		"",
-		"## Agenda",
-		"- [ ] ",
-		"",
-		"## Timeline",
-		"- <time>09:00</time> Kickoff — ",
 		"",
 		"## Notes",
-		"- ",
+		"- Capture decisions, summaries, or paste AI output here.",
 		"",
-		"## Decisions",
-		"- [ ] ",
-		"",
-		"## Action items",
-		"- [ ] Owner — description",
+		"## Attachments",
+		context.periodicDaily || context.periodicWeekly
+			? `- Related daily note: ${
+					context.periodicDaily
+						? `[[${context.periodicDaily}]]`
+						: "—"
+			  }`
+			: "- ",
+		"- Drag & drop any supporting docs below.",
 		"",
 		"## Recording",
-		buildAudioBlock(context)
-	);
+		buildAudioBlock(context),
+	];
 	return sections.join("\n");
 }
 
 function buildOverview(context: ResolvedMeetingContext): string {
-	const transcriptLine = context.transcriptPath
-		? `\`${context.transcriptPath}\``
-		: "—";
+	const playbackLink = `[Open playback sidebar](${TRANSCRIPT_SIDEBAR_COMMAND_URI})`;
+	const recordingLink = formatResourceMarkdown(
+		context.audioPath,
+		"Open recording file"
+	);
+	const transcriptLink = formatResourceMarkdown(
+		context.transcriptPath,
+		"Open transcript file"
+	);
+
 	return [
-		"> [!info] Meeting overview",
+		"> [!info] Schedule",
 		`> - **When:** ${context.dateLabel}`,
-		`> - **Time:** ${context.timeLabel} (${context.timezone})`,
+		`> - **Time:** ${context.timeLabel}`,
 		`> - **Duration:** ${context.durationLabel}`,
-		`> - **Recording:** \`${context.audioPath}\``,
-		`> - **Transcript:** ${transcriptLine}`,
-		"> - **Summary:** ",
+		`> - **Timezone:** ${context.timezone}`,
+		"",
+		"> [!abstract] Resources",
+		`> - **Playback:** ${playbackLink}`,
+		`> - **Recording file:** ${recordingLink}`,
+		`> - **Transcript file:** ${transcriptLink}`,
 	].join("\n");
+}
+
+function formatResourceMarkdown(
+	target: string | undefined,
+	label: string
+): string {
+	if (!target) {
+		return "—";
+	}
+	if (target.startsWith("http://") || target.startsWith("https://")) {
+		return `[${label}](${target})`;
+	}
+	const safeLabel = label.replace(/\[/g, "\\[").replace(/\]/g, "\\]");
+	return `[[${target}|${safeLabel}]]`;
 }
 
 function buildAudioBlock(context: ResolvedMeetingContext): string {

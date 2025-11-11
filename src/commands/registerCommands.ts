@@ -330,6 +330,14 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 	});
 
 	plugin.addCommand({
+		id: "open-transcript-sidebar",
+		name: "Open transcript sidebar",
+		callback: async () => {
+			await plugin.openTranscriptSidebar();
+		},
+	});
+
+	plugin.addCommand({
 		id: "quick-audio-note",
 		name: "Generate quick audio recording with transcription",
 		callback: async () => {

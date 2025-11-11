@@ -192,6 +192,10 @@ First, you'll need an API Key from [Deepgram AI](https://dpgr.am/obsidian). It d
 
 Audio Notes also supports the [Scriberr](https://scriberr.app/api.html) API for people running a local WhisperX server. Head to the **Scriberr Settings** section inside the plugin options, point the base URL at your server (defaults to `https://localhost:8080/api/v1`), and paste an `X-API-Key`. Once configured, the same commands listed above—quick recordings, mp3 URL transcription, and the queue uploader—can route audio through Scriberr without leaving your machine.
 
+- The **Audio Notes: Open transcript sidebar** command now opens a permanent right-sidebar panel. It follows whatever meeting note you have active (and shows the calendar/day list when you’re on another note) so the player + transcript are always handy.
+- Enable “Store meeting attachments with the note” in Settings → Audio Notes → Calendar view to automatically move dragged attachments into the same folder as the meeting file, keeping related docs together without manual cleanup.
+
+
 ### Use an Existing .srt File
 
 If you already have the transcript in .srt format, you can use it directly by putting the filename in the `transcript: <your .srt file>` attribute.

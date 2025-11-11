@@ -34,8 +34,205 @@ If your plugin does not need CSS, delete this file.
 	margin-top: 16px;
 }
 
-.markdown-preview-view.aan-meeting-note .metadata-container {
+.markdown-preview-view.aan-hide-properties .metadata-container,
+.markdown-source-view.aan-hide-properties .metadata-container {
+	display: none !important;
+}
+
+.markdown-preview-view.aan-hide-inline-player .audio-note,
+.markdown-source-view.aan-hide-inline-player .audio-note {
 	display: none;
+}
+
+.audio-notes-transcript-view {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 12px;
+	height: 100%;
+	box-sizing: border-box;
+}
+
+.aan-transcript-meeting.is-hidden,
+.aan-transcript-dashboard.is-hidden {
+	display: none;
+}
+
+.aan-transcript-meeting {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.aan-transcript-dashboard {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.aan-dashboard-placeholder {
+	color: var(--text-muted);
+	font-size: 0.9rem;
+	margin: 0 0 12px 0;
+}
+
+.aan-sidebar-calendar {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 12px;
+	padding: 8px;
+}
+
+.aan-sidebar-calendar__toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.aan-sidebar-calendar__btn-group {
+	display: inline-flex;
+	gap: 4px;
+}
+
+.aan-sidebar-calendar__btn-group button {
+	padding: 2px 6px;
+	border-radius: 6px;
+	border: 1px solid var(--background-modifier-border);
+	background: transparent;
+	cursor: pointer;
+}
+
+.aan-sidebar-calendar__label {
+	font-weight: 600;
+	font-size: 0.85rem;
+}
+
+.aan-sidebar-calendar__weekdays,
+.aan-sidebar-calendar__grid {
+	display: grid;
+	grid-template-columns: repeat(7, minmax(0, 1fr));
+	gap: 4px;
+}
+
+.aan-sidebar-calendar__weekdays div {
+	text-align: center;
+	font-size: 0.7rem;
+	color: var(--text-muted);
+}
+
+.aan-sidebar-calendar__cell {
+	position: relative;
+	border: none;
+	background: transparent;
+	border-radius: 8px;
+	height: 32px;
+	padding: 4px;
+	font-size: 0.85rem;
+	cursor: pointer;
+}
+
+.aan-sidebar-calendar__cell.is-outside {
+	opacity: 0.5;
+}
+
+.aan-sidebar-calendar__cell.is-today {
+	border: 1px solid var(--interactive-accent);
+}
+
+.aan-sidebar-calendar__cell.is-selected {
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.15);
+	color: var(--interactive-accent);
+}
+
+.aan-sidebar-calendar__cell span {
+	position: absolute;
+	left: 6px;
+	top: 6px;
+}
+
+.aan-sidebar-calendar__dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--interactive-accent);
+	position: absolute;
+	bottom: 6px;
+	left: 50%;
+	transform: translateX(-50%);
+}
+
+.aan-sidebar-agenda {
+	background: var(--background-primary);
+	border-radius: 12px;
+	border: 1px solid var(--background-modifier-border);
+	padding: 8px;
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+
+.aan-transcript-sidebar-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.aan-transcript-title {
+	margin: 0;
+	font-size: 1rem;
+	flex: 1;
+}
+
+.aan-transcript-sidebar-actions {
+	display: flex;
+	gap: 8px;
+}
+
+.aan-transcript-sidebar-meta {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 10px 12px;
+	background: var(--background-secondary);
+	border-radius: 10px;
+}
+
+
+.aan-transcript-meta-row {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	font-size: 0.9rem;
+}
+
+.aan-transcript-meta-label {
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	font-size: 0.75rem;
+	color: var(--text-muted);
+}
+
+.aan-transcript-meta-value {
+	font-weight: 500;
+	text-align: right;
+}
+
+.aan-transcript-empty-state {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.audio-notes-transcript-view .audio-note-transcript-wrapper {
+	flex: 1;
+	overflow: auto;
 }
 
 .audio-note-transcript-panel {
@@ -878,6 +1075,7 @@ input.title-input {
 	height: 100%;
 }
 
+
 @media screen and (max-width: 1000px) {
 	.aan-calendar-panel {
 		grid-template-columns: 1fr;
@@ -899,6 +1097,7 @@ input.title-input {
 	grid-row: 2;
 	min-height: 520px;
 }
+
 
 .aan-calendar-toolbar {
 	display: flex;
@@ -1146,6 +1345,16 @@ input.title-input {
 
 .aan-calendar-view .fc {
 	font-family: var(--font-interface);
+}
+
+.aan-calendar-grid .fc-scroller.fc-scroller-liquid-absolute {
+	scrollbar-width: none;
+	-ms-overflow-style: none;
+}
+
+.aan-calendar-grid .fc-scroller.fc-scroller-liquid-absolute::-webkit-scrollbar {
+	width: 0;
+	height: 0;
 }
 
 .aan-calendar-view .fc .fc-toolbar-title {

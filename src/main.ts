@@ -3,6 +3,7 @@ import {
 	Plugin,
 	Notice,
 	TFile,
+	TAbstractFile,
 	Platform,
 	request,
 	WorkspaceLeaf,
@@ -25,6 +26,7 @@ import { registerAudioNoteCommands } from "./commands/registerCommands";
 import { AudioNoteService } from "./services/AudioNoteService";
 import { renderAudioNote } from "./renderers/AudioNoteRenderer";
 import { secondsToTimeString, getUniqueId } from "./utils";
+import { ensureFolderExists } from "./AudioNotesUtils";
 import {
 	AudioNotesSettings,
 	AudioNotesSettingsTab,
@@ -45,6 +47,10 @@ import {
 	AUDIO_NOTES_BASES_CALENDAR_VIEW,
 	BasesCalendarView,
 } from "./BasesCalendarView";
+import {
+	AUDIO_NOTES_TRANSCRIPT_VIEW,
+	TranscriptSidebarView,
+} from "./views/TranscriptSidebarView";
 
 // Load Font-Awesome stuff
 import { library } from "@fortawesome/fontawesome-svg-core";
@@ -62,6 +68,8 @@ export default class AutomaticAudioNotes extends Plugin {
 	knownAudioPlayers: AudioElementCache = new AudioElementCache(30);
 	currentlyPlayingAudioFakeUuid: string | null = null;
 	atLeastOneNoteRendered: boolean = false;
+	private lastMeetingFolder: string | null = null;
+	private lastMeetingFilePath: string | null = null;
 
 	private get isDesktop(): boolean {
 		return Platform.isDesktop || Platform.isDesktopApp || Platform.isMacOS;
@@ -142,6 +150,7 @@ export default class AutomaticAudioNotes extends Plugin {
 			loadedData["_scriberrBaseUrl"],
 			loadedData["_scriberrApiKey"],
 			loadedData["_scriberrProfileName"],
+			loadedData["_storeAttachmentsWithMeeting"],
 			loadedData["_whisperAudioFolder"],
 			loadedData["_whisperTranscriptFolder"],
 			loadedData["_whisperUseDateFolders"],
@@ -285,6 +294,7 @@ export default class AutomaticAudioNotes extends Plugin {
 		await this.loadSettings();
 		this.addSettingTab(new AudioNotesSettingsTab(this.app, this));
 		this.registerView(AUDIO_NOTES_CALENDAR_VIEW, (leaf) => new MeetingCalendarView(leaf, this));
+		this.registerView(AUDIO_NOTES_TRANSCRIPT_VIEW, (leaf) => new TranscriptSidebarView(leaf, this));
 		this.registerBasesView(AUDIO_NOTES_BASES_CALENDAR_VIEW, {
 			name: "Audio Notes Calendar",
 			icon: "lucide-calendar",
@@ -363,6 +373,23 @@ export default class AutomaticAudioNotes extends Plugin {
 		);
 		// Done!
 		console.info("Audio Notes: Obsidian Audio Notes loaded");
+
+		this.app.workspace.onLayoutReady(() => {
+			this.registerEvent(
+				this.app.workspace.on("file-open", (file) => {
+					void this.handleFileOpen(file);
+				})
+			);
+			this.registerEvent(
+				this.app.vault.on("create", (file) => {
+					void this.handleAttachmentCreate(file);
+				})
+			);
+			void this.syncTranscriptSidebar(
+				this.app.workspace.getActiveFile() ?? null,
+				false
+			);
+		});
 
 		if (this.settings.calendarSidebarPinned) {
 			await this.syncCalendarSidebar(true);
@@ -519,8 +546,119 @@ export default class AutomaticAudioNotes extends Plugin {
 		}
 	}
 
+	public async openTranscriptSidebar(file?: TFile) {
+		const targetFile = file ?? this.app.workspace.getActiveFile();
+		await this.syncTranscriptSidebar(targetFile ?? null, true);
+	}
+
+	private async handleFileOpen(file: TFile | null) {
+		if (file && this.isMeetingFile(file)) {
+			this.lastMeetingFilePath = file.path;
+			this.lastMeetingFolder = file.parent?.path ?? "";
+		} else {
+			this.lastMeetingFilePath = null;
+			this.lastMeetingFolder = null;
+		}
+		await this.syncTranscriptSidebar(file, false);
+	}
+
+	private isMeetingFile(file: TFile | null): boolean {
+		if (!file) return false;
+		const cache = this.app.metadataCache.getFileCache(file);
+		const frontmatter = cache?.frontmatter;
+		if (!frontmatter) {
+			return false;
+		}
+		return Boolean(
+			frontmatter.media_uri ||
+				frontmatter.audio ||
+				frontmatter.media ||
+				frontmatter.transcript_uri ||
+				frontmatter.transcript
+		);
+	}
+
+	private async syncTranscriptSidebar(
+		file: TFile | null,
+		reveal: boolean
+	): Promise<void> {
+		const view = await this.getTranscriptSidebarView(reveal);
+		if (file && this.isMeetingFile(file)) {
+			await view.showMeetingFile(file);
+		} else {
+			await view.showDashboard();
+		}
+	}
+
+	private async getTranscriptSidebarView(
+		reveal: boolean
+	): Promise<TranscriptSidebarView> {
+		let leaf = this.app.workspace.getLeavesOfType(
+			AUDIO_NOTES_TRANSCRIPT_VIEW
+		)[0];
+		if (!leaf) {
+			let rightLeaf = this.app.workspace.getRightLeaf(false);
+			if (!rightLeaf) {
+				try {
+					rightLeaf = this.app.workspace.getRightLeaf(true);
+				} catch {
+					rightLeaf = this.app.workspace.getLeaf(true);
+				}
+			}
+			await rightLeaf.setViewState({
+				type: AUDIO_NOTES_TRANSCRIPT_VIEW,
+				active: reveal,
+			});
+			leaf = rightLeaf;
+		}
+		if (reveal) {
+			this.app.workspace.revealLeaf(leaf);
+		}
+		return leaf.view as TranscriptSidebarView;
+	}
+
+	private async handleAttachmentCreate(file: TAbstractFile) {
+		if (
+			!this.settings.storeAttachmentsWithMeeting ||
+			!this.lastMeetingFolder
+		) {
+			return;
+		}
+		if (!(file instanceof TFile)) {
+			return;
+		}
+		const ext = file.extension?.toLowerCase();
+		if (
+			!ext ||
+			ext === "md" ||
+			ext === "json" ||
+			["m4a", "mp3", "wav", "flac", "webm", "ogg"].includes(ext)
+		) {
+			return;
+		}
+		if (!this.lastMeetingFilePath) {
+			return;
+		}
+		const targetFolder = this.lastMeetingFolder;
+		const targetPath = targetFolder
+			? `${targetFolder}/${file.name}`
+			: file.name;
+		if (targetPath === file.path) {
+			return;
+		}
+		try {
+			if (targetFolder) {
+				await ensureFolderExists(this.app, targetFolder);
+			}
+			await this.app.fileManager.renameFile(file, targetPath);
+		} catch (error) {
+			console.error("Audio Notes: Could not move attachment", error);
+		}
+	}
+
 	public onunload() {
 		this.app.workspace.detachLeavesOfType(AUDIO_NOTES_CALENDAR_VIEW);
+		this.app.workspace.detachLeavesOfType(AUDIO_NOTES_TRANSCRIPT_VIEW);
 		this.knownCurrentTimes.clear();
 		this.knownAudioPlayers.clear();
 		this.currentlyPlayingAudioFakeUuid = null;

@@ -8,16 +8,17 @@
 	import type { MeetingEvent } from "./meeting-events";
 	import { localDateKey } from "./meeting-events";
 
-	export let events: MeetingEvent[] = [];
-	export let selectedDate: string;
-	export let colorLegend: Record<string, string> = {};
-	export let onSelectDate: (date: string) => void;
-	export let onOpenNote: (path: string, newLeaf: boolean) => void;
-	export let onRefresh: () => void;
+export let events: MeetingEvent[] = [];
+export let selectedDate: string;
+export let colorLegend: Record<string, string> = {};
+export let onSelectDate: (date: string) => void;
+export let onOpenNote: (path: string, newLeaf: boolean) => void;
+export let onRefresh: () => void;
+export let condensed = false;
 
-	let calendarEl: HTMLDivElement;
+let calendarEl: HTMLDivElement;
 	let calendar: Calendar | null = null;
-	let currentView: "dayGridMonth" | "timeGridWeek" | "timeGridDay" = "dayGridMonth";
+let currentView: "dayGridMonth" | "timeGridWeek" | "timeGridDay" = "dayGridMonth";
 	let currentLabel = "";
 	let highlightFrame: number | null = null;
 
@@ -90,6 +91,9 @@
 	};
 
 	const changeView = (view: "dayGridMonth" | "timeGridWeek" | "timeGridDay") => {
+		if (condensed && view !== "dayGridMonth") {
+			return;
+		}
 		currentView = view;
 		if (calendar) {
 			calendar.changeView(view, parseDateString(selectedDate));
@@ -109,6 +113,7 @@
 		});
 		currentLabel = calendar?.view?.title ?? "";
 		scheduleSelectedDayHighlight();
+		requestAnimationFrame(() => calendar?.updateSize());
 	};
 
 	const setSelectedDate = (value: string) => {
@@ -161,6 +166,7 @@
 			},
 		});
 		calendar.render();
+		requestAnimationFrame(() => calendar?.updateSize());
 		syncCalendar();
 		scheduleSelectedDayHighlight();
 
@@ -184,7 +190,7 @@
 	$: syncCalendar();
 </script>
 
-<div class="aan-calendar-panel">
+<div class={`aan-calendar-panel ${condensed ? "aan-calendar-panel--condensed" : ""}`}>
 		<div class="aan-calendar-toolbar">
 			<div class="aan-calendar-toolbar__group">
 				<button on:click={gotoPrev}>Prev</button>
@@ -192,18 +198,20 @@
 				<button on:click={gotoNext}>Next</button>
 			</div>
 			<div class="aan-calendar-toolbar__label">{currentLabel}</div>
-			<div class="aan-calendar-toolbar__group">
-				<button class:selected={currentView === "dayGridMonth"} on:click={() => changeView("dayGridMonth")}>
-					Month
-				</button>
-				<button class:selected={currentView === "timeGridWeek"} on:click={() => changeView("timeGridWeek")}>
-					Week
-				</button>
-				<button class:selected={currentView === "timeGridDay"} on:click={() => changeView("timeGridDay")}>
-					Day
-				</button>
-			</div>
-			<button class="aan-calendar-refresh" on:click={() => onRefresh?.()}>Refresh</button>
+			{#if !condensed}
+				<div class="aan-calendar-toolbar__group">
+					<button class:selected={currentView === "dayGridMonth"} on:click={() => changeView("dayGridMonth")}>
+						Month
+					</button>
+					<button class:selected={currentView === "timeGridWeek"} on:click={() => changeView("timeGridWeek")}>
+						Week
+					</button>
+					<button class:selected={currentView === "timeGridDay"} on:click={() => changeView("timeGridDay")}>
+						Day
+					</button>
+				</div>
+				<button class="aan-calendar-refresh" on:click={() => onRefresh?.()}>Refresh</button>
+			{/if}
 		</div>
 	<div class="aan-calendar-grid" bind:this={calendarEl}></div>
 	<div class="aan-calendar-day-view">
