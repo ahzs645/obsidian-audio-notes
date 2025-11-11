@@ -29,7 +29,6 @@ interface TranscriptSidebarState {
 export class TranscriptSidebarView extends ItemView {
 	private transcriptComponent: TranscriptDisplay | null = null;
 	private calendarComponent: SidebarPlanner | undefined;
-	private playerHost: HTMLDivElement | null = null;
 	private transcriptWrapper: HTMLDivElement | null = null;
 	private headerEl: HTMLDivElement | null = null;
 	private meetingContainer: HTMLDivElement | null = null;
@@ -175,16 +174,6 @@ export class TranscriptSidebarView extends ItemView {
 			setTranscriptProps
 		);
 
-		if (this.playerHost) {
-			if (playerEl) {
-				this.playerHost.empty();
-				this.playerHost.addClass("has-player");
-				this.playerHost.appendChild(playerEl);
-			} else {
-				this.playerHost.removeClass("has-player");
-			}
-		}
-
 		setTranscriptProps({
 			title: "Live Transcript",
 			playerContainer: playerEl ?? null,
@@ -252,10 +241,6 @@ export class TranscriptSidebarView extends ItemView {
 			text: "Transcript",
 		});
 		titleEl.classList.add("aan-transcript-title");
-
-		this.playerHost = this.meetingContainer.createDiv({
-			cls: "audio-note-player-host",
-		});
 
 		this.transcriptWrapper = this.meetingContainer.createDiv({
 			cls: "audio-note-transcript-wrapper",

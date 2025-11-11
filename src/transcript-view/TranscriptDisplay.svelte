@@ -51,6 +51,7 @@ let collapsed = false;
 	let dragCounter = 0;
 	let isUploadingAttachments = false;
 	let filePicker: HTMLInputElement | null = null;
+	let attachmentsCollapsed = true;
 	type GroupedTranscript = {
 		id: string;
 		speakerKey: string;
@@ -551,121 +552,143 @@ let collapsed = false;
 					{/if}
 				</p>
 			</div>
-			<button
-				class="aan-transcript-btn"
-				type="button"
-				on:click={triggerFileDialog}
-				disabled={!attachmentsEnabled || isUploadingAttachments}
-			>
-				{isUploadingAttachments ? "Uploading…" : "Add files"}
-			</button>
+			<div class="aan-attachments-actions">
+				<button
+					class="aan-transcript-btn"
+					type="button"
+					on:click={triggerFileDialog}
+					disabled={!attachmentsEnabled || isUploadingAttachments}
+				>
+					{isUploadingAttachments ? "Uploading…" : "Add files"}
+				</button>
+				<button
+					class="aan-attachments-toggle"
+					type="button"
+					on:click={() => (attachmentsCollapsed = !attachmentsCollapsed)}
+					aria-label={attachmentsCollapsed ? "Expand attachments" : "Collapse attachments"}
+					aria-expanded={!attachmentsCollapsed}
+				>
+					<svg viewBox="0 0 24 24" aria-hidden="true" class:expanded={!attachmentsCollapsed}>
+						<path
+							d="M6 9l6 6 6-6"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						/>
+					</svg>
+				</button>
+			</div>
 		</header>
-		<div
-			class="aan-attachments-dropzone"
-			class:is-disabled={!attachmentsEnabled}
-			class:is-dragging={dragActive}
-			on:dragenter={handleDragEnter}
-			on:dragover={handleDragOver}
-			on:dragleave={handleDragLeave}
-			on:drop={handleDrop}
-			aria-disabled={!attachmentsEnabled}
-			aria-busy={isUploadingAttachments}
-		>
-			<p>{attachmentStatusText}</p>
-		</div>
-		{#if attachments.length}
-			<ul class="aan-attachments-list">
-				{#each attachments as attachment (attachment.path)}
-					<li class="aan-attachment-item">
-						<div class="aan-attachment-details">
-							<span class="aan-attachment-type" aria-hidden="true">
-								{formatAttachmentType(attachment.extension)}
-							</span>
-							<div class="aan-attachment-meta">
-								<span class="aan-attachment-name">{attachment.name}</span>
-								<span class="aan-attachment-size">{attachment.size}</span>
+		{#if !attachmentsCollapsed}
+			<div
+				class="aan-attachments-dropzone"
+				class:is-disabled={!attachmentsEnabled}
+				class:is-dragging={dragActive}
+				on:dragenter={handleDragEnter}
+				on:dragover={handleDragOver}
+				on:dragleave={handleDragLeave}
+				on:drop={handleDrop}
+				aria-disabled={!attachmentsEnabled}
+				aria-busy={isUploadingAttachments}
+			>
+				<p>{attachmentStatusText}</p>
+			</div>
+			{#if attachments.length}
+				<ul class="aan-attachments-list">
+					{#each attachments as attachment (attachment.path)}
+						<li class="aan-attachment-item">
+							<div class="aan-attachment-details">
+								<span class="aan-attachment-type" aria-hidden="true">
+									{formatAttachmentType(attachment.extension)}
+								</span>
+								<div class="aan-attachment-meta">
+									<span class="aan-attachment-name">{attachment.name}</span>
+									<span class="aan-attachment-size">{attachment.size}</span>
+								</div>
 							</div>
-						</div>
-						<div class="aan-attachment-actions">
-							<button
-								type="button"
-								class="aan-attachment-action"
-								on:click={async () => {
-									await onOpenAttachment(attachment.path);
-								}}
-								aria-label={`Open ${attachment.name}`}
-							>
-								<svg
-									viewBox="0 0 24 24"
-									aria-hidden="true"
-									focusable="false"
+							<div class="aan-attachment-actions">
+								<button
+									type="button"
+									class="aan-attachment-action"
+									on:click={async () => {
+										await onOpenAttachment(attachment.path);
+									}}
+									aria-label={`Open ${attachment.name}`}
 								>
-									<path
-										d="M7 17L17 7"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
-										stroke-linecap="round"
-										stroke-linejoin="round"
-									/>
-									<path
-										d="M10 7h7v7"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
-										stroke-linecap="round"
-										stroke-linejoin="round"
-									/>
-								</svg>
-							</button>
-							<button
-								type="button"
-								class="aan-attachment-action danger"
-								on:click={async () => {
-									await onDeleteAttachment(attachment.path);
-								}}
-								aria-label={`Delete ${attachment.name}`}
-								disabled={isUploadingAttachments}
-							>
-								<svg
-									viewBox="0 0 24 24"
-									aria-hidden="true"
-									focusable="false"
+									<svg
+										viewBox="0 0 24 24"
+										aria-hidden="true"
+										focusable="false"
+									>
+										<path
+											d="M7 17L17 7"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+										/>
+										<path
+											d="M10 7h7v7"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+										/>
+									</svg>
+								</button>
+								<button
+									type="button"
+									class="aan-attachment-action danger"
+									on:click={async () => {
+										await onDeleteAttachment(attachment.path);
+									}}
+									aria-label={`Delete ${attachment.name}`}
+									disabled={isUploadingAttachments}
 								>
-									<path
-										d="M6 7h12"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
-										stroke-linecap="round"
-									/>
-									<path
-										d="M10 7V5h4v2"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
-										stroke-linecap="round"
-									/>
-									<path
-										d="M9 7v10a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V7"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
-										stroke-linecap="round"
-										stroke-linejoin="round"
-									/>
-								</svg>
-							</button>
-						</div>
-					</li>
-				{/each}
-			</ul>
-		{:else}
-			<p class="aan-attachments-empty">
-				{attachmentsEnabled
-					? "No attachments yet."
-					: "Attachments will appear once a recording is linked."}
-			</p>
+									<svg
+										viewBox="0 0 24 24"
+										aria-hidden="true"
+										focusable="false"
+									>
+										<path
+											d="M6 7h12"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+											stroke-linecap="round"
+										/>
+										<path
+											d="M10 7V5h4v2"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+											stroke-linecap="round"
+										/>
+										<path
+											d="M9 7v10a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V7"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+										/>
+									</svg>
+								</button>
+							</div>
+						</li>
+					{/each}
+				</ul>
+			{:else}
+				<p class="aan-attachments-empty">
+					{attachmentsEnabled
+						? "No attachments yet."
+						: "Attachments will appear once a recording is linked."}
+				</p>
+			{/if}
 		{/if}
 		<input
 			type="file"
@@ -675,13 +698,13 @@ let collapsed = false;
 			on:change={handleFileInput}
 		/>
 	</section>
+	<div
+		class="audio-note-player-host"
+		class:has-player={Boolean(playerContainer)}
+		bind:this={playerHost}
+	></div>
 	<div class="audio-note-transcript-panel">
-		<div class="audio-note-transcript-card">
-			<div
-				class="audio-note-player-host"
-				class:has-player={Boolean(playerContainer)}
-				bind:this={playerHost}
-			></div>
+			<div class="audio-note-transcript-card">
 			<header class="audio-note-transcript-header">
 				<div>
 					<div class="audio-note-transcript-title">
@@ -861,7 +884,7 @@ let collapsed = false;
 						</div>
 					{/if}
 				</div>
-			{/if}
+				{/if}
+			</div>
 		</div>
 	</div>
-</div>
