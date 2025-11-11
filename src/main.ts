@@ -379,22 +379,19 @@ export default class AutomaticAudioNotes extends Plugin {
 				this.app.workspace.on("file-open", (file) => {
 					void this.handleFileOpen(file);
 				})
-			);
-			this.registerEvent(
-				this.app.metadataCache.on("resolved", (file) => {
-					if (!(file instanceof TFile)) {
-						return;
-					}
-					const active = this.app.workspace.getActiveFile();
-					if (!active || active.path !== file.path) {
-						return;
-					}
-					if (!this.isMeetingFile(file)) {
-						return;
-					}
-					void this.handleFileOpen(file);
-				})
-			);
+				);
+				this.registerEvent(
+					this.app.metadataCache.on("resolved", () => {
+						const active = this.app.workspace.getActiveFile();
+						if (!active) {
+							return;
+						}
+						if (!this.isMeetingFile(active)) {
+							return;
+						}
+						void this.handleFileOpen(active);
+					})
+				);
 			this.registerEvent(
 				this.app.vault.on("create", (file) => {
 					void this.handleAttachmentCreate(file);

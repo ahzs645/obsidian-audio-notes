@@ -25,3 +25,10 @@ export interface TranscriptSearchMatch {
 	length?: number;
 	context?: string;
 }
+
+export interface SidebarAttachment {
+	path: string;
+	name: string;
+	extension: string;
+	size: string;
+}

@@ -218,6 +218,170 @@ If your plugin does not need CSS, delete this file.
 	box-shadow: var(--shadow-s);
 }
 
+.aan-transcript-stack {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.audio-note-attachments-panel {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 12px;
+	padding: 16px;
+	box-shadow: var(--shadow-s);
+}
+
+.aan-attachments-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.aan-attachments-title {
+	font-weight: 600;
+	margin: 0;
+}
+
+.aan-attachments-subtitle {
+	margin: 2px 0 0;
+	color: var(--text-muted);
+	font-size: 0.85em;
+}
+
+.aan-attachments-dropzone {
+	margin-top: 12px;
+	padding: 14px;
+	border: 1px dashed var(--background-modifier-border);
+	border-radius: 10px;
+	text-align: center;
+	color: var(--text-muted);
+	transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.aan-attachments-dropzone p {
+	margin: 0;
+}
+
+.aan-attachments-dropzone.is-dragging {
+	border-color: var(--interactive-accent);
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.1);
+	color: var(--text-normal);
+}
+
+.aan-attachments-dropzone.is-disabled {
+	opacity: 0.6;
+	pointer-events: none;
+}
+
+.aan-attachments-list {
+	list-style: none;
+	margin: 12px 0 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.aan-attachment-item {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 12px;
+	padding: 8px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+}
+
+.aan-attachment-details {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+}
+
+.aan-attachment-type {
+	width: 40px;
+	height: 40px;
+	border-radius: 8px;
+	background: var(--background-secondary);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: 600;
+	font-size: 0.75rem;
+	color: var(--text-muted);
+	text-transform: uppercase;
+}
+
+.aan-attachment-meta {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.aan-attachment-name {
+	font-weight: 500;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.aan-attachment-size {
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
+.aan-attachment-actions {
+	display: inline-flex;
+	gap: 6px;
+}
+
+.aan-attachment-action {
+	border: none;
+	background: transparent;
+	width: 32px;
+	height: 32px;
+	border-radius: 999px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: background 0.15s ease, color 0.15s ease;
+}
+
+.aan-attachment-action svg {
+	width: 16px;
+	height: 16px;
+}
+
+.aan-attachment-action:hover:not(:disabled) {
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.15);
+	color: var(--text-normal);
+}
+
+.aan-attachment-action.danger:hover:not(:disabled) {
+	color: var(--color-red, #ff4d4f);
+}
+
+.aan-attachment-action:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.aan-attachments-empty {
+	margin-top: 12px;
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.aan-attachments-input {
+	display: none;
+}
+
 .audio-note-player-host {
 	display: none;
 }

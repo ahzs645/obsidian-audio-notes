@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { Notice } from "obsidian";
 	import { onMount, onDestroy, tick } from "svelte";
-	import type {
-		TranscriptSegmentWithSpeaker,
-		TranscriptSearchMatch,
-	} from "./types";
+import type {
+	TranscriptSegmentWithSpeaker,
+	TranscriptSearchMatch,
+	SidebarAttachment,
+} from "./types";
 
 	export let segments: TranscriptSegmentWithSpeaker[] = [];
 	export let transcriptText = "";
@@ -16,6 +17,14 @@
 	export let onSeekToTime: (time: number) => void = () => {};
 	export let title = "Live Transcript";
 	export let playerContainer: HTMLElement | null = null;
+	export let attachments: SidebarAttachment[] = [];
+	export let attachmentsEnabled = false;
+	export let onUploadAttachments: (files: File[]) => Promise<void> = async () =>
+		Promise.resolve();
+	export let onOpenAttachment: (path: string) => Promise<void> = async () =>
+		Promise.resolve();
+	export let onDeleteAttachment: (path: string) => Promise<void> = async () =>
+		Promise.resolve();
 
 	const speakerColorAssignments = new Map<string, string>();
 	const speakerColorClasses = [
@@ -38,6 +47,10 @@ let showSearch = false;
 let collapsed = false;
 	let playerHost: HTMLDivElement | null = null;
 	let mountedPlayerEl: HTMLElement | null = null;
+	let dragActive = false;
+	let dragCounter = 0;
+	let isUploadingAttachments = false;
+	let filePicker: HTMLInputElement | null = null;
 	type GroupedTranscript = {
 		id: string;
 		speakerKey: string;
@@ -81,6 +94,17 @@ let collapsed = false;
 	$: activeSegmentIndex = syncWithAudio
 		? findActiveSegmentIndex(segments, currentTime ?? null)
 		: null;
+
+	$: if (!attachmentsEnabled && dragActive) {
+		dragActive = false;
+		dragCounter = 0;
+	}
+
+	$: attachmentStatusText = attachmentsEnabled
+		? dragActive
+			? "Release to upload"
+			: "Drag files here or click Add files"
+		: "Add a recording to enable attachments";
 
 	$: if (playerHost && mountedPlayerEl !== playerContainer) {
 		while (playerHost.firstChild) {
@@ -191,6 +215,73 @@ let collapsed = false;
 
 	function toggleAutoScroll() {
 		autoScroll = !autoScroll;
+	}
+
+	function formatAttachmentType(ext: string): string {
+		return (ext ? ext.slice(0, 4) : "FILE").toUpperCase();
+	}
+
+	async function uploadFiles(files: File[]) {
+		if (!attachmentsEnabled || !files?.length) {
+			return;
+		}
+		isUploadingAttachments = true;
+		try {
+			await onUploadAttachments(files);
+		} catch (error) {
+			console.error("Audio Notes: Failed to upload attachments", error);
+		} finally {
+			isUploadingAttachments = false;
+			if (filePicker) {
+				filePicker.value = "";
+			}
+		}
+	}
+
+	function handleFileInput(event: Event) {
+		const target = event.currentTarget as HTMLInputElement | null;
+		if (!target?.files?.length) return;
+		uploadFiles(Array.from(target.files));
+	}
+
+	function triggerFileDialog() {
+		if (!attachmentsEnabled || isUploadingAttachments) return;
+		filePicker?.click();
+	}
+
+	function handleDragEnter(event: DragEvent) {
+		if (!attachmentsEnabled) return;
+		event.preventDefault();
+		dragCounter += 1;
+		dragActive = true;
+	}
+
+	function handleDragOver(event: DragEvent) {
+		if (!attachmentsEnabled) return;
+		event.preventDefault();
+		if (event.dataTransfer) {
+			event.dataTransfer.dropEffect = "copy";
+		}
+	}
+
+	function handleDragLeave(event: DragEvent) {
+		if (!attachmentsEnabled) return;
+		event.preventDefault();
+		dragCounter = Math.max(dragCounter - 1, 0);
+		if (dragCounter === 0) {
+			dragActive = false;
+		}
+	}
+
+	function handleDrop(event: DragEvent) {
+		if (!attachmentsEnabled) return;
+		event.preventDefault();
+		dragCounter = 0;
+		dragActive = false;
+		const files = event.dataTransfer?.files;
+		if (files?.length) {
+			uploadFiles(Array.from(files));
+		}
 	}
 
 	async function copyTranscript() {
@@ -447,192 +538,330 @@ let collapsed = false;
 
 </script>
 
-<div class="audio-note-transcript-panel">
-	<div class="audio-note-transcript-card">
-		<div
-			class="audio-note-player-host"
-			class:has-player={Boolean(playerContainer)}
-			bind:this={playerHost}
-		></div>
-		<header class="audio-note-transcript-header">
+<div class="aan-transcript-stack">
+	<section class="audio-note-attachments-panel">
+		<header class="aan-attachments-header">
 			<div>
-				<div class="audio-note-transcript-title">
-					<span>{title}</span>
-					{#if isTranscribing}
-						<span class="audio-note-transcript-pill">Transcribing…</span>
-					{/if}
-				</div>
-				<p class="audio-note-transcript-meta">
-					{#if hasSegments}
-						{segments.length} segments · {formatDurationLabel(transcriptDuration)}
-					{:else if (isTranscribing)}
-						{progressMessage ?? "Waiting for transcript…"}
+				<p class="aan-attachments-title">Attachments</p>
+				<p class="aan-attachments-subtitle">
+					{#if attachments.length}
+						{attachments.length} file{attachments.length === 1 ? "" : "s"}
 					{:else}
-						Ready for transcript
+						Store reference files with this recording
 					{/if}
 				</p>
 			</div>
-			<div class="audio-note-transcript-actions">
-				<button
-					class="aan-transcript-btn"
-					type="button"
-					on:click={() => (collapsed = !collapsed)}
-				>
-					{collapsed ? "Expand transcript" : "Collapse transcript"}
-				</button>
-				<button
-					class="aan-transcript-btn icon-only"
-					class:auto-scroll-active={autoScroll}
-					on:click={toggleAutoScroll}
-					disabled={isSearching}
-					type="button"
-					title={autoScroll ? "Disable auto-scroll" : "Enable auto-scroll"}
-					aria-label={autoScroll ? "Disable auto-scroll" : "Enable auto-scroll"}
-					aria-pressed={autoScroll}
-				>
-					<svg
-						aria-hidden="true"
-						viewBox="0 0 24 24"
-						focusable="false"
-						class="aan-transcript-icon"
-					>
-						<path
-							d="M7 5l5 5 5-5M7 19l5-5 5 5"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						/>
-					</svg>
-				</button>
-				<button
-					class="aan-transcript-btn"
-					on:click={copyTranscript}
-					type="button"
-					disabled={!transcriptText}
-				>
-					Copy all
-				</button>
-			</div>
+			<button
+				class="aan-transcript-btn"
+				type="button"
+				on:click={triggerFileDialog}
+				disabled={!attachmentsEnabled || isUploadingAttachments}
+			>
+				{isUploadingAttachments ? "Uploading…" : "Add files"}
+			</button>
 		</header>
-
-		{#if !collapsed}
-			<section class="audio-note-transcript-toolbar">
-				<div class="aan-transcript-search-controls">
+		<div
+			class="aan-attachments-dropzone"
+			class:is-disabled={!attachmentsEnabled}
+			class:is-dragging={dragActive}
+			on:dragenter={handleDragEnter}
+			on:dragover={handleDragOver}
+			on:dragleave={handleDragLeave}
+			on:drop={handleDrop}
+			aria-disabled={!attachmentsEnabled}
+			aria-busy={isUploadingAttachments}
+		>
+			<p>{attachmentStatusText}</p>
+		</div>
+		{#if attachments.length}
+			<ul class="aan-attachments-list">
+				{#each attachments as attachment (attachment.path)}
+					<li class="aan-attachment-item">
+						<div class="aan-attachment-details">
+							<span class="aan-attachment-type" aria-hidden="true">
+								{formatAttachmentType(attachment.extension)}
+							</span>
+							<div class="aan-attachment-meta">
+								<span class="aan-attachment-name">{attachment.name}</span>
+								<span class="aan-attachment-size">{attachment.size}</span>
+							</div>
+						</div>
+						<div class="aan-attachment-actions">
+							<button
+								type="button"
+								class="aan-attachment-action"
+								on:click={async () => {
+									await onOpenAttachment(attachment.path);
+								}}
+								aria-label={`Open ${attachment.name}`}
+							>
+								<svg
+									viewBox="0 0 24 24"
+									aria-hidden="true"
+									focusable="false"
+								>
+									<path
+										d="M7 17L17 7"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									/>
+									<path
+										d="M10 7h7v7"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									/>
+								</svg>
+							</button>
+							<button
+								type="button"
+								class="aan-attachment-action danger"
+								on:click={async () => {
+									await onDeleteAttachment(attachment.path);
+								}}
+								aria-label={`Delete ${attachment.name}`}
+								disabled={isUploadingAttachments}
+							>
+								<svg
+									viewBox="0 0 24 24"
+									aria-hidden="true"
+									focusable="false"
+								>
+									<path
+										d="M6 7h12"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+									/>
+									<path
+										d="M10 7V5h4v2"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+									/>
+									<path
+										d="M9 7v10a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V7"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									/>
+								</svg>
+							</button>
+						</div>
+					</li>
+				{/each}
+			</ul>
+		{:else}
+			<p class="aan-attachments-empty">
+				{attachmentsEnabled
+					? "No attachments yet."
+					: "Attachments will appear once a recording is linked."}
+			</p>
+		{/if}
+		<input
+			type="file"
+			multiple
+			class="aan-attachments-input"
+			bind:this={filePicker}
+			on:change={handleFileInput}
+		/>
+	</section>
+	<div class="audio-note-transcript-panel">
+		<div class="audio-note-transcript-card">
+			<div
+				class="audio-note-player-host"
+				class:has-player={Boolean(playerContainer)}
+				bind:this={playerHost}
+			></div>
+			<header class="audio-note-transcript-header">
+				<div>
+					<div class="audio-note-transcript-title">
+						<span>{title}</span>
+						{#if isTranscribing}
+							<span class="audio-note-transcript-pill">Transcribing…</span>
+						{/if}
+					</div>
+					<p class="audio-note-transcript-meta">
+						{#if hasSegments}
+							{segments.length} segments · {formatDurationLabel(transcriptDuration)}
+						{:else if (isTranscribing)}
+							{progressMessage ?? "Waiting for transcript…"}
+						{:else}
+							Ready for transcript
+						{/if}
+					</p>
+				</div>
+				<div class="audio-note-transcript-actions">
 					<button
 						class="aan-transcript-btn"
 						type="button"
-						on:click={toggleSearch}
+						on:click={() => (collapsed = !collapsed)}
 					>
-						Search
+						{collapsed ? "Expand transcript" : "Collapse transcript"}
 					</button>
-					{#if searchMatches.length}
-						<span class="aan-transcript-match-count">
-							{currentMatchIndex + 1} / {searchMatches.length}
-						</span>
-						<div class="aan-transcript-match-nav">
-							<button type="button" on:click={goToPreviousMatch}>▲</button>
-							<button type="button" on:click={goToNextMatch}>▼</button>
-						</div>
-					{/if}
+					<button
+						class="aan-transcript-btn icon-only"
+						class:auto-scroll-active={autoScroll}
+						on:click={toggleAutoScroll}
+						disabled={isSearching}
+						type="button"
+						title={autoScroll ? "Disable auto-scroll" : "Enable auto-scroll"}
+						aria-label={autoScroll ? "Disable auto-scroll" : "Enable auto-scroll"}
+						aria-pressed={autoScroll}
+					>
+						<svg
+							aria-hidden="true"
+							viewBox="0 0 24 24"
+							focusable="false"
+							class="aan-transcript-icon"
+						>
+							<path
+								d="M7 5l5 5 5-5M7 19l5-5 5 5"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/>
+						</svg>
+					</button>
+					<button
+						class="aan-transcript-btn"
+						on:click={copyTranscript}
+						type="button"
+						disabled={!transcriptText}
+					>
+						Copy all
+					</button>
 				</div>
-			</section>
+			</header>
 
-			{#if showSearch}
-				<div class="aan-transcript-search-bar">
-					<input
-						bind:this={searchInputEl}
-						type="text"
-						placeholder="Search transcript… (Ctrl/Cmd + F)"
-						bind:value={searchQuery}
-					/>
-					{#if searchQuery}
-						<button type="button" class="aan-transcript-btn" on:click={clearSearch}>
-							Clear
+			{#if !collapsed}
+				<section class="audio-note-transcript-toolbar">
+					<div class="aan-transcript-search-controls">
+						<button
+							class="aan-transcript-btn"
+							type="button"
+							on:click={toggleSearch}
+						>
+							Search
 						</button>
-					{/if}
-					{#if searchQuery && !searchMatches.length}
-						<span class="aan-transcript-no-match">No matches</span>
+						{#if searchMatches.length}
+							<span class="aan-transcript-match-count">
+								{currentMatchIndex + 1} / {searchMatches.length}
+							</span>
+							<div class="aan-transcript-match-nav">
+								<button type="button" on:click={goToPreviousMatch}>▲</button>
+								<button type="button" on:click={goToNextMatch}>▼</button>
+							</div>
+						{/if}
+					</div>
+				</section>
+
+				{#if showSearch}
+					<div class="aan-transcript-search-bar">
+						<input
+							bind:this={searchInputEl}
+							type="text"
+							placeholder="Search transcript… (Ctrl/Cmd + F)"
+							bind:value={searchQuery}
+						/>
+						{#if searchQuery}
+							<button type="button" class="aan-transcript-btn" on:click={clearSearch}>
+								Clear
+							</button>
+						{/if}
+						{#if searchQuery && !searchMatches.length}
+							<span class="aan-transcript-no-match">No matches</span>
+						{/if}
+					</div>
+				{/if}
+
+				<div
+					class="audio-note-transcript-scroll"
+					bind:this={scrollContainer}
+					aria-live="polite"
+				>
+					{#if !hasSegments}
+						{#if transcriptText}
+							<div class="audio-note-transcript-plain-text">
+								{#each highlightParts(transcriptText, searchQuery) as part, idx}
+									<span
+										class:aan-transcript-highlight={part.highlight}
+										class:aan-transcript-highlight-current={currentMatch?.type === "plaintext" && part.highlight}
+										>{part.text}</span
+									>
+								{/each}
+							</div>
+						{:else}
+							<p class="audio-note-transcript-empty">
+								{#if isTranscribing}
+									{progressMessage ?? "Processing audio…"}
+								{:else}
+									Transcript will appear here once available.
+								{/if}
+							</p>
+						{/if}
+					{:else}
+						<div class="audio-note-transcript-groups">
+							{#each groupedSegments as group (group.id)}
+								<div
+									class="aan-transcript-group"
+									class:is-active={group.segments.some(({ index }) => index === activeSegmentIndex)}
+								>
+									<div class="aan-transcript-group-header">
+										<div
+											class={`aan-transcript-speaker-badge speaker-${getSpeakerColorClass(
+												group.speakerKey
+											)}`}
+										>
+											{group.label}
+										</div>
+										<button
+											type="button"
+											class="aan-transcript-time-button"
+											on:click={() => jumpToTime(group.startTime)}
+											aria-label={`Jump to ${formatTime(group.startTime)}`}
+										>
+											<span>{formatTime(group.startTime)}</span>
+											{#if group.endTime !== undefined && group.endTime !== null}
+												<span class="aan-transcript-time-arrow">→</span>
+												<span>{formatTime(group.endTime)}</span>
+											{/if}
+										</button>
+									</div>
+									<div class="aan-transcript-group-body">
+										{#each group.segments as entry (entry.index)}
+											<p
+												class="aan-transcript-group-text"
+												class:is-active={entry.index === activeSegmentIndex}
+												use:segmentRefAction={entry.index}
+											>
+												{#each highlightParts(entry.segment.text, searchQuery) as part, idx}
+													<span
+														class:aan-transcript-highlight={part.highlight}
+														class:aan-transcript-highlight-current={currentMatch?.segmentIndex === entry.index && part.highlight}
+														>{part.text}</span
+													>
+												{/each}
+											</p>
+										{/each}
+									</div>
+								</div>
+							{/each}
+						</div>
 					{/if}
 				</div>
 			{/if}
-
-			<div
-				class="audio-note-transcript-scroll"
-				bind:this={scrollContainer}
-				aria-live="polite"
-			>
-				{#if !hasSegments}
-					{#if transcriptText}
-						<div class="audio-note-transcript-plain-text">
-							{#each highlightParts(transcriptText, searchQuery) as part, idx}
-								<span
-									class:aan-transcript-highlight={part.highlight}
-									class:aan-transcript-highlight-current={currentMatch?.type === "plaintext" && part.highlight}
-									>{part.text}</span
-								>
-							{/each}
-						</div>
-					{:else}
-						<p class="audio-note-transcript-empty">
-							{#if isTranscribing}
-								{progressMessage ?? "Processing audio…"}
-							{:else}
-								Transcript will appear here once available.
-							{/if}
-						</p>
-					{/if}
-				{:else}
-					<div class="audio-note-transcript-groups">
-						{#each groupedSegments as group (group.id)}
-							<div
-								class="aan-transcript-group"
-								class:is-active={group.segments.some(({ index }) => index === activeSegmentIndex)}
-							>
-								<div class="aan-transcript-group-header">
-									<div
-										class={`aan-transcript-speaker-badge speaker-${getSpeakerColorClass(
-											group.speakerKey
-										)}`}
-									>
-										{group.label}
-									</div>
-									<button
-										type="button"
-										class="aan-transcript-time-button"
-										on:click={() => jumpToTime(group.startTime)}
-										aria-label={`Jump to ${formatTime(group.startTime)}`}
-									>
-										<span>{formatTime(group.startTime)}</span>
-										{#if group.endTime !== undefined && group.endTime !== null}
-											<span class="aan-transcript-time-arrow">→</span>
-											<span>{formatTime(group.endTime)}</span>
-										{/if}
-									</button>
-								</div>
-								<div class="aan-transcript-group-body">
-									{#each group.segments as entry (entry.index)}
-										<p
-											class="aan-transcript-group-text"
-											class:is-active={entry.index === activeSegmentIndex}
-											use:segmentRefAction={entry.index}
-										>
-											{#each highlightParts(entry.segment.text, searchQuery) as part, idx}
-												<span
-													class:aan-transcript-highlight={part.highlight}
-													class:aan-transcript-highlight-current={currentMatch?.segmentIndex === entry.index && part.highlight}
-													>{part.text}</span
-												>
-											{/each}
-										</p>
-									{/each}
-								</div>
-							</div>
-						{/each}
-					</div>
-				{/if}
-			</div>
-		{/if}
+		</div>
 	</div>
 </div>
