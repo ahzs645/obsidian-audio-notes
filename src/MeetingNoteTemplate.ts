@@ -151,8 +151,6 @@ function buildFrontmatter(
 
 function buildTemplateBody(context: ResolvedMeetingContext): string {
 	const sections = [
-		`# ${context.title}`,
-		"",
 		buildOverview(context),
 		"",
 		"## Notes",

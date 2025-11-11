@@ -29,8 +29,6 @@ export class TranscriptSidebarView extends ItemView {
 	private transcriptWrapper: HTMLDivElement | null = null;
 	private headerEl: HTMLDivElement | null = null;
 	private metaEl: HTMLDivElement | null = null;
-	private openNoteButton: HTMLButtonElement | null = null;
-	private openTranscriptButton: HTMLButtonElement | null = null;
 	private meetingContainer: HTMLDivElement | null = null;
 	private dashboardContainer: HTMLDivElement | null = null;
 	private dashboardPlaceholder: HTMLParagraphElement | null = null;
@@ -129,7 +127,6 @@ export class TranscriptSidebarView extends ItemView {
 			typeof transcriptPath === "string"
 				? transcriptPath
 				: null;
-		this.updateTranscriptButton();
 
 		this.renderMetaSummary(frontmatter);
 
@@ -245,18 +242,6 @@ export class TranscriptSidebarView extends ItemView {
 		});
 		titleEl.classList.add("aan-transcript-title");
 
-		const actionsEl = this.headerEl.createDiv({
-			cls: "aan-transcript-sidebar-actions",
-		});
-		this.openNoteButton = actionsEl.createEl("button", {
-			text: "Open note",
-			cls: "aan-transcript-btn",
-		});
-		this.openTranscriptButton = actionsEl.createEl("button", {
-			text: "Open transcript",
-			cls: "aan-transcript-btn",
-		});
-
 		this.metaEl = this.meetingContainer.createDiv({
 			cls: "aan-transcript-sidebar-meta",
 		});
@@ -296,15 +281,6 @@ export class TranscriptSidebarView extends ItemView {
 		this.headerEl
 			.querySelector(".aan-transcript-title")
 			?.setText(file.basename);
-		if (this.openNoteButton) {
-			this.openNoteButton.onclick = () => {
-				this.plugin.app.workspace.openLinkText(
-					file.path,
-					file.path,
-					true
-				);
-			};
-		}
 	}
 
 	private renderMetaSummary(frontmatter: Record<string, unknown>) {
@@ -364,23 +340,6 @@ export class TranscriptSidebarView extends ItemView {
 		this.dashboardContainer?.removeClass("is-hidden");
 		this.ensureCalendar();
 		this.scheduleRefresh();
-	}
-
-	private updateTranscriptButton() {
-		if (!this.openTranscriptButton) return;
-		if (!this.currentTranscriptPath) {
-			this.openTranscriptButton.disabled = true;
-			return;
-		}
-		this.openTranscriptButton.disabled = false;
-		this.openTranscriptButton.onclick = () => {
-			if (!this.currentTranscriptPath) return;
-			this.plugin.app.workspace.openLinkText(
-				this.currentTranscriptPath,
-				this.currentTranscriptPath,
-				true
-			);
-		};
 	}
 
 	private ensureCalendar() {

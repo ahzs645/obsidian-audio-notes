@@ -262,6 +262,22 @@ If your plugin does not need CSS, delete this file.
 	background: var(--background-secondary);
 }
 
+.audio-note-player-host .aan-player-compact {
+	flex-direction: column;
+	align-items: stretch;
+	gap: 12px;
+}
+
+.audio-note-player-host .aan-player-compact-buttons {
+	order: 1;
+	justify-content: flex-start;
+}
+
+.audio-note-player-host .aan-player-compact-slider {
+	order: 0;
+	width: 100%;
+}
+
 .audio-note-transcript-header {
 	display: flex;
 	justify-content: space-between;
@@ -318,6 +334,27 @@ If your plugin does not need CSS, delete this file.
 .aan-transcript-btn:disabled {
 	opacity: 0.6;
 	cursor: not-allowed;
+}
+
+.aan-transcript-btn.icon-only {
+	width: 36px;
+	height: 36px;
+	padding: 0;
+	border-radius: 999px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.aan-transcript-btn.icon-only .aan-transcript-icon {
+	width: 16px;
+	height: 16px;
+}
+
+.aan-transcript-btn.icon-only.auto-scroll-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: transparent;
 }
 
 .audio-note-transcript-toolbar {
@@ -661,72 +698,48 @@ If your plugin does not need CSS, delete this file.
 	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.15);
 }
 
-.audio-player-container .audio-note-speed-button {
+.aan-player-speed-control {
 	display: inline-flex;
 	align-items: center;
-	justify-content: center;
-	height: 44px;
-	min-width: 72px;
-	padding: 0 16px;
 	border-radius: 999px;
 	border: 1px solid var(--background-modifier-border);
 	background: var(--background-secondary);
+	height: 44px;
+	overflow: hidden;
+}
+
+.audio-note-speed-value {
 	font-weight: 600;
 	font-size: 0.9rem;
 	color: var(--text-normal);
-	cursor: pointer;
-	transition: background 0.15s ease, border-color 0.15s ease;
+	padding: 0 14px;
+	min-width: 52px;
+	text-align: center;
 }
 
-.audio-player-container .audio-note-speed-button:hover {
-	border-color: var(--interactive-accent);
-	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.15);
-}
-
-.aan-player-speed-wrapper {
-	position: relative;
-	display: inline-flex;
-}
-
-.aan-player-speed-menu {
-	position: absolute;
-	top: calc(100% + 6px);
-	right: 0;
-	display: none;
-	flex-direction: column;
-	gap: 2px;
-	padding: 6px;
-	border-radius: var(--radius-m);
-	border: 1px solid var(--background-modifier-border);
-	background: var(--background-primary);
-	box-shadow: var(--shadow-s);
-	z-index: 10;
-	min-width: 120px;
-}
-
-.aan-player-speed-menu.open {
-	display: flex;
-}
-
-.aan-player-speed-option {
+.audio-note-speed-adjust {
 	border: none;
 	background: transparent;
-	border-radius: var(--radius-s);
-	padding: 6px 10px;
-	text-align: left;
-	font-size: var(--font-ui-small);
+	width: 42px;
+	height: 42px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 1rem;
+	font-weight: 600;
 	color: var(--text-muted);
 	cursor: pointer;
+	transition: background 0.15s ease, color 0.15s ease;
 }
 
-.aan-player-speed-option:hover {
-	background: var(--background-modifier-hover);
+.audio-note-speed-adjust:hover:not(:disabled) {
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.15);
 	color: var(--text-normal);
 }
 
-.aan-player-speed-option.active {
-	background: var(--interactive-accent);
-	color: var(--text-on-accent);
+.audio-note-speed-adjust:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 
 .aan-player-compact {

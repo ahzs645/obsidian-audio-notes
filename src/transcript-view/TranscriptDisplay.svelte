@@ -35,7 +35,7 @@ let showSearch = false;
 	let searchInputEl: HTMLInputElement | null = null;
 	const segmentRefs = new Map<number, HTMLElement>();
 	let lastAutoScrollIndex: number | null = null;
-	let collapsed = true;
+let collapsed = false;
 	let playerHost: HTMLDivElement | null = null;
 	let mountedPlayerEl: HTMLElement | null = null;
 	type GroupedTranscript = {
@@ -481,12 +481,30 @@ let showSearch = false;
 					{collapsed ? "Expand transcript" : "Collapse transcript"}
 				</button>
 				<button
-					class="aan-transcript-btn"
+					class="aan-transcript-btn icon-only"
+					class:auto-scroll-active={autoScroll}
 					on:click={toggleAutoScroll}
 					disabled={isSearching}
 					type="button"
+					title={autoScroll ? "Disable auto-scroll" : "Enable auto-scroll"}
+					aria-label={autoScroll ? "Disable auto-scroll" : "Enable auto-scroll"}
+					aria-pressed={autoScroll}
 				>
-					{autoScroll ? "Auto-scroll on" : "Auto-scroll off"}
+					<svg
+						aria-hidden="true"
+						viewBox="0 0 24 24"
+						focusable="false"
+						class="aan-transcript-icon"
+					>
+						<path
+							d="M7 5l5 5 5-5M7 19l5-5 5 5"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						/>
+					</svg>
 				</button>
 				<button
 					class="aan-transcript-btn"

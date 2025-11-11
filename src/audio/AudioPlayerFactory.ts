@@ -69,15 +69,7 @@ export function createAudioPlayer(
 	timeSpan.createSpan({ cls: "time-divider", text: "/" });
 	timeSpan.createSpan({ cls: "time-total", text: "0:00" });
 
-	const speedButton = createEl("button", {
-		attr: {
-			id: `speed-button-${fakeUuid}`,
-			title: "Change playback speed",
-			"aria-label": "Change playback speed",
-		},
-		cls: "audio-note-speed-button",
-	});
-	const speedValueSpan = speedButton.createSpan({ text: "" });
+	let speedValueSpan: HTMLElement;
 
 	const speedSteps = [0.75, 1, 1.25, 1.5, 1.75, 2];
 	if (!speedSteps.some((step) => Math.abs(step - audio.playbackRate) < 0.01)) {
@@ -89,18 +81,18 @@ export function createAudioPlayer(
 	);
 	if (speedIndex === -1) speedIndex = 1;
 
-	let updateSpeedSelection = (_rate: number) => {};
-
 	const formatSpeed = (rate: number) =>
 		Math.abs(rate - Math.round(rate)) < 0.01
 			? `${Math.round(rate)}x`
 			: `${rate.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}x`;
 
+	let updateSpeedButtonsState = () => {};
+
 	const applySpeed = (rate: number) => {
 		audio.playbackRate = rate;
 		audioNote.speed = rate;
 		speedValueSpan.setText(formatSpeed(rate));
-		updateSpeedSelection(rate);
+		updateSpeedButtonsState();
 	};
 
 	const togglePlayback = () => {
@@ -270,65 +262,58 @@ export function createAudioPlayer(
 	const controlsRow = audioPlayerContainer.createDiv("aan-player-compact");
 	const controlGroup = controlsRow.createDiv("aan-player-compact-buttons");
 	controlGroup.appendChild(playButton);
-	const speedWrapper = controlGroup.createDiv("aan-player-speed-wrapper");
-	speedWrapper.appendChild(speedButton);
-	const speedMenu = speedWrapper.createDiv("aan-player-speed-menu");
-	const speedOptionButtons: Array<{
-		rate: number;
-		button: HTMLButtonElement;
-	}> = [];
-
-	updateSpeedSelection = (rate: number) => {
-		speedOptionButtons.forEach(({ rate: optionRate, button }) => {
-			button.classList.toggle(
-				"active",
-				Math.abs(optionRate - rate) < 0.01
-			);
-		});
-	};
-
-	const closeSpeedMenu = () => {
-		if (speedMenu.classList.contains("open")) {
-			speedMenu.classList.remove("open");
-			document.removeEventListener("click", handleDocumentClick);
-		}
-	};
-
-	const handleDocumentClick = (event: MouseEvent) => {
-		if (!speedWrapper.contains(event.target as Node)) {
-			closeSpeedMenu();
-		}
-	};
-
-	speedSteps.forEach((rate) => {
-		const optionButton = speedMenu.createEl("button", {
-			attr: { type: "button" },
-			cls: "aan-player-speed-option",
-			text: formatSpeed(rate),
-		});
-		optionButton.addEventListener("click", (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			speedIndex = speedSteps.indexOf(rate);
-			applySpeed(rate);
-			closeSpeedMenu();
-		});
-		speedOptionButtons.push({ rate, button: optionButton });
+	const speedControl = controlGroup.createDiv("aan-player-speed-control");
+	const decreaseSpeedButton = speedControl.createEl("button", {
+		attr: {
+			type: "button",
+			"aria-label": "Slow down playback",
+			title: "Slow down playback",
+		},
+		cls: "audio-note-speed-adjust",
+		text: "-",
+	});
+	speedValueSpan = speedControl.createSpan({
+		cls: "audio-note-speed-value",
+		text: "",
+	});
+	const increaseSpeedButton = speedControl.createEl("button", {
+		attr: {
+			type: "button",
+			"aria-label": "Speed up playback",
+			title: "Speed up playback",
+		},
+		cls: "audio-note-speed-adjust",
+		text: "+",
 	});
 
-	speedButton.addEventListener("click", (event) => {
-		event.preventDefault();
-		event.stopPropagation();
-		if (speedMenu.classList.contains("open")) {
-			closeSpeedMenu();
-		} else {
-			speedMenu.addClass("open");
-			document.addEventListener("click", handleDocumentClick);
+	const clampSpeedIndex = (value: number) =>
+		Math.max(0, Math.min(speedSteps.length - 1, value));
+
+	const handleSpeedAdjustment = (delta: number) => {
+		const nextIndex = clampSpeedIndex(speedIndex + delta);
+		if (nextIndex !== speedIndex) {
+			speedIndex = nextIndex;
+			applySpeed(speedSteps[speedIndex]);
 		}
-	});
-	env.registerCleanup(() =>
-		document.removeEventListener("click", handleDocumentClick)
+	};
+
+	decreaseSpeedButton.addEventListener("click", () =>
+		handleSpeedAdjustment(-1)
 	);
+	increaseSpeedButton.addEventListener("click", () =>
+		handleSpeedAdjustment(1)
+	);
+
+	updateSpeedButtonsState = () => {
+		decreaseSpeedButton.toggleAttribute(
+			"disabled",
+			speedIndex <= 0 || speedSteps.length === 0
+		);
+		increaseSpeedButton.toggleAttribute(
+			"disabled",
+			speedIndex >= speedSteps.length - 1 || speedSteps.length === 0
+		);
+	};
 
 	applySpeed(speedSteps[speedIndex]);
 
