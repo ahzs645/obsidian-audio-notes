@@ -555,26 +555,51 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					const existingLabels =
 						(normalizedPrefix &&
 							labelsByCategory.get(normalizedPrefix)) ||
-						[];
+						new Map<string, number>();
 					const labelContainer = setting.settingEl.createDiv({
-						cls: "aan-settings-label-tree-wrapper",
+						cls: "aan-settings-label-tree",
 					});
-					if (existingLabels.length) {
-						labelContainer.createSpan({
-							text: "Labels found:",
+					if (existingLabels.size) {
+						const totalCount = Array.from(existingLabels.values()).reduce((sum, count) => sum + count, 0);
+						const headerDiv = labelContainer.createDiv({
+							cls: "aan-settings-label-tree-header",
+						});
+						const toggleIcon = headerDiv.createSpan({
+							cls: "aan-settings-label-toggle-icon",
+							text: "▼",
+						});
+						headerDiv.createSpan({
+							text: `Labels found: ${existingLabels.size} (${totalCount} total uses)`,
 							cls: "aan-settings-label-list-title",
 						});
+
+						const contentDiv = labelContainer.createDiv({
+							cls: "aan-settings-label-tree-content",
+						});
+
 						const tree = this.buildLabelTree(
 							existingLabels,
 							normalizedPrefix || ""
 						);
 						if (tree.children.size) {
 							this.renderLabelTree(
-								labelContainer,
+								contentDiv,
 								tree,
 								normalizedPrefix || ""
 							);
 						}
+
+						headerDiv.addEventListener("click", () => {
+							const isCollapsed = contentDiv.hasClass("is-collapsed");
+							if (isCollapsed) {
+								contentDiv.removeClass("is-collapsed");
+								toggleIcon.setText("▼");
+							} else {
+								contentDiv.addClass("is-collapsed");
+								toggleIcon.setText("▶");
+							}
+						});
+						headerDiv.style.cursor = "pointer";
 					} else {
 						labelContainer.createSpan({
 							text: "No labels found for this category yet.",
@@ -694,14 +719,14 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 		}
 	}
 
-	private collectLabelsByCategory(): Map<string, string[]> {
+	private collectLabelsByCategory(): Map<string, Map<string, number>> {
 		const metadataCache = this.plugin.app.metadataCache;
 		const categories = getEffectiveMeetingLabelCategories(
 			this.plugin.settings.meetingLabelCategories
 		);
-		const labelsByPrefix = new Map<string, Set<string>>();
+		const labelsByPrefix = new Map<string, Map<string, number>>();
 		for (const category of categories) {
-			labelsByPrefix.set(category.tagPrefix, new Set());
+			labelsByPrefix.set(category.tagPrefix, new Map());
 		}
 		const files = this.plugin.app.vault.getMarkdownFiles();
 		for (const file of files) {
@@ -715,20 +740,13 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					normalized.startsWith(entry.tagPrefix)
 				);
 				if (!category) continue;
-				labelsByPrefix.get(category.tagPrefix)?.add(normalized);
+				const map = labelsByPrefix.get(category.tagPrefix);
+				if (map) {
+					map.set(normalized, (map.get(normalized) || 0) + 1);
+				}
 			}
 		}
-		const result = new Map<string, string[]>();
-		for (const category of categories) {
-			const values = labelsByPrefix.get(category.tagPrefix);
-			if (values?.size) {
-				result.set(
-					category.tagPrefix,
-					Array.from(values).sort((a, b) => a.localeCompare(b))
-				);
-			}
-		}
-		return result;
+		return labelsByPrefix;
 	}
 
 	private formatLabelDisplay(tag: string): string {
@@ -743,10 +761,10 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 			.join(" ");
 	}
 
-	private buildLabelTree(labels: string[], prefix: string) {
-		type Node = { name: string; children: Map<string, Node>; fullTag?: string };
-		const root: Node = { name: "", children: new Map() };
-		for (const tag of labels) {
+	private buildLabelTree(labelCounts: Map<string, number>, prefix: string) {
+		type Node = { name: string; children: Map<string, Node>; fullTag?: string; count: number };
+		const root: Node = { name: "", children: new Map(), count: 0 };
+		for (const [tag, count] of labelCounts.entries()) {
 			const normalized = tag.trim().toLowerCase();
 			if (!normalized.startsWith(prefix)) continue;
 			const remainder = normalized.slice(prefix.length);
@@ -755,34 +773,39 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 			let node = root;
 			for (const part of parts) {
 				if (!node.children.has(part)) {
-					node.children.set(part, { name: part, children: new Map() });
+					node.children.set(part, { name: part, children: new Map(), count: 0 });
 				}
 				node = node.children.get(part)!;
 			}
 			node.fullTag = normalized;
+			node.count = count;
 		}
 		return root;
 	}
 
 	private renderLabelTree(
 		container: HTMLElement,
-		root: { name: string; children: Map<string, any>; fullTag?: string },
+		root: { name: string; children: Map<string, any>; fullTag?: string; count?: number },
 		prefix: string
 	) {
 		const ul = container.createEl("ul");
 		ul.addClass("aan-settings-label-tree-list");
 		const renderNode = (
 			parent: HTMLElement,
-			node: { name: string; children: Map<string, any>; fullTag?: string }
+			node: { name: string; children: Map<string, any>; fullTag?: string; count?: number }
 		) => {
 			const entries = Array.from(node.children.values()).sort((a, b) =>
 				a.name.localeCompare(b.name)
 			);
 			for (const child of entries) {
 				const li = parent.createEl("li");
+				const labelText = this.formatLabelDisplay(child.name);
+				// Only show count if this is an actual used tag (has fullTag and count > 0)
+				const countText = child.fullTag && child.count ? `(${child.count}) ` : "";
 				li.createSpan({
-					text: this.formatLabelDisplay(child.name),
+					text: countText + labelText,
 					title: child.fullTag ? `#${child.fullTag}` : undefined,
+					cls: child.fullTag && child.count ? "aan-settings-label-with-count" : "aan-settings-label-branch",
 				});
 				if (child.children.size) {
 					const nested = li.createEl("ul");

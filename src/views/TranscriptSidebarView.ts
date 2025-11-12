@@ -615,7 +615,21 @@ export class TranscriptSidebarView extends ItemView {
 		if (!(file instanceof TFile)) {
 			return;
 		}
-		const leaf = this.plugin.app.workspace.getLeaf(newLeaf);
+		if (newLeaf) {
+			const workspace = this.plugin.app.workspace as any;
+			let leaf: WorkspaceLeaf | null = null;
+			if (typeof workspace.getLeaf === "function") {
+				leaf = workspace.getLeaf("tab");
+			}
+			if (!leaf) {
+				leaf = this.plugin.app.workspace.getLeaf(true);
+			}
+			if (!leaf) return;
+			await leaf.openFile(file);
+			this.plugin.app.workspace.setActiveLeaf(leaf, true, true);
+			return;
+		}
+		const leaf = this.plugin.app.workspace.getLeaf(false);
 		await leaf.openFile(file);
 	}
 

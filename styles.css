@@ -406,26 +406,98 @@ If your plugin does not need CSS, delete this file.
 	color: var(--text-muted);
 }
 
-.aan-settings-label-tree-wrapper {
+.aan-settings-label-category-list .setting-item {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 0;
+}
+
+.aan-settings-label-tree {
 	margin-top: 8px;
-	padding-left: 12px;
-	margin-left: -12px;
-	border-left: 1px solid var(--background-modifier-border);
+	padding: 12px;
+	border-left: 3px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	border-radius: 6px;
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
+	gap: 8px;
+	width: 100%;
+	grid-column: 1 / -1;
+}
+
+.aan-settings-label-tree-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	user-select: none;
+	padding: 4px;
+	border-radius: 4px;
+	transition: background 0.15s ease;
+}
+
+.aan-settings-label-tree-header:hover {
+	background: var(--background-modifier-hover);
+}
+
+.aan-settings-label-toggle-icon {
+	font-size: 0.8em;
+	color: var(--text-muted);
+	min-width: 16px;
+	text-align: center;
+}
+
+.aan-settings-label-tree-content {
+	display: block;
+	transition: max-height 0.2s ease, opacity 0.2s ease;
+}
+
+.aan-settings-label-tree-content.is-collapsed {
+	display: none;
 }
 
 .aan-settings-label-tree-list {
 	list-style: none;
 	margin: 4px 0 0 0;
-	padding-left: 12px;
+	padding-left: 20px;
 }
 
 .aan-settings-label-tree-list > li {
-	margin: 2px 0;
+	margin: 4px 0;
 	font-size: 0.9em;
 	color: var(--text-muted);
+	position: relative;
+}
+
+.aan-settings-label-tree-list > li::before {
+	content: "└─";
+	position: absolute;
+	left: -16px;
+	color: var(--background-modifier-border);
+	font-size: 0.85em;
+}
+
+.aan-settings-label-tree-list > li:not(:last-child)::before {
+	content: "├─";
+}
+
+.aan-settings-label-tree-list ul {
+	margin-top: 4px;
+}
+
+.aan-settings-label-with-count {
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.aan-settings-label-branch {
+	font-weight: 500;
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.aan-settings-label-tree-list > li > span:hover {
+	color: var(--text-normal);
+	cursor: default;
 }
 
 .audio-notes-transcript-view .audio-note-transcript-wrapper {
