@@ -6,9 +6,10 @@ export interface MeetingTemplateData {
 	transcriptPath?: string;
 	start?: Date;
 	end?: Date;
+	extraFrontmatter?: Record<string, unknown>;
 }
 
-interface ResolvedMeetingContext {
+export interface ResolvedMeetingContext {
 	title: string;
 	audioPath: string;
 	transcriptPath?: string;
@@ -36,8 +37,12 @@ export function generateMeetingNoteContent(
 	settings: AudioNotesSettings,
 	data: MeetingTemplateData
 ): string {
-	const context = resolveContext(settings, data);
-	const frontmatter = buildFrontmatter(settings, context);
+	const context = resolveMeetingContext(settings, data);
+	const frontmatter = buildFrontmatter(
+		settings,
+		context,
+		data.extraFrontmatter
+	);
 
 	if (!settings.meetingTemplateEnabled) {
 		return `${frontmatter}\n\n${buildAudioBlock(context)}`;
@@ -47,7 +52,7 @@ export function generateMeetingNoteContent(
 	return `${frontmatter}\n\n${body}`;
 }
 
-function resolveContext(
+export function resolveMeetingContext(
 	settings: AudioNotesSettings,
 	data: MeetingTemplateData
 ): ResolvedMeetingContext {
@@ -108,7 +113,8 @@ function resolveContext(
 
 function buildFrontmatter(
 	settings: AudioNotesSettings,
-	context: ResolvedMeetingContext
+	context: ResolvedMeetingContext,
+	extra?: Record<string, unknown>
 ): string {
 	const lines = [
 		"---",
@@ -141,13 +147,28 @@ function buildFrontmatter(
 	if (context.periodicWeekly) {
 		lines.push(`weekly_note: ${yamlQuote(context.periodicWeekly)}`);
 	}
+	if (extra) {
+		for (const [key, value] of Object.entries(extra)) {
+			if (!key) continue;
+			if (typeof value === "string") {
+				lines.push(`${key}: ${yamlQuote(value)}`);
+			} else if (
+				typeof value === "number" ||
+				typeof value === "boolean"
+			) {
+				lines.push(`${key}: ${value}`);
+			} else if (value === null) {
+				lines.push(`${key}: null`);
+			}
+		}
+	}
 	lines.push("---");
 	return lines.join("\n");
 }
 
 function buildTemplateBody(context: ResolvedMeetingContext): string {
 	const sections = [
-		buildOverview(context),
+		buildScheduleCallout(context),
 		"",
 		"## Notes",
 		"- Capture decisions, summaries, or paste AI output here.",
@@ -155,7 +176,9 @@ function buildTemplateBody(context: ResolvedMeetingContext): string {
 	return sections.join("\n");
 }
 
-function buildOverview(context: ResolvedMeetingContext): string {
+export function buildScheduleCallout(
+	context: ResolvedMeetingContext
+): string {
 	return [
 		"> [!info] Schedule",
 		`> - **When:** ${context.dateLabel}`,

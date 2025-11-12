@@ -1,7 +1,9 @@
 import AdmZip from "adm-zip";
 import { Notice, normalizePath, Vault } from "obsidian";
 import type AutomaticAudioNotes from "./main";
-import { generateMeetingNoteContent } from "./MeetingNoteTemplate";
+import {
+	generateMeetingNoteContent,
+} from "./MeetingNoteTemplate";
 
 interface WhisperMetadata {
 	dateCreated?: number | string;
@@ -382,16 +384,32 @@ async function maybeCreateNote(
 		`${folder}/${safeFileName}.md`
 	);
 
-	const createdAt = normalizeEpoch(metadata.dateCreated) ?? Date.now();
+	const createdAt = normalizeEpoch(metadata.dateCreated);
+	const updatedAt = normalizeEpoch(metadata.dateUpdated);
 	const normalizedDuration =
 		Number.isFinite(meetingDurationMs) && meetingDurationMs > 0
 			? meetingDurationMs
 			: 0;
-	const endTimestamp =
+	let endTimestamp =
+		createdAt ??
+		updatedAt ??
+		Date.now();
+	if (!Number.isFinite(endTimestamp)) {
+		endTimestamp = Date.now();
+	}
+	let startTimestamp =
 		normalizedDuration > 0
-			? createdAt + normalizedDuration
-			: normalizeEpoch(metadata.dateUpdated) ?? createdAt;
-	const startDateObj = new Date(createdAt);
+			? endTimestamp - normalizedDuration
+			: updatedAt ?? endTimestamp;
+	if (!Number.isFinite(startTimestamp)) {
+		startTimestamp = endTimestamp;
+	}
+	if (startTimestamp > endTimestamp) {
+		const swap = startTimestamp;
+		startTimestamp = endTimestamp;
+		endTimestamp = swap;
+	}
+	const startDateObj = new Date(startTimestamp);
 	const endDateObj = new Date(endTimestamp);
 	const startIso = startDateObj.toISOString();
 	const endIso = endDateObj.toISOString();
@@ -401,6 +419,10 @@ async function maybeCreateNote(
 		transcriptPath,
 		start: startDateObj,
 		end: endDateObj,
+		extraFrontmatter: {
+			whisper_schedule_normalized: true,
+			whisper_import_version: 2,
+		},
 	});
 	await plugin.app.vault.adapter.write(notePath, content);
 	return notePath;

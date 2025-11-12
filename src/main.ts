@@ -27,7 +27,11 @@ import { AudioNoteService } from "./services/AudioNoteService";
 import { renderAudioNote } from "./renderers/AudioNoteRenderer";
 import { secondsToTimeString, getUniqueId } from "./utils";
 import { ensureFolderExists, normalizeFolderPath } from "./AudioNotesUtils";
-import { generateMeetingNoteContent } from "./MeetingNoteTemplate";
+import {
+	generateMeetingNoteContent,
+	resolveMeetingContext,
+	buildScheduleCallout,
+} from "./MeetingNoteTemplate";
 import {
 	AudioNotesSettings,
 	AudioNotesSettingsTab,
@@ -409,6 +413,7 @@ export default class AutomaticAudioNotes extends Plugin {
 				this.app.workspace.getActiveFile() ?? null,
 				false
 			);
+			void this.normalizeExistingWhisperSchedules();
 		});
 
 		if (this.settings.calendarSidebarPinned) {
@@ -794,6 +799,141 @@ export default class AutomaticAudioNotes extends Plugin {
 		return dotIndex === -1
 			? filename.trim()
 			: filename.substring(0, dotIndex).trim();
+	}
+
+	private async normalizeExistingWhisperSchedules(): Promise<void> {
+		const files = this.app.vault.getMarkdownFiles();
+		for (const file of files) {
+			try {
+				await this.normalizeWhisperScheduleForFile(file);
+			} catch (error) {
+				console.error(
+					"Audio Notes: Could not normalize Whisper schedule",
+					file.path,
+					error
+				);
+			}
+		}
+	}
+
+	private async normalizeWhisperScheduleForFile(file: TFile): Promise<void> {
+		const cache = this.app.metadataCache.getFileCache(file);
+		const frontmatter = cache?.frontmatter;
+		if (!frontmatter) {
+			return;
+		}
+		if (frontmatter.whisper_schedule_normalized === true) {
+			return;
+		}
+		const transcriptUri =
+			typeof frontmatter.transcript_uri === "string"
+				? frontmatter.transcript_uri.trim()
+				: "";
+		if (!transcriptUri) {
+			return;
+		}
+		const transcriptFile =
+			this.app.vault.getAbstractFileByPath(transcriptUri);
+		if (!(transcriptFile instanceof TFile)) {
+			return;
+		}
+		if (!(await this.isWhisperTranscript(transcriptFile))) {
+			return;
+		}
+		const startIso =
+			typeof frontmatter.start === "string"
+				? frontmatter.start.trim()
+				: "";
+		const endIso =
+			typeof frontmatter.end === "string"
+				? frontmatter.end.trim()
+				: "";
+		const startMs = Date.parse(startIso);
+		const endMs = Date.parse(endIso);
+		if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+			return;
+		}
+		const duration = endMs - startMs;
+		if (!(duration > 0 && duration < 1000 * 60 * 60 * 12)) {
+			return;
+		}
+		const correctedEnd = startMs;
+		const correctedStart = startMs - duration;
+		if (!(correctedStart > 0 && correctedStart < correctedEnd)) {
+			return;
+		}
+		const startDate = new Date(correctedStart);
+		const endDate = new Date(correctedEnd);
+		await this.app.fileManager.processFrontMatter(file, (fm) => {
+			fm.start = new Date(correctedStart).toISOString();
+			fm.end = new Date(correctedEnd).toISOString();
+			fm.start_date = this.formatFrontmatterDate(startDate);
+			fm.start_time = this.formatFrontmatterTime(startDate);
+			fm.end_date = this.formatFrontmatterDate(endDate);
+			fm.end_time = this.formatFrontmatterTime(endDate);
+			fm.date = this.formatFrontmatterDate(startDate);
+			fm.whisper_schedule_normalized = true;
+			fm.whisper_import_version = 2;
+		});
+		await this.updateScheduleCallout(file, startDate, endDate);
+	}
+
+	private async isWhisperTranscript(file: TFile): Promise<boolean> {
+		try {
+			const contents = await this.app.vault.read(file);
+			const parsed = JSON.parse(contents);
+			return parsed?.source === "whisper";
+		} catch {
+			return false;
+		}
+	}
+
+	private formatFrontmatterDate(date: Date): string {
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, "0");
+		const day = String(date.getDate()).padStart(2, "0");
+		return `${year}-${month}-${day}`;
+	}
+
+	private formatFrontmatterTime(date: Date): string {
+		const hours = String(date.getHours()).padStart(2, "0");
+		const minutes = String(date.getMinutes()).padStart(2, "0");
+		const seconds = String(date.getSeconds()).padStart(2, "0");
+		return `${hours}:${minutes}:${seconds}`;
+	}
+
+	private async updateScheduleCallout(
+		file: TFile,
+		start: Date,
+		end: Date
+	): Promise<void> {
+		const content = await this.app.vault.read(file);
+		const lines = content.split("\n");
+		const startIndex = lines.findIndex((line) =>
+			line.trim().startsWith("> [!info] Schedule")
+		);
+		if (startIndex === -1) {
+			return;
+		}
+		let endIndex = startIndex + 1;
+		while (
+			endIndex < lines.length &&
+			lines[endIndex].trim().startsWith(">")
+		) {
+			endIndex++;
+		}
+		const context = resolveMeetingContext(this.settings, {
+			title:
+				typeof file.basename === "string" && file.basename.length
+					? file.basename
+					: "Meeting",
+			audioPath: "",
+			start,
+			end,
+		});
+		const scheduleBlock = buildScheduleCallout(context).split("\n");
+		lines.splice(startIndex, endIndex - startIndex, ...scheduleBlock);
+		await this.app.vault.modify(file, lines.join("\n"));
 	}
 
 	public async createNewMeeting(details: NewMeetingDetails): Promise<void> {

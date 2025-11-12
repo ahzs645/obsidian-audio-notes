@@ -5,6 +5,7 @@ import {
 	collectMeetingEvents,
 	localDateKey,
 } from "../../meeting-events";
+import { getEffectiveMeetingLabelCategories } from "../../meeting-labels";
 import type AutomaticAudioNotes from "../../main";
 
 export class DashboardController {
@@ -13,6 +14,7 @@ export class DashboardController {
 	private listenersRegistered = false;
 	private events: MeetingEvent[] = [];
 	private selectedDate: string = localDateKey(new Date());
+	private filterCategoryId = "";
 
 	constructor(
 		private readonly plugin: AutomaticAudioNotes,
@@ -33,10 +35,14 @@ export class DashboardController {
 			props: {
 				events: this.events,
 				selectedDate: this.selectedDate,
+				categories: this.getCategories(),
+				filterCategoryId: this.filterCategoryId,
 				onSelectDate: (date: string) => this.handleSelectDate(date),
 				onOpenNote: (path: string, newLeaf: boolean) =>
 					this.openFile(path, newLeaf),
 				onRefresh: () => this.refreshEvents(),
+				onFilterChange: (filterId: string) =>
+					this.handleFilterChange(filterId),
 			},
 		});
 		this.registerListeners();
@@ -90,22 +96,30 @@ export class DashboardController {
 	}
 
 	private refreshEvents() {
+		const categories = this.getCategories();
 		this.events = collectMeetingEvents(
 			this.plugin.app,
 			this.plugin.settings.calendarTagColors,
 			this.plugin.settings.meetingLabelCategories
 		);
-		if (
-			this.events.length &&
-			!this.events.some(
-				(event) => event.displayDate === this.selectedDate
-			)
-		) {
-			this.selectedDate = this.events[0].displayDate;
-		}
 		this.component?.$set({
 			events: this.events,
 			selectedDate: this.selectedDate,
+			categories,
+			filterCategoryId: this.filterCategoryId,
 		});
+	}
+
+	private handleFilterChange(filterId: string) {
+		this.filterCategoryId = filterId || "";
+		this.component?.$set({
+			filterCategoryId: this.filterCategoryId,
+		});
+	}
+
+	private getCategories() {
+		return getEffectiveMeetingLabelCategories(
+			this.plugin.settings.meetingLabelCategories
+		);
 	}
 }

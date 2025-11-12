@@ -1,14 +1,19 @@
 <script lang="ts">
 	import { localDateKey } from "../meeting-events";
 	import type { MeetingEvent } from "../meeting-events";
+	import type { NormalizedMeetingLabelCategory } from "../meeting-labels";
 
 	export let events: MeetingEvent[] = [];
 	export let selectedDate: string;
-export let onSelectDate: (date: string) => void;
-export let onOpenNote: (path: string, newLeaf: boolean) => void;
+	export let categories: NormalizedMeetingLabelCategory[] = [];
+	export let filterCategoryId: string = "";
+	export let onSelectDate: (date: string) => void;
+	export let onOpenNote: (path: string, newLeaf: boolean) => void;
+	export let onFilterChange: (filterId: string) => void = () => {};
 
 	const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 	const todayKey = localDateKey(new Date());
+	$: selectedDayDate = parseISODate(selectedDate);
 
 	let monthCursor = firstDayOfMonth(selectedDate);
 	let lastSelected = selectedDate;
@@ -18,9 +23,10 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 		monthCursor = firstDayOfMonth(selectedDate);
 	}
 
-	$: eventsByDate = buildEventsByDate(events);
-	$: weeks = buildCalendar(monthCursor);
-	$: selectedDayEvents = (events || [])
+	$: filteredEvents = filterEvents(events, filterCategoryId);
+	$: eventsByDate = buildEventsByDate(filteredEvents);
+	$: weeks = buildCalendar(monthCursor, eventsByDate);
+	$: selectedDayEvents = (filteredEvents || [])
 		.filter((event) => getDisplayDate(event) === selectedDate)
 		.sort((a, b) => a.start.getTime() - b.start.getTime());
 
@@ -58,7 +64,10 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 		return clone;
 	}
 
-	function buildCalendar(month: Date) {
+	function buildCalendar(
+		month: Date,
+		map: Map<string, MeetingEvent[]>
+	) {
 		const first = new Date(month);
 		const startOffset = first.getDay();
 		const gridStart = new Date(first);
@@ -88,7 +97,7 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 						current.getFullYear() === month.getFullYear(),
 					isToday: iso === todayKey,
 					isSelected: iso === selectedDate,
-					meetingCount: eventsByDate.get(iso)?.length || 0,
+					meetingCount: map.get(iso)?.length || 0,
 				});
 			}
 			weeks.push({ label: `week-${w}`, days });
@@ -140,6 +149,30 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 		}
 		return tag.slice(slashIndex + 1);
 	};
+	function filterEvents(
+		source: MeetingEvent[],
+		categoryId: string
+	): MeetingEvent[] {
+		if (!categoryId) {
+			return source || [];
+		}
+		if (categoryId === "__unlabeled__") {
+			return (source || []).filter((event) => !event.label?.categoryId);
+		}
+		return (source || []).filter(
+			(event) => event.label?.categoryId === categoryId
+		);
+	}
+
+	function handleFilterChange(value: string) {
+		onFilterChange?.(value);
+	}
+
+	function handleFilterSelectChange(event: Event) {
+		const target = event.currentTarget as HTMLSelectElement | null;
+		if (!target) return;
+		handleFilterChange(target.value);
+	}
 </script>
 
 <div class="aan-sidebar-calendar">
@@ -151,6 +184,23 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 		</div>
 		<div class="aan-sidebar-calendar__label">{monthLabel(monthCursor)}</div>
 	</header>
+	<div class="aan-sidebar-calendar__filter">
+		<label for="aan-calendar-filter">Filter</label>
+		<select
+			id="aan-calendar-filter"
+			on:change={handleFilterSelectChange}
+		>
+			<option value="" selected={!filterCategoryId}>All labels</option>
+			<option value="__unlabeled__" selected={filterCategoryId === "__unlabeled__"}>
+				No label
+			</option>
+			{#each categories as category}
+				<option value={category.id} selected={filterCategoryId === category.id}>
+					{category.name}
+				</option>
+			{/each}
+		</select>
+	</div>
 	<div class="aan-sidebar-calendar__weekdays">
 		{#each weekdays as day}
 			<div>{day}</div>
@@ -175,13 +225,15 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 
 	<section class="aan-sidebar-agenda">
 		<header>
-			<div class="aan-calendar-day-label">
-				{new Date(selectedDate).toLocaleDateString(undefined, {
-					weekday: "long",
-					month: "long",
-					day: "numeric",
-				})}
-			</div>
+			{#if selectedDayDate instanceof Date && !Number.isNaN(selectedDayDate.getTime())}
+				<div class="aan-calendar-day-label">
+					{selectedDayDate.toLocaleDateString(undefined, {
+						weekday: "long",
+						month: "long",
+						day: "numeric",
+					})}
+				</div>
+			{/if}
 			<div class="aan-calendar-day-count">
 				{selectedDayEvents.length
 					? `${selectedDayEvents.length} meeting${selectedDayEvents.length > 1 ? "s" : ""}`

@@ -26,13 +26,11 @@
 	<header class="aan-attachments-header">
 		<div>
 			<p class="aan-attachments-title">Attachments</p>
-			<p class="aan-attachments-subtitle">
-				{#if attachments.length}
+			{#if attachments.length}
+				<p class="aan-attachments-subtitle">
 					{attachments.length} file{attachments.length === 1 ? "" : "s"}
-				{:else}
-					Store reference files with this recording
-				{/if}
-			</p>
+				</p>
+			{/if}
 		</div>
 		<div class="aan-attachments-actions">
 			<button

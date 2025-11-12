@@ -122,13 +122,18 @@ function buildMeetingEvent(
 		getColor(colorMap, MEETING_TAG) ??
 		DEFAULT_EVENT_COLOR;
 
-		return {
-			path,
-			title: frontmatter.title || basename,
-			start: startDate,
-			end: endDate,
-			tags: orderedTags,
-			label,
+	const fileTitle = typeof basename === "string" ? basename.trim() : "";
+	const frontmatterTitle =
+		typeof frontmatter.title === "string" ? frontmatter.title.trim() : "";
+	const resolvedTitle = fileTitle || frontmatterTitle || path;
+
+	return {
+		path,
+		title: resolvedTitle,
+		start: startDate,
+		end: endDate,
+		tags: orderedTags,
+		label,
 			color,
 			displayDate: rawStartDate || localDateKey(startDate),
 			displayEndDate: rawEndDate || localDateKey(endDate),

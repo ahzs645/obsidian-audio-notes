@@ -119,6 +119,26 @@ If your plugin does not need CSS, delete this file.
 	font-size: 0.85rem;
 }
 
+.aan-sidebar-calendar__filter {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: 0.8rem;
+}
+
+.aan-sidebar-calendar__filter label {
+	color: var(--text-muted);
+}
+
+.aan-sidebar-calendar__filter select {
+	border-radius: 8px;
+	border: 1px solid var(--background-modifier-border);
+	padding: 4px 8px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: 0.85rem;
+}
+
 .aan-sidebar-calendar__weekdays,
 .aan-sidebar-calendar__grid {
 	display: grid;
@@ -977,6 +997,15 @@ If your plugin does not need CSS, delete this file.
 .aan-transcript-btn:disabled {
 	opacity: 0.6;
 	cursor: not-allowed;
+}
+
+.aan-transcript-btn.danger {
+	color: var(--text-error);
+	border-color: var(--text-error);
+}
+
+.aan-transcript-btn.danger:hover:not(:disabled) {
+	background: rgba(255, 99, 71, 0.12);
 }
 
 .aan-transcript-btn.icon-only {

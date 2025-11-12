@@ -1,6 +1,9 @@
-import { ItemView, Notice, TFile, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import TranscriptDisplay from "../transcript-view/TranscriptDisplay.svelte";
-import type { TranscriptSegmentWithSpeaker } from "../transcript-view/types";
+import type {
+	TranscriptSegmentWithSpeaker,
+	SidebarAttachment,
+} from "../transcript-view/types";
 import type AutomaticAudioNotes from "../main";
 import { AudioNote } from "../AudioNotes";
 import type { Transcript } from "../Transcript";
@@ -29,6 +32,7 @@ import {
 	getMeetingLabelFromFrontmatter,
 } from "../meeting-label-manager";
 import { collectTags } from "../meeting-events";
+import { confirmWithModal } from "../modals/ConfirmModal";
 
 export const AUDIO_NOTES_TRANSCRIPT_VIEW = "audio-notes-transcript-view";
 
@@ -45,6 +49,7 @@ export class TranscriptSidebarView extends ItemView {
 	private meetingContainer: HTMLDivElement | null = null;
 	private dashboardContainer: HTMLDivElement | null = null;
 	private dashboardPlaceholder: HTMLParagraphElement | null = null;
+	private deleteButtonEl: HTMLButtonElement | null = null;
 	private currentFilePath: string | null = null;
 	private currentTranscriptPath: string | null = null;
 	private currentMeetingFile: TFile | null = null;
@@ -52,6 +57,7 @@ export class TranscriptSidebarView extends ItemView {
 	private mode: "meeting" | "dashboard" = "dashboard";
 	private isUploadingMeetingAudio = false;
 	private isTranscribingMeeting = false;
+	private isDeletingMeeting = false;
 	private currentAudioPath: string | null = null;
 	private readonly meetingFiles: MeetingFileService;
 	private readonly attachments: AttachmentManager;
@@ -250,6 +256,7 @@ export class TranscriptSidebarView extends ItemView {
 				frontmatter
 			) ??
 			this.meetingFiles.deriveDatePartsFromNotePath(activeFile);
+		this.updateDeleteButtonState();
 
 		const resolvedAudioFile = hasAudio && audioPath
 			? this.plugin.app.vault.getAbstractFileByPath(audioPath)
@@ -423,6 +430,13 @@ export class TranscriptSidebarView extends ItemView {
 				this.openLabelPicker();
 			}
 		});
+		this.deleteButtonEl = this.labelActionsEl.createEl("button", {
+			text: "Delete meeting",
+			cls: "aan-transcript-btn danger",
+		});
+		this.deleteButtonEl.addEventListener("click", () => {
+			void this.confirmDeleteCurrentMeeting();
+		});
 	}
 
 	private renderHeader(file: TFile) {
@@ -431,6 +445,7 @@ export class TranscriptSidebarView extends ItemView {
 			.querySelector(".aan-transcript-title")
 			?.setText(file.basename);
 		this.updateLabelHeader();
+		this.updateDeleteButtonState();
 	}
 
 	private renderEmpty(message: string) {
@@ -449,6 +464,7 @@ export class TranscriptSidebarView extends ItemView {
 		const canEdit =
 			this.mode === "meeting" && Boolean(this.currentMeetingFile);
 		this.labelInputEl.toggleAttribute("disabled", !canEdit);
+		this.updateDeleteButtonState();
 		if (!canEdit) {
 			this.labelInputEl.value = "";
 			this.labelInputEl.classList.add("is-placeholder");
@@ -464,6 +480,153 @@ export class TranscriptSidebarView extends ItemView {
 			this.labelInputEl.value = "";
 			this.labelInputEl.classList.add("is-placeholder");
 		}
+	}
+
+	private updateDeleteButtonState() {
+		const enabled =
+			this.mode === "meeting" &&
+			Boolean(this.currentMeetingFile) &&
+			!this.isDeletingMeeting;
+		if (!this.deleteButtonEl) {
+			return;
+		}
+		this.deleteButtonEl.toggleAttribute("disabled", !enabled);
+	}
+
+	private async confirmDeleteCurrentMeeting() {
+		if (this.mode !== "meeting" || !this.currentMeetingFile) {
+			new Notice("Open a meeting note to delete it.", 4000);
+			return;
+		}
+		const confirmed = await confirmWithModal(this.app, {
+			title: "Delete meeting?",
+			message:
+				"This will permanently delete the note, linked transcript, audio file, and attachments.",
+			confirmText: "Delete meeting",
+			cancelText: "Cancel",
+		});
+		if (!confirmed) {
+			return;
+		}
+		await this.deleteCurrentMeeting();
+	}
+
+	private async deleteCurrentMeeting(): Promise<void> {
+		const meetingFile = this.currentMeetingFile;
+		if (!meetingFile) {
+			return;
+		}
+		this.isDeletingMeeting = true;
+		this.updateDeleteButtonState();
+		const failures: string[] = [];
+		const deleteFileIfExists = async (
+			path: string | null | undefined
+		): Promise<void> => {
+			if (!path || path === meetingFile.path) {
+				return;
+			}
+			const file = this.plugin.app.vault.getAbstractFileByPath(path);
+			if (!(file instanceof TFile)) {
+				return;
+			}
+			try {
+				await this.plugin.app.vault.delete(file);
+			} catch (error) {
+				console.error("Audio Notes: Failed to delete file", path, error);
+				failures.push(path);
+			}
+		};
+		try {
+			const attachmentFolder = this.attachments.getAttachmentFolder();
+			let attachmentEntries: SidebarAttachment[] = [];
+			try {
+				attachmentEntries = await this.attachments.refresh();
+			} catch (error) {
+				console.error(
+					"Audio Notes: Failed to refresh attachments prior to delete",
+					error
+				);
+			}
+			for (const attachment of attachmentEntries) {
+				await deleteFileIfExists(attachment.path);
+			}
+			await deleteFileIfExists(this.currentAudioPath);
+			await deleteFileIfExists(this.currentTranscriptPath);
+			if (this.currentTranscriptPath) {
+				this.plugin.transcriptDatastore.cache.delete(
+					this.currentTranscriptPath
+				);
+			}
+			await this.plugin.app.vault.delete(meetingFile);
+			if (attachmentFolder) {
+				await this.deleteFolderIfEmpty(attachmentFolder);
+			}
+			const audioParent = this.getParentPath(this.currentAudioPath);
+			if (audioParent && audioParent !== attachmentFolder) {
+				await this.deleteFolderIfEmpty(audioParent);
+			}
+			await this.showDashboard();
+			this.dashboardController.scheduleRefresh();
+			if (failures.length) {
+				new Notice(
+					`Meeting deleted, but some linked files could not be removed: ${failures.join(
+						", "
+					)}`,
+					6000
+				);
+			} else {
+				new Notice("Meeting deleted.", 4000);
+			}
+		} catch (error) {
+			console.error("Audio Notes: Could not delete meeting", error);
+			new Notice("Could not delete meeting.", 6000);
+		} finally {
+			this.isDeletingMeeting = false;
+			this.updateDeleteButtonState();
+		}
+	}
+
+	private async deleteFolderIfEmpty(path: string | null | undefined) {
+		if (!path) {
+			return;
+		}
+		const folder = this.plugin.app.vault.getAbstractFileByPath(path);
+		if (!(folder instanceof TFolder)) {
+			return;
+		}
+		if (folder.children.length > 0 || !this.shouldDeleteFolder(folder)) {
+			return;
+		}
+		try {
+			await this.plugin.app.vault.delete(folder);
+		} catch (error) {
+			console.error("Audio Notes: Failed to delete folder", path, error);
+			return;
+		}
+		const parent = folder.parent;
+		if (parent instanceof TFolder) {
+			await this.deleteFolderIfEmpty(parent.path);
+		}
+	}
+
+	private shouldDeleteFolder(folder: TFolder): boolean {
+		const name = folder.name;
+		if (/^[a-z0-9]{4}-/i.test(name)) {
+			return true;
+		}
+		if (/^\d{4}$/.test(name) || /^\d{2}$/.test(name)) {
+			return true;
+		}
+		return false;
+	}
+
+	private getParentPath(path: string | null | undefined): string | null {
+		if (!path) return null;
+		const segments = path.split("/").filter(Boolean);
+		if (segments.length <= 1) {
+			return null;
+		}
+		return segments.slice(0, -1).join("/");
 	}
 
 	private openLabelPicker(initialQuery = "") {
@@ -607,6 +770,7 @@ export class TranscriptSidebarView extends ItemView {
 		this.updateLabelHeader();
 		this.resetAttachments();
 		this.setMode("dashboard");
+		this.updateDeleteButtonState();
 		this.meetingContainer?.addClass("is-hidden");
 		this.dashboardContainer?.removeClass("is-hidden");
 		this.dashboardController.ensure(this.dashboardContainer);
