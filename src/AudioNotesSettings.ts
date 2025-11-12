@@ -6,9 +6,18 @@ import {
 	ToggleComponent,
 	request,
 	App,
+	TextComponent,
 } from "obsidian";
 import { secondsToTimeString } from "./utils";
 import { ensureDashboardNote } from "./dashboard";
+import { MeetingLabelIconPickerModal } from "./settings/MeetingLabelIconPickerModal";
+import {
+	DEFAULT_MEETING_LABEL_CATEGORIES,
+	getEffectiveMeetingLabelCategories,
+	type MeetingLabelCategory,
+} from "./meeting-labels";
+import { collectTags } from "./meeting-events";
+import { normalizeTagPrefix } from "./meeting-labels";
 
 export class ApiKeyInfo {
 	constructor(
@@ -431,6 +440,175 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					});
 			});
 
+		containerEl.createEl("h3", { text: "Meeting labels" });
+			const labelsDescription = containerEl.createEl("p");
+			labelsDescription.textContent =
+				"Use categories to keep related meeting tags grouped together. Each category defines a tag prefix (e.g. job/acme) and an optional icon or emoji shown in the calendar. Click the sparkle button to open the built-in icon library.";
+
+			const categoriesListEl = containerEl.createDiv(
+				"aan-settings-label-category-list"
+			);
+
+			const renderLabelCategories = () => {
+				categoriesListEl.empty();
+				const labelsByCategory = this.collectLabelsByCategory();
+				const categories =
+					this.plugin.settings.meetingLabelCategories || [];
+				if (!categories.length) {
+					categoriesListEl
+						.createEl("p", { text: "No categories yet." })
+					.addClass("setting-item-description");
+				return;
+			}
+				categories.forEach((category, index) => {
+					const setting = new Setting(categoriesListEl)
+						.setName(category.name || `Category ${index + 1}`)
+						.setDesc(
+							category.tagPrefix
+								? `Tags begin with “${category.tagPrefix}”`
+								: "Set a tag prefix to match note tags (e.g. job/)"
+						);
+					let nameInput: TextComponent | undefined;
+					let prefixInput: TextComponent | undefined;
+					let iconInput: TextComponent | undefined;
+					setting.addText((text) => {
+						nameInput = text;
+						text
+							.setPlaceholder("Label (e.g. Job)")
+							.setValue(category.name || "")
+							.onChange(async (value) => {
+								category.name = value;
+								this.plugin.settings.meetingLabelCategories =
+									categories;
+								await this.plugin.saveSettings();
+							});
+						text.inputEl.setAttribute(
+							"aria-label",
+							"Meeting label name"
+						);
+					});
+					setting.addText((text) => {
+						prefixInput = text;
+						text
+							.setPlaceholder("Prefix (e.g. job/)")
+							.setValue(category.tagPrefix || "")
+							.onChange(async (value) => {
+								category.tagPrefix = value;
+								this.plugin.settings.meetingLabelCategories =
+									categories;
+								await this.plugin.saveSettings();
+							});
+						text.inputEl.setAttribute(
+							"aria-label",
+							"Meeting label prefix"
+						);
+					});
+					setting.addText((text) => {
+						iconInput = text;
+						text
+							.setPlaceholder("Icon or emoji")
+							.setValue(category.icon || "")
+							.onChange(async (value) => {
+								category.icon = value;
+								this.plugin.settings.meetingLabelCategories =
+									categories;
+								await this.plugin.saveSettings();
+							});
+						text.inputEl.setAttribute(
+							"aria-label",
+							"Meeting label icon"
+						);
+					});
+					setting.addExtraButton((button) =>
+						button
+							.setIcon("sparkles")
+							.setTooltip("Choose from icon library")
+							.onClick(() => {
+								new MeetingLabelIconPickerModal(
+									this.app,
+									(iconValue) => {
+										category.icon = iconValue;
+										iconInput?.setValue(iconValue);
+										this.plugin.settings.meetingLabelCategories =
+											categories;
+										void this.plugin.saveSettings();
+									}
+								).open();
+							})
+					);
+					setting.addExtraButton((button) =>
+						button
+							.setIcon("trash")
+							.setTooltip("Remove category")
+							.onClick(async () => {
+							this.plugin.settings.meetingLabelCategories.splice(
+								index,
+								1
+							);
+							await this.plugin.saveSettings();
+							renderLabelCategories();
+						})
+						);
+					const normalizedPrefix = normalizeTagPrefix(
+						category.tagPrefix || category.name || category.id || ""
+					);
+					const existingLabels =
+						(normalizedPrefix &&
+							labelsByCategory.get(normalizedPrefix)) ||
+						[];
+					const labelContainer = setting.settingEl.createDiv({
+						cls: "aan-settings-label-tree-wrapper",
+					});
+					if (existingLabels.length) {
+						labelContainer.createSpan({
+							text: "Labels found:",
+							cls: "aan-settings-label-list-title",
+						});
+						const tree = this.buildLabelTree(
+							existingLabels,
+							normalizedPrefix || ""
+						);
+						if (tree.children.size) {
+							this.renderLabelTree(
+								labelContainer,
+								tree,
+								normalizedPrefix || ""
+							);
+						}
+					} else {
+						labelContainer.createSpan({
+							text: "No labels found for this category yet.",
+							cls: "aan-settings-label-empty",
+						});
+					}
+				});
+			};
+
+			new Setting(containerEl)
+			.addButton((button) =>
+				button
+					.setButtonText("Add category")
+					.setTooltip("Create a new meeting label category")
+					.onClick(async () => {
+						const categories =
+							this.plugin.settings.meetingLabelCategories || [];
+						categories.push({
+							id: `category-${Math.random()
+								.toString(36)
+								.slice(2, 10)}`,
+							name: "",
+							icon: "",
+							tagPrefix: "",
+						});
+						this.plugin.settings.meetingLabelCategories = categories;
+						await this.plugin.saveSettings();
+						renderLabelCategories();
+					})
+			)
+			.setName(" ");
+
+		renderLabelCategories();
+
 		containerEl.createEl("h3", { text: "Dashboard" });
 		new Setting(containerEl)
 			.setName("Dashboard note path")
@@ -515,6 +693,106 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 			});
 		}
 	}
+
+	private collectLabelsByCategory(): Map<string, string[]> {
+		const metadataCache = this.plugin.app.metadataCache;
+		const categories = getEffectiveMeetingLabelCategories(
+			this.plugin.settings.meetingLabelCategories
+		);
+		const labelsByPrefix = new Map<string, Set<string>>();
+		for (const category of categories) {
+			labelsByPrefix.set(category.tagPrefix, new Set());
+		}
+		const files = this.plugin.app.vault.getMarkdownFiles();
+		for (const file of files) {
+			const cache = metadataCache.getFileCache(file);
+			if (!cache) continue;
+			const tags = collectTags(cache);
+			for (const tag of tags) {
+				const normalized = tag.trim().toLowerCase();
+				if (!normalized) continue;
+				const category = categories.find((entry) =>
+					normalized.startsWith(entry.tagPrefix)
+				);
+				if (!category) continue;
+				labelsByPrefix.get(category.tagPrefix)?.add(normalized);
+			}
+		}
+		const result = new Map<string, string[]>();
+		for (const category of categories) {
+			const values = labelsByPrefix.get(category.tagPrefix);
+			if (values?.size) {
+				result.set(
+					category.tagPrefix,
+					Array.from(values).sort((a, b) => a.localeCompare(b))
+				);
+			}
+		}
+		return result;
+	}
+
+	private formatLabelDisplay(tag: string): string {
+		const raw = tag.split("/").pop() || tag;
+		return raw
+			.split(/[-_]/)
+			.filter(Boolean)
+			.map(
+				(part) =>
+					part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
+			)
+			.join(" ");
+	}
+
+	private buildLabelTree(labels: string[], prefix: string) {
+		type Node = { name: string; children: Map<string, Node>; fullTag?: string };
+		const root: Node = { name: "", children: new Map() };
+		for (const tag of labels) {
+			const normalized = tag.trim().toLowerCase();
+			if (!normalized.startsWith(prefix)) continue;
+			const remainder = normalized.slice(prefix.length);
+			const parts = remainder.split("/").filter(Boolean);
+			if (!parts.length) continue;
+			let node = root;
+			for (const part of parts) {
+				if (!node.children.has(part)) {
+					node.children.set(part, { name: part, children: new Map() });
+				}
+				node = node.children.get(part)!;
+			}
+			node.fullTag = normalized;
+		}
+		return root;
+	}
+
+	private renderLabelTree(
+		container: HTMLElement,
+		root: { name: string; children: Map<string, any>; fullTag?: string },
+		prefix: string
+	) {
+		const ul = container.createEl("ul");
+		ul.addClass("aan-settings-label-tree-list");
+		const renderNode = (
+			parent: HTMLElement,
+			node: { name: string; children: Map<string, any>; fullTag?: string }
+		) => {
+			const entries = Array.from(node.children.values()).sort((a, b) =>
+				a.name.localeCompare(b.name)
+			);
+			for (const child of entries) {
+				const li = parent.createEl("li");
+				li.createSpan({
+					text: this.formatLabelDisplay(child.name),
+					title: child.fullTag ? `#${child.fullTag}` : undefined,
+				});
+				if (child.children.size) {
+					const nested = li.createEl("ul");
+					nested.addClass("aan-settings-label-tree-list");
+					renderNode(nested, child);
+				}
+			}
+		};
+		renderNode(ul, root);
+	}
 }
 
 function formatColorMap(map: Record<string, string> = {}): string {
@@ -569,6 +847,7 @@ export interface StringifiedAudioNotesSettings {
 	periodicWeeklyNoteFormat: string;
 	calendarSidebarPinned: boolean;
 	dashboardNotePath: string;
+	meetingLabelCategories: MeetingLabelCategory[];
 }
 
 const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
@@ -597,6 +876,9 @@ const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	periodicWeeklyNoteFormat: "gggg-'W'WW",
 	calendarSidebarPinned: false,
 	dashboardNotePath: "Audio Notes Dashboard.md",
+	meetingLabelCategories: DEFAULT_MEETING_LABEL_CATEGORIES.map((category) => ({
+		...category,
+	})),
 };
 
 export class AudioNotesSettings {
@@ -622,10 +904,11 @@ export class AudioNotesSettings {
 		private _meetingTemplateEnabled: boolean,
 		private _periodicDailyNoteEnabled: boolean,
 		private _periodicDailyNoteFormat: string,
-		private _periodicWeeklyNoteEnabled: boolean,
-		private _periodicWeeklyNoteFormat: string,
-		private _calendarSidebarPinned: boolean,
-		private _dashboardNotePath: string,
+	private _periodicWeeklyNoteEnabled: boolean,
+	private _periodicWeeklyNoteFormat: string,
+	private _calendarSidebarPinned: boolean,
+	private _dashboardNotePath: string,
+	private _meetingLabelCategories: MeetingLabelCategory[],
 	) {}
 
 	static fromDefaultSettings(): AudioNotesSettings {
@@ -655,6 +938,9 @@ export class AudioNotesSettings {
 			DEFAULT_SETTINGS.periodicWeeklyNoteFormat,
 			DEFAULT_SETTINGS.calendarSidebarPinned,
 			DEFAULT_SETTINGS.dashboardNotePath,
+			DEFAULT_SETTINGS.meetingLabelCategories.map((category) => ({
+				...category,
+			})),
 		);
 	}
 
@@ -803,6 +1089,12 @@ export class AudioNotesSettings {
 			data.dashboardNotePath !== undefined
 		) {
 			settings.dashboardNotePath = data.dashboardNotePath!;
+		}
+		if (
+			data.meetingLabelCategories !== null &&
+			data.meetingLabelCategories !== undefined
+		) {
+			settings.meetingLabelCategories = data.meetingLabelCategories!;
 		}
 		return settings;
 	}
@@ -1021,6 +1313,28 @@ export class AudioNotesSettings {
 
 	set dashboardNotePath(value: string) {
 		this._dashboardNotePath = value || "Audio Notes Dashboard.md";
+	}
+
+	get meetingLabelCategories(): MeetingLabelCategory[] {
+		if (!Array.isArray(this._meetingLabelCategories)) {
+			this._meetingLabelCategories = [];
+		}
+		return this._meetingLabelCategories;
+	}
+
+	set meetingLabelCategories(value: MeetingLabelCategory[]) {
+		this._meetingLabelCategories = (value || []).map(
+			(category, index) => ({
+				id:
+					category.id?.trim() ||
+					`category-${index + 1}-${Math.random()
+						.toString(36)
+						.slice(2, 6)}`,
+				name: category.name || "",
+				icon: category.icon || "",
+				tagPrefix: category.tagPrefix || "",
+			})
+		);
 	}
 
 	async getInfoByApiKey(): Promise<ApiKeyInfo | undefined> {

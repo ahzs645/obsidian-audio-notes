@@ -26,7 +26,8 @@ import { registerAudioNoteCommands } from "./commands/registerCommands";
 import { AudioNoteService } from "./services/AudioNoteService";
 import { renderAudioNote } from "./renderers/AudioNoteRenderer";
 import { secondsToTimeString, getUniqueId } from "./utils";
-import { ensureFolderExists } from "./AudioNotesUtils";
+import { ensureFolderExists, normalizeFolderPath } from "./AudioNotesUtils";
+import { generateMeetingNoteContent } from "./MeetingNoteTemplate";
 import {
 	AudioNotesSettings,
 	AudioNotesSettingsTab,
@@ -51,6 +52,7 @@ import {
 	AUDIO_NOTES_TRANSCRIPT_VIEW,
 	TranscriptSidebarView,
 } from "./views/TranscriptSidebarView";
+import type { NewMeetingDetails } from "./modals/NewMeetingModal";
 
 // Load Font-Awesome stuff
 import { library } from "@fortawesome/fontawesome-svg-core";
@@ -163,7 +165,8 @@ export default class AutomaticAudioNotes extends Plugin {
 			_periodicWeeklyNoteEnabled,
 			_periodicWeeklyNoteFormat,
 			_calendarSidebarPinned,
-			_dashboardNotePath
+			_dashboardNotePath,
+			loadedData["_meetingLabelCategories"],
 		);
 		this.settings = AudioNotesSettings.overrideDefaultSettings(newSettings);
 	}
@@ -581,13 +584,78 @@ export default class AutomaticAudioNotes extends Plugin {
 		if (!frontmatter) {
 			return false;
 		}
-		return Boolean(
+
+		const hasMediaFields = Boolean(
 			frontmatter.media_uri ||
 				frontmatter.audio ||
 				frontmatter.media ||
 				frontmatter.transcript_uri ||
 				frontmatter.transcript
 		);
+		if (hasMediaFields) {
+			return true;
+		}
+
+		const hasMeetingCssClass =
+			this.hasFrontmatterValue(
+				frontmatter.cssclass,
+				"aan-meeting-note"
+			) ||
+			this.hasFrontmatterValue(
+				frontmatter.cssclasses,
+				"aan-meeting-note"
+			);
+		if (hasMeetingCssClass) {
+			return true;
+		}
+
+		const hasMeetingTag =
+			this.hasFrontmatterValue(frontmatter.tags, "meeting", true) ||
+			this.hasFrontmatterValue(frontmatter.tag, "meeting", true);
+		return hasMeetingTag;
+	}
+
+	private hasFrontmatterValue(
+		value: unknown,
+		target: string,
+		stripHash = false
+	): boolean {
+		if (!target) return false;
+		const normalizedTarget = target.toLowerCase();
+		return this.normalizeFrontmatterList(value, stripHash).some(
+			(entry) => entry === normalizedTarget
+		);
+	}
+
+	private normalizeFrontmatterList(
+		value: unknown,
+		stripHash = false
+	): string[] {
+		const results: string[] = [];
+		const pushParts = (input: string) => {
+			input
+				.split(/[, ]+/)
+				.map((part) =>
+					stripHash
+						? part.replace(/^#/, "").trim()
+						: part.trim()
+				)
+				.filter(Boolean)
+				.forEach((part) => results.push(part.toLowerCase()));
+		};
+
+		if (typeof value === "string") {
+			pushParts(value);
+		} else if (Array.isArray(value)) {
+			for (const entry of value) {
+				if (typeof entry === "string") {
+					pushParts(entry);
+				} else if (entry !== null && entry !== undefined) {
+					pushParts(String(entry));
+				}
+			}
+		}
+		return results;
 	}
 
 	private async syncTranscriptSidebar(
@@ -666,6 +734,100 @@ export default class AutomaticAudioNotes extends Plugin {
 		} catch (error) {
 			console.error("Audio Notes: Could not move attachment", error);
 		}
+	}
+
+	public async createNewMeeting(details: NewMeetingDetails): Promise<void> {
+		try {
+			const title = details.title?.trim() || "New meeting";
+			const start = this.combineMeetingDateTime(
+				details.date,
+				details.startTime
+			);
+			const end = this.combineMeetingDateTime(
+				details.date,
+				details.endTime
+			);
+			const resolvedEnd =
+				end.getTime() >= start.getTime()
+					? end
+					: new Date(start.getTime() + 60 * 60 * 1000);
+			const meetingFolder = await this.prepareMeetingNoteFolder(
+				start
+			);
+			const notePath = await this.getAvailableNotePath(
+				meetingFolder,
+				`${this.slugifyTitle(title)}.md`
+			);
+			const content = generateMeetingNoteContent(this.settings, {
+				title,
+				audioPath: "",
+				start,
+				end: resolvedEnd,
+			});
+			const file = await this.app.vault.create(notePath, content);
+			this.lastMeetingFilePath = file.path;
+			this.lastMeetingFolder = file.parent?.path ?? null;
+			const leaf = this.app.workspace.getLeaf(false);
+			await leaf.openFile(file);
+			new Notice("Meeting note created.");
+		} catch (error) {
+			console.error("Audio Notes: Could not create meeting note.", error);
+			new Notice("Could not create meeting note.", 6000);
+		}
+	}
+
+	private async prepareMeetingNoteFolder(meetingDate: Date): Promise<string> {
+		const baseFolder = normalizeFolderPath(
+			this.settings.whisperNoteFolder,
+			"02-meetings"
+		) || "02-meetings";
+		const year = meetingDate.getFullYear().toString();
+		const month = (meetingDate.getMonth() + 1).toString().padStart(2, "0");
+		const day = meetingDate.getDate().toString().padStart(2, "0");
+		const folder = [baseFolder, year, month, day]
+			.filter(Boolean)
+			.join("/");
+		await ensureFolderExists(this.app, folder);
+		return folder;
+	}
+
+	private async getAvailableNotePath(
+		folder: string,
+		filename: string
+	): Promise<string> {
+		let candidate = `${folder}/${filename}`.replace(/\/+/g, "/");
+		const dotIndex = filename.lastIndexOf(".");
+		const base =
+			dotIndex === -1 ? filename : filename.slice(0, dotIndex);
+		const extension = dotIndex === -1 ? "" : filename.slice(dotIndex);
+		let counter = 1;
+		while (await this.app.vault.adapter.exists(candidate)) {
+			candidate = `${folder}/${base}-${counter}${extension}`.replace(
+				/\/+/g,
+				"/"
+			);
+			counter += 1;
+		}
+		return candidate;
+	}
+
+	private combineMeetingDateTime(dateStr?: string, timeStr?: string): Date {
+		const datePart = dateStr || new Date().toISOString().slice(0, 10);
+		const timePart = timeStr || "00:00";
+		const isoString = `${datePart}T${timePart}`;
+		const result = new Date(isoString);
+		return Number.isNaN(result.getTime()) ? new Date() : result;
+	}
+
+	private slugifyTitle(value: string): string {
+		return value
+			.toLowerCase()
+			.normalize("NFKD")
+			.replace(/[^\w\s-]/g, "")
+			.trim()
+			.replace(/\s+/g, "-")
+			.replace(/-+/g, "-")
+			.slice(0, 60) || "meeting";
 	}
 
 	public onunload() {

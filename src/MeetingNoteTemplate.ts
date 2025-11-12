@@ -151,16 +151,6 @@ function buildTemplateBody(context: ResolvedMeetingContext): string {
 		"",
 		"## Notes",
 		"- Capture decisions, summaries, or paste AI output here.",
-		"",
-		"## Attachments",
-		context.periodicDaily || context.periodicWeekly
-			? `- Related daily note: ${
-					context.periodicDaily
-						? `[[${context.periodicDaily}]]`
-						: "—"
-			  }`
-			: "- ",
-		"- Drag & drop any supporting docs below.",
 	];
 	return sections.join("\n");
 }

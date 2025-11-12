@@ -1,4 +1,4 @@
-import { MarkdownView, Notice, WorkspaceLeaf, request } from "obsidian";
+import { App, MarkdownView, Notice, WorkspaceLeaf, request } from "obsidian";
 import type AutomaticAudioNotes from "../main";
 import { ImportWhisperModal } from "../ImportWhisperModal";
 import { CreateNewAudioNoteInNewFileModal } from "../CreateNewAudioNoteInNewFileModal";
@@ -9,6 +9,14 @@ import {
 	getStartAndEndFromBracketString,
 } from "../AudioNotes";
 import { ensureDashboardNote } from "../dashboard";
+import { NewMeetingModal } from "../modals/NewMeetingModal";
+import {
+	MeetingLabelPickerModal,
+	type MeetingLabelSelection,
+} from "../MeetingLabelPickerModal";
+import { applyMeetingLabelToFile } from "../meeting-label-manager";
+import { MeetingLabelCategoryModal } from "../settings/MeetingLabelCategoryModal";
+import { normalizeTagPrefix, slugifyTagSegment } from "../meeting-labels";
 
 export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 	const { app, settings } = plugin;
@@ -36,10 +44,66 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 	});
 
 	plugin.addCommand({
+		id: "assign-meeting-label",
+		name: "Assign meeting label…",
+		checkCallback: (checking: boolean) => {
+			const file = app.workspace.getActiveFile();
+			if (!file || file.extension !== "md") {
+				return false;
+			}
+			if (checking) {
+				return true;
+			}
+				const picker = new MeetingLabelPickerModal(
+					app,
+					plugin,
+					(selection) => {
+						void applyMeetingLabelToFile(app, file, selection.tag)
+							.then(() => {
+								const labelName =
+									selection.label.displayName ||
+									selection.tag;
+								new Notice(
+									labelName
+										? `Meeting labeled as ${labelName}.`
+										: "Meeting label updated."
+								);
+							})
+							.catch((error) => {
+								console.error(error);
+								new Notice(
+									"Could not update meeting label.",
+									6000
+								);
+							});
+					},
+					{
+						onCreateCategory: (query) =>
+							openCategoryModal(app, plugin, query),
+					}
+				);
+				picker.open();
+				return true;
+			},
+		});
+
+	plugin.addCommand({
 		id: "import-whisper-archive",
 		name: "Import Whisper transcription archive",
 		callback: () => {
 			new ImportWhisperModal(plugin).open();
+		},
+	});
+
+	plugin.addCommand({
+		id: "create-new-meeting-note",
+		name: "Create new meeting note",
+		callback: () => {
+			new NewMeetingModal(app, {
+				onSubmit: (details) => {
+					void plugin.createNewMeeting(details);
+				},
+			}).open();
 		},
 	});
 
@@ -353,4 +417,42 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 			}
 		},
 	});
+}
+
+function openCategoryModal(
+	app: App,
+	plugin: AutomaticAudioNotes,
+	query?: string
+) {
+	new MeetingLabelCategoryModal(
+		app,
+		plugin,
+		{
+			initialName: formatCategoryName(query),
+			initialPrefix: formatCategoryPrefix(query),
+		},
+		() => {}
+	).open();
+}
+
+function formatCategoryName(raw?: string): string {
+	const value = raw?.trim();
+	if (!value) return "";
+	return value
+		.split(/[\s/_-]+/)
+		.filter(Boolean)
+		.map(
+			(part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
+		)
+		.join(" ");
+}
+
+function formatCategoryPrefix(raw?: string): string {
+	if (!raw?.trim()) {
+		return "";
+	}
+	return (
+		normalizeTagPrefix(raw) ||
+		`${slugifyTagSegment(raw) || "category"}/`
+	);
 }

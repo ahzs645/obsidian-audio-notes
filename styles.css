@@ -140,6 +140,11 @@ If your plugin does not need CSS, delete this file.
 	cursor: pointer;
 }
 
+.aan-sidebar-calendar__cell:disabled {
+	cursor: default;
+	opacity: 0.4;
+}
+
 .aan-sidebar-calendar__cell.is-outside {
 	opacity: 0.5;
 }
@@ -153,7 +158,7 @@ If your plugin does not need CSS, delete this file.
 	color: var(--interactive-accent);
 }
 
-.aan-sidebar-calendar__cell span {
+.aan-sidebar-calendar__cell > span:first-child {
 	position: absolute;
 	left: 6px;
 	top: 6px;
@@ -165,20 +170,174 @@ If your plugin does not need CSS, delete this file.
 	border-radius: 50%;
 	background: var(--interactive-accent);
 	position: absolute;
-	bottom: 6px;
-	left: 50%;
-	transform: translateX(-50%);
+	bottom: 4px;
+	right: 6px;
+	left: auto;
+	top: auto;
+	transform: none;
 }
 
 .aan-sidebar-agenda {
 	background: var(--background-primary);
-	border-radius: 12px;
+	border-radius: 16px;
 	border: 1px solid var(--background-modifier-border);
-	padding: 8px;
+	padding: 16px;
 	flex: 1;
 	display: flex;
 	flex-direction: column;
+	gap: 16px;
 	min-height: 0;
+	box-shadow: var(--shadow-s);
+}
+
+.aan-sidebar-agenda header {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-label {
+	font-size: 1rem;
+	font-weight: 600;
+	margin: 0;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-count {
+	font-size: 0.85rem;
+	color: var(--text-muted);
+	margin: 0;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-row {
+	display: block;
+	margin: 0;
+	padding: 0;
+	border: none;
+	background: transparent;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-card {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 14px;
+	padding: 12px 14px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+	width: 100%;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-card-top {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 6px;
+	min-height: 24px;
+	flex-wrap: nowrap;
+	width: 100%;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-badge {
+	border-radius: 999px;
+	padding: 2px 10px;
+	font-size: 0.75rem;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	white-space: nowrap;
+	flex-shrink: 0;
+	margin-left: auto;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-time {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 0.8rem;
+	font-variant-numeric: tabular-nums;
+	color: var(--text-normal);
+	white-space: nowrap;
+	min-width: 0;
+	flex: 1 1 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-time-separator {
+	color: var(--text-muted);
+}
+
+.aan-sidebar-agenda .aan-calendar-day-time__end {
+	color: var(--text-muted);
+}
+
+
+.aan-sidebar-agenda .aan-calendar-day-content {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-title-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 999px;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-title-text {
+	font-size: 1.05rem;
+	font-weight: 600;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-meta {
+	margin-top: 4px;
+}
+
+.aan-sidebar-agenda .aan-calendar-day-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 4px;
+}
+
+.aan-sidebar-agenda .aan-calendar-action-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	border-radius: 12px;
+	border: 1px solid var(--background-modifier-border);
+	padding: 6px 12px;
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	cursor: pointer;
+	font-size: 0.85rem;
+	transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.aan-sidebar-agenda .aan-calendar-action-btn:hover {
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.15);
+	border-color: var(--interactive-accent);
+}
+
+.aan-sidebar-agenda .aan-calendar-action-btn svg {
+	width: 16px;
+	height: 16px;
 }
 
 .aan-transcript-sidebar-header {
@@ -197,11 +356,76 @@ If your plugin does not need CSS, delete this file.
 .aan-transcript-sidebar-actions {
 	display: flex;
 	gap: 8px;
+	align-items: flex-end;
+}
+
+.aan-transcript-label-field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 190px;
+}
+
+.aan-transcript-label-input {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 6px 10px;
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	cursor: pointer;
+	outline: none;
+}
+
+.aan-transcript-label-input.is-placeholder {
+	color: var(--text-muted);
+}
+
+.aan-transcript-label-input:focus {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.aan-transcript-label-input:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
 }
 
 .aan-transcript-empty-state {
 	color: var(--text-muted);
 	font-style: italic;
+}
+
+.aan-settings-label-list-title {
+	font-size: 0.8em;
+	color: var(--text-muted);
+	margin-right: 4px;
+}
+
+.aan-settings-label-empty {
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
+.aan-settings-label-tree-wrapper {
+	margin-top: 8px;
+	padding-left: 12px;
+	margin-left: -12px;
+	border-left: 1px solid var(--background-modifier-border);
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.aan-settings-label-tree-list {
+	list-style: none;
+	margin: 4px 0 0 0;
+	padding-left: 12px;
+}
+
+.aan-settings-label-tree-list > li {
+	margin: 2px 0;
+	font-size: 0.9em;
+	color: var(--text-muted);
 }
 
 .audio-notes-transcript-view .audio-note-transcript-wrapper {
@@ -234,6 +458,43 @@ If your plugin does not need CSS, delete this file.
 	min-height: 0;
 }
 
+.aan-transcription-card {
+	justify-content: center;
+}
+
+.aan-transcription-cta {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	align-items: flex-start;
+	text-align: left;
+}
+
+.aan-transcription-cta h3 {
+	margin: 0;
+	font-size: 1.1rem;
+}
+
+.aan-transcription-cta p {
+	margin: 0;
+	color: var(--text-muted);
+}
+
+.aan-transcription-cta-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.aan-transcription-status {
+	color: var(--text-normal);
+	font-style: italic;
+}
+
+.aan-transcription-cta-hint {
+	font-size: 0.9rem;
+}
+
 .aan-transcript-stack {
 	display: flex;
 	flex-direction: column;
@@ -248,6 +509,23 @@ If your plugin does not need CSS, delete this file.
 	border-radius: 12px;
 	padding: 16px;
 	flex-shrink: 0;
+}
+
+.aan-audio-upload-panel {
+	background: var(--background-primary);
+	border: 1px dashed var(--background-modifier-border);
+	border-radius: 12px;
+	padding: 20px;
+	text-align: center;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.aan-audio-upload-title {
+	margin: 0;
+	font-size: 0.95rem;
+	color: var(--text-muted);
 }
 
 .aan-attachments-header {
@@ -1465,8 +1743,7 @@ input.title-input {
 
 .aan-calendar-day-time {
 	font-weight: 600;
-	display: flex;
-	flex-direction: column;
+	display: block;
 	gap: var(--size-2-1);
 }
 
@@ -1502,7 +1779,7 @@ input.title-input {
 	gap: var(--size-2-1);
 }
 
-.aan-calendar-job-row {
+.aan-calendar-label-row {
 	display: inline-flex;
 	align-items: center;
 	gap: var(--size-2-1);
@@ -1510,10 +1787,15 @@ input.title-input {
 	color: var(--text-muted);
 }
 
-.aan-calendar-job-label {
+.aan-calendar-label-caption {
 	text-transform: uppercase;
 	font-size: var(--font-ui-tiny, 10px);
 	letter-spacing: 0.08em;
+}
+
+.aan-calendar-label-icon {
+	display: inline-flex;
+	align-items: center;
 }
 
 .aan-calendar-tag-row {
@@ -1535,14 +1817,39 @@ input.title-input {
 	color: var(--text-on-accent);
 }
 
-.aan-calendar-chip--job {
+.aan-calendar-chip--label {
 	background: var(--interactive-accent);
 	color: var(--text-on-accent);
 	font-weight: 600;
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-1);
 }
 
 .aan-calendar-chip--soft {
 	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+}
+
+.aan-label-picker-item {
+	display: flex;
+	flex-direction: column;
+	padding: 4px 0;
+}
+
+.aan-label-picker-title {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	font-weight: 600;
+}
+
+.aan-label-picker-icon {
+	font-size: 1rem;
+}
+
+.aan-label-picker-meta {
+	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
 }
 

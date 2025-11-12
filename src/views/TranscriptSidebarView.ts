@@ -1,25 +1,34 @@
-import {
-	ItemView,
-	Notice,
-	TFile,
-	TFolder,
-	WorkspaceLeaf,
-} from "obsidian";
+import { ItemView, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import TranscriptDisplay from "../transcript-view/TranscriptDisplay.svelte";
-import type {
-	TranscriptSegmentWithSpeaker,
-	SidebarAttachment,
-} from "../transcript-view/types";
+import type { TranscriptSegmentWithSpeaker } from "../transcript-view/types";
 import type AutomaticAudioNotes from "../main";
 import { AudioNote } from "../AudioNotes";
 import type { Transcript } from "../Transcript";
-import SidebarPlanner from "../sidebar/SidebarPlanner.svelte";
-import type { MeetingEvent } from "../meeting-events";
+import { AttachmentManager } from "./transcript-sidebar/AttachmentManager";
 import {
-	collectMeetingEvents,
-	localDateKey,
-} from "../meeting-events";
-import { generateRandomString } from "../utils";
+	MeetingFileService,
+	type MeetingDateParts,
+	type MeetingFolderResult,
+} from "./transcript-sidebar/MeetingFileService";
+import { DashboardController } from "./transcript-sidebar/DashboardController";
+import { TranscriptionService } from "./transcript-sidebar/TranscriptionService";
+import {
+	MeetingLabelPickerModal,
+	type MeetingLabelSelection,
+} from "../MeetingLabelPickerModal";
+import { MeetingLabelCategoryModal } from "../settings/MeetingLabelCategoryModal";
+import {
+	buildMeetingLabelInfo,
+	getEffectiveMeetingLabelCategories,
+	type MeetingLabelInfo,
+	normalizeTagPrefix,
+	slugifyTagSegment,
+} from "../meeting-labels";
+import {
+	applyMeetingLabelToFile,
+	getMeetingLabelFromFrontmatter,
+} from "../meeting-label-manager";
+import { collectTags } from "../meeting-events";
 
 export const AUDIO_NOTES_TRANSCRIPT_VIEW = "audio-notes-transcript-view";
 
@@ -27,43 +36,48 @@ interface TranscriptSidebarState {
 	file?: string;
 }
 
-type MeetingDateParts = {
-	year?: string;
-	month?: string;
-	day?: string;
-};
-
-interface MeetingFolderResult {
-	audioPath: string;
-	meetingFolder: string | null;
-	dateParts: MeetingDateParts;
-}
-
 export class TranscriptSidebarView extends ItemView {
 	private transcriptComponent: TranscriptDisplay | null = null;
-	private calendarComponent: SidebarPlanner | undefined;
 	private transcriptWrapper: HTMLDivElement | null = null;
 	private headerEl: HTMLDivElement | null = null;
+	private labelActionsEl: HTMLDivElement | null = null;
+	private labelInputEl: HTMLInputElement | null = null;
 	private meetingContainer: HTMLDivElement | null = null;
 	private dashboardContainer: HTMLDivElement | null = null;
 	private dashboardPlaceholder: HTMLParagraphElement | null = null;
 	private currentFilePath: string | null = null;
 	private currentTranscriptPath: string | null = null;
-	private calendarEvents: MeetingEvent[] = [];
-	private selectedDate: string = localDateKey(new Date());
-	private refreshTimeout: number | null = null;
+	private currentMeetingFile: TFile | null = null;
+	private currentMeetingDateParts: MeetingDateParts | null = null;
 	private mode: "meeting" | "dashboard" = "dashboard";
-	private dashboardListenersRegistered = false;
-	private currentAttachments: SidebarAttachment[] = [];
-	private attachmentFolderPath: string | null = null;
+	private isUploadingMeetingAudio = false;
+	private isTranscribingMeeting = false;
 	private currentAudioPath: string | null = null;
-	private currentAudioFileName: string | null = null;
+	private readonly meetingFiles: MeetingFileService;
+	private readonly attachments: AttachmentManager;
+	private readonly dashboardController: DashboardController;
+	private readonly transcriptionService: TranscriptionService;
+	private currentMeetingLabel: MeetingLabelInfo | undefined;
 
 	constructor(
 		leaf: WorkspaceLeaf,
 		private plugin: AutomaticAudioNotes
 	) {
 		super(leaf);
+		this.meetingFiles = new MeetingFileService(this.plugin);
+		this.attachments = new AttachmentManager(
+			this.plugin,
+			this.meetingFiles
+		);
+		this.transcriptionService = new TranscriptionService(
+			this.plugin,
+			this.meetingFiles
+		);
+		this.dashboardController = new DashboardController(
+			this.plugin,
+			this.registerEvent.bind(this),
+			this.openFile.bind(this)
+		);
 	}
 
 	private setMode(mode: "meeting" | "dashboard") {
@@ -96,7 +110,7 @@ export class TranscriptSidebarView extends ItemView {
 			this.transcriptComponent.$destroy();
 			this.transcriptComponent = null;
 		}
-		this.destroyCalendar();
+		this.dashboardController.destroy();
 		return Promise.resolve();
 	}
 
@@ -125,9 +139,11 @@ export class TranscriptSidebarView extends ItemView {
 	public async showMeetingFile(file: TFile): Promise<void> {
 		let activeFile = file;
 		this.setMode("meeting");
-		this.currentFilePath = activeFile.path;
-		this.currentAudioPath = null;
 		this.resetAttachments();
+		this.currentFilePath = activeFile.path;
+		this.currentMeetingFile = activeFile;
+		this.attachments.setMeetingFilePath(activeFile.path);
+		this.currentAudioPath = null;
 		if (!this.transcriptComponent) {
 			this.renderBase();
 		}
@@ -137,8 +153,9 @@ export class TranscriptSidebarView extends ItemView {
 
 		let cache =
 			this.plugin.app.metadataCache.getFileCache(activeFile);
-		const frontmatter = (cache?.frontmatter ??
+		let frontmatter = (cache?.frontmatter ??
 			{}) as Record<string, unknown>;
+		let noteFolderPath = activeFile.parent?.path ?? null;
 		const noteTitle =
 			(frontmatter["title"] as string | undefined) ||
 			activeFile.basename;
@@ -161,74 +178,127 @@ export class TranscriptSidebarView extends ItemView {
 				? transcriptPath
 				: null;
 
-
-		if (!audioPath) {
-			this.renderEmpty(
-				"Add a `media_uri` property to this note to load the recording."
-			);
-			return;
-		}
-
-		const meetingFolderResult = await this.ensureMeetingFolderForAudio(
-			activeFile,
-			audioPath,
-			audioFieldKey,
-			noteTitle
+		const hasAudio = Boolean(audioPath && audioPath.trim().length);
+		const categories = getEffectiveMeetingLabelCategories(
+			this.plugin.settings.meetingLabelCategories
 		);
-		if (meetingFolderResult) {
-			audioPath = meetingFolderResult.audioPath;
-			this.attachmentFolderPath = meetingFolderResult.meetingFolder ?? null;
-			if (meetingFolderResult.dateParts) {
-				const relocated = await this.ensureMeetingNoteFolder(
-					activeFile,
-					meetingFolderResult.dateParts
-				);
-				if (relocated) {
-					activeFile = relocated;
-					this.currentFilePath = relocated.path;
-					cache =
-						this.plugin.app.metadataCache.getFileCache(relocated);
+		const explicitLabel = getMeetingLabelFromFrontmatter(frontmatter);
+		let detectedLabel = explicitLabel;
+		if (!detectedLabel) {
+			const tags = collectTags(cache);
+			detectedLabel =
+				tags.find((tag) =>
+					categories.some((category) =>
+						tag.startsWith(category.tagPrefix)
+					)
+				) ?? undefined;
+		}
+		this.currentMeetingLabel = detectedLabel
+			? buildMeetingLabelInfo(detectedLabel, categories)
+			: undefined;
+		this.updateLabelHeader();
+		let meetingFolderResult: MeetingFolderResult | null = null;
+		let attachmentFolder = noteFolderPath;
+		if (hasAudio) {
+			meetingFolderResult = await this.meetingFiles.ensureMeetingFolderForAudio(
+				activeFile,
+				audioPath!,
+				audioFieldKey,
+				noteTitle
+			);
+			if (meetingFolderResult) {
+				audioPath = meetingFolderResult.audioPath;
+				if (meetingFolderResult.meetingFolder) {
+					attachmentFolder = meetingFolderResult.meetingFolder;
+				}
+				if (meetingFolderResult.dateParts) {
+					const relocated = await this.meetingFiles.ensureMeetingNoteFolder(
+						activeFile,
+						meetingFolderResult.dateParts
+					);
+					if (relocated) {
+						activeFile = relocated;
+						this.currentMeetingFile = relocated;
+						this.currentFilePath = relocated.path;
+						this.attachments.setMeetingFilePath(relocated.path);
+						cache =
+							this.plugin.app.metadataCache.getFileCache(
+								relocated
+							);
+						frontmatter = (cache?.frontmatter ??
+							{}) as Record<string, unknown>;
+						noteFolderPath = relocated.parent?.path ?? null;
+						if (!attachmentFolder) {
+							attachmentFolder = noteFolderPath;
+						}
+					}
 				}
 			}
+			this.currentAudioPath = audioPath!;
+			this.attachments.setAudioPath(this.currentAudioPath);
+			await this.attachments.setAttachmentFolder(attachmentFolder);
 		} else {
-			this.attachmentFolderPath = null;
+			this.currentAudioPath = null;
+			this.attachments.setAudioPath(null);
+			await this.attachments.setAttachmentFolder(noteFolderPath);
 		}
-		this.currentAudioPath = audioPath;
-		const resolvedAudioFile = audioPath
+
+		this.currentMeetingFile = activeFile;
+		this.currentMeetingDateParts =
+			meetingFolderResult?.dateParts ??
+			this.meetingFiles.extractDatePartsFromFrontmatter(
+				frontmatter
+			) ??
+			this.meetingFiles.deriveDatePartsFromNotePath(activeFile);
+
+		const resolvedAudioFile = hasAudio && audioPath
 			? this.plugin.app.vault.getAbstractFileByPath(audioPath)
 			: null;
-		this.currentAudioFileName =
-			resolvedAudioFile instanceof TFile ? resolvedAudioFile.name : null;
-		await this.refreshAttachmentsList();
-
-		const audioNote = new AudioNote(
-			noteTitle,
-			undefined,
-			audioPath,
-			0,
-			Infinity,
-			1,
-			this.currentTranscriptPath || undefined,
-			undefined,
-			undefined,
-			undefined,
-			false,
-			false
-		);
+		if (!(resolvedAudioFile instanceof TFile)) {
+			this.attachments.setAudioPath(null);
+		}
+		await this.syncAttachments();
 
 		const setTranscriptProps = (props: Record<string, unknown>) => {
 			this.transcriptComponent?.$set(props);
 		};
 
-		const [, playerEl] = this.plugin.createAudioPlayerElements(
-			audioNote,
-			setTranscriptProps
-		);
+		let playerEl: HTMLElement | undefined;
+		if (hasAudio && audioPath) {
+			const audioNote = new AudioNote(
+				noteTitle,
+				undefined,
+				audioPath,
+				0,
+				Infinity,
+				1,
+				this.currentTranscriptPath || undefined,
+				undefined,
+				undefined,
+				undefined,
+				false,
+				false
+			);
+
+			[, playerEl] = this.plugin.createAudioPlayerElements(
+				audioNote,
+				setTranscriptProps
+			);
+		}
 
 		setTranscriptProps({
 			title: "Live Transcript",
 			playerContainer: playerEl ?? null,
-			isTranscribing: false,
+			isTranscribing: this.isTranscribingMeeting,
+			needsAudioUpload: !hasAudio,
+			audioUploadInProgress: this.isUploadingMeetingAudio,
+			canTranscribeDeepgram: this.transcriptionService.canUseDeepgram(),
+			canTranscribeScriberr: this.transcriptionService.canUseScriberr(),
+			hasTranscript: Boolean(this.currentTranscriptPath),
+			onUploadMeetingAudio: (files: File[]) =>
+				this.handleMeetingAudioUpload(files),
+			onTranscribeMeeting: (provider: "deepgram" | "scriberr") =>
+				this.handleTranscriptionRequest(provider),
 		});
 
 		if (this.currentTranscriptPath) {
@@ -292,6 +362,7 @@ export class TranscriptSidebarView extends ItemView {
 			text: "Transcript",
 		});
 		titleEl.classList.add("aan-transcript-title");
+		this.buildHeaderActions();
 
 		this.transcriptWrapper = this.meetingContainer.createDiv({
 			cls: "audio-note-transcript-wrapper",
@@ -327,11 +398,39 @@ export class TranscriptSidebarView extends ItemView {
 		});
 	}
 
+	private buildHeaderActions() {
+		if (!this.headerEl) return;
+		this.labelActionsEl = this.headerEl.createDiv({
+			cls: "aan-transcript-sidebar-actions",
+		});
+		const field = this.labelActionsEl.createDiv({
+			cls: "aan-transcript-label-field",
+		});
+		this.labelInputEl = field.createEl("input", {
+			type: "text",
+			attr: { readonly: "readonly" },
+		}) as HTMLInputElement;
+		this.labelInputEl.classList.add("aan-transcript-label-input");
+		this.labelInputEl.placeholder = "Select or create label";
+		this.labelInputEl.title = "Click to assign a meeting label";
+		this.labelInputEl.addEventListener("click", (event) => {
+			event.preventDefault();
+			this.openLabelPicker();
+		});
+		this.labelInputEl.addEventListener("keydown", (event) => {
+			if (event.key === "Enter" || event.key === " ") {
+				event.preventDefault();
+				this.openLabelPicker();
+			}
+		});
+	}
+
 	private renderHeader(file: TFile) {
 		if (!this.headerEl) return;
 		this.headerEl
 			.querySelector(".aan-transcript-title")
 			?.setText(file.basename);
+		this.updateLabelHeader();
 	}
 
 	private renderEmpty(message: string) {
@@ -343,424 +442,172 @@ export class TranscriptSidebarView extends ItemView {
 		});
 	}
 
+	private updateLabelHeader() {
+		if (!this.labelInputEl) {
+			return;
+		}
+		const canEdit =
+			this.mode === "meeting" && Boolean(this.currentMeetingFile);
+		this.labelInputEl.toggleAttribute("disabled", !canEdit);
+		if (!canEdit) {
+			this.labelInputEl.value = "";
+			this.labelInputEl.classList.add("is-placeholder");
+			this.labelInputEl.placeholder = "Open a meeting note to label it";
+			return;
+		}
+		this.labelInputEl.placeholder = "Select or create label";
+		if (this.currentMeetingLabel) {
+			this.labelInputEl.value =
+				this.currentMeetingLabel.displayName || this.currentMeetingLabel.tag;
+			this.labelInputEl.classList.remove("is-placeholder");
+		} else {
+			this.labelInputEl.value = "";
+			this.labelInputEl.classList.add("is-placeholder");
+		}
+	}
+
+	private openLabelPicker(initialQuery = "") {
+		if (this.mode !== "meeting" || !this.currentMeetingFile) {
+			new Notice("Open a meeting note to assign a label.", 4000);
+			return;
+		}
+		const picker = new MeetingLabelPickerModal(
+			this.app,
+			this.plugin,
+			(selection) => {
+				void this.applyMeetingLabelSelection(selection);
+			},
+			{
+				onCreateCategory: (query) =>
+					this.openCategoryModal(query, true),
+			}
+		);
+		if (initialQuery) {
+			picker.setInitialQuery(initialQuery);
+		}
+		picker.open();
+	}
+
+	private async applyMeetingLabelSelection(
+		selection: MeetingLabelSelection
+	) {
+		if (!this.currentMeetingFile) {
+			return;
+		}
+		try {
+			await applyMeetingLabelToFile(
+				this.app,
+				this.currentMeetingFile,
+				selection.tag
+			);
+			this.currentMeetingLabel = selection.label;
+			this.updateLabelHeader();
+			new Notice(
+				selection.label.displayName
+					? `Meeting labeled as ${selection.label.displayName}.`
+					: "Meeting label updated."
+			);
+		} catch (error) {
+			console.error(error);
+			new Notice("Could not update meeting label.", 6000);
+		}
+	}
+
+	private openCategoryModal(initialQuery?: string, reopenAfter = false) {
+		const initialName = this.formatCategoryName(initialQuery);
+		const initialPrefix = this.formatCategoryPrefix(initialQuery);
+		new MeetingLabelCategoryModal(
+			this.app,
+			this.plugin,
+			{
+				initialName,
+				initialPrefix,
+			},
+			() => {
+				this.updateLabelHeader();
+				if (reopenAfter) {
+					setTimeout(
+						() => this.openLabelPicker(initialQuery ?? ""),
+						100
+					);
+				}
+			}
+		).open();
+	}
+
+	private formatCategoryName(raw?: string): string {
+		const value = raw?.trim();
+		if (!value) return "";
+		return value
+			.split(/[\s/_-]+/)
+			.filter(Boolean)
+			.map(
+				(part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
+			)
+			.join(" ");
+	}
+
+	private formatCategoryPrefix(raw?: string): string {
+		if (!raw?.trim()) {
+			return "";
+		}
+		return (
+			normalizeTagPrefix(raw) ||
+			`${slugifyTagSegment(raw) || "category"}/`
+		);
+	}
+
 	public async showDashboard(): Promise<void> {
 		this.currentFilePath = null;
 		this.currentTranscriptPath = null;
 		this.currentAudioPath = null;
+		this.currentMeetingLabel = undefined;
+		this.updateLabelHeader();
 		this.resetAttachments();
 		this.setMode("dashboard");
 		this.meetingContainer?.addClass("is-hidden");
 		this.dashboardContainer?.removeClass("is-hidden");
-		this.ensureCalendar();
-		this.scheduleRefresh();
+		this.dashboardController.ensure(this.dashboardContainer);
+		this.dashboardController.scheduleRefresh();
 	}
-
-	private ensureCalendar() {
-		if (this.calendarComponent || !this.dashboardContainer) {
-			return;
-		}
-	this.dashboardContainer.empty();
-	this.calendarComponent = new SidebarPlanner({
-		target: this.dashboardContainer,
-		props: {
-			events: this.calendarEvents,
-			selectedDate: this.selectedDate,
-			onSelectDate: (date: string) => {
-				this.selectedDate = date;
-				this.calendarComponent?.$set({
-					selectedDate: this.selectedDate,
-				});
-			},
-			onOpenNote: (path: string, newLeaf: boolean) =>
-				this.openFile(path, newLeaf),
-			onRefresh: () => this.refreshEvents(),
-		},
-	});
-		this.registerDashboardListeners();
-		this.refreshEvents();
-	}
-
-	private destroyCalendar() {
-		if (this.refreshTimeout) {
-			window.clearTimeout(this.refreshTimeout);
-			this.refreshTimeout = null;
-		}
-		this.calendarComponent?.$destroy();
-		this.calendarComponent = undefined;
-		this.dashboardListenersRegistered = false;
-	}
-
-	private registerDashboardListeners() {
-		if (this.dashboardListenersRegistered) {
-			return;
-		}
-		this.dashboardListenersRegistered = true;
-		const schedule = () => this.scheduleRefresh();
-		this.registerEvent(this.plugin.app.metadataCache.on("changed", schedule));
-		this.registerEvent(this.plugin.app.vault.on("create", schedule));
-		this.registerEvent(this.plugin.app.vault.on("delete", schedule));
-		this.registerEvent(this.plugin.app.vault.on("rename", schedule));
-		// @ts-ignore custom workspace signal
-		this.registerEvent(
-			(this.plugin.app.workspace as any).on(
-				"audio-notes:settings-updated",
-				schedule
-			)
-		);
-	}
-
-	private scheduleRefresh() {
-		if (this.refreshTimeout) {
-			window.clearTimeout(this.refreshTimeout);
-		}
-		this.refreshTimeout = window.setTimeout(() => {
-			this.refreshTimeout = null;
-			this.refreshEvents();
-		}, 200);
-	}
-
-	private refreshEvents() {
-		this.calendarEvents = collectMeetingEvents(
-			this.plugin.app,
-			this.plugin.settings.calendarTagColors
-		);
-		if (
-			this.calendarEvents.length &&
-			!this.calendarEvents.some(
-				(event) => event.displayDate === this.selectedDate
-			)
-		) {
-			this.selectedDate = this.calendarEvents[0].displayDate;
-		}
-	this.calendarComponent?.$set({
-		events: this.calendarEvents,
-		selectedDate: this.selectedDate,
-	});
-}
-
 
 	private resetAttachments() {
-		this.currentAttachments = [];
-		this.attachmentFolderPath = null;
+		this.attachments.reset();
+		this.attachments.setMeetingFilePath(null);
 		this.transcriptComponent?.$set({
 			attachments: [],
 			attachmentsEnabled: false,
 		});
-		this.currentAudioFileName = null;
+		this.currentMeetingFile = null;
+		this.currentMeetingDateParts = null;
 	}
 
-	private async ensureMeetingFolderForAudio(
-		meetingFile: TFile,
-		audioPath: string,
-		audioFieldKey: string | null,
-		meetingTitle: string
-	): Promise<MeetingFolderResult | null> {
-		if (!audioPath || audioPath.includes("://")) {
-			return { audioPath, meetingFolder: null, dateParts: {} };
-		}
-		const audioFile =
-			this.plugin.app.vault.getAbstractFileByPath(audioPath);
-		if (!(audioFile instanceof TFile)) {
-			return { audioPath, meetingFolder: null, dateParts: {} };
-		}
-
-		const dateParts = this.extractDateParts(
-			audioFile.basename,
-			audioFile
-		);
-		const parentFolder = audioFile.parent;
-		const currentParentPath = parentFolder?.path ?? "";
-		const baseParentPath = this.getMeetingBasePath(audioFile);
-
-		if (baseParentPath) {
-			const baseReady = await this.ensureFolder(baseParentPath);
-			if (!baseReady) {
-				return {
-					audioPath: audioFile.path,
-					meetingFolder: currentParentPath || null,
-					dateParts,
-				};
-			}
-		}
-
-		const parentSegments = currentParentPath
-			? currentParentPath.split("/").filter(Boolean)
-			: [];
-		const baseSegments = baseParentPath
-			? baseParentPath.split("/").filter(Boolean)
-			: [];
-		const hashedFolderRegex = /^[a-z0-9]{4}-/;
-		const basePrefix = baseParentPath ? `${baseParentPath}/` : "";
-		const hasHashedFolder =
-			parentFolder && hashedFolderRegex.test(parentFolder.name);
-		const isDirectChildOfBase =
-			Boolean(baseParentPath) &&
-			currentParentPath.startsWith(basePrefix) &&
-			parentSegments.length === baseSegments.length + 1 &&
-			hasHashedFolder;
-		const isStandaloneHashedParent = !baseParentPath && hasHashedFolder;
-
-		let meetingFolderPath: string;
-		if ((isDirectChildOfBase || isStandaloneHashedParent) && currentParentPath) {
-			meetingFolderPath = currentParentPath;
-		} else {
-			meetingFolderPath = this.buildMeetingFolderPath(
-				baseParentPath,
-				meetingTitle,
-				audioFile.basename
-			);
-			const folderReady = await this.ensureFolder(meetingFolderPath);
-			if (!folderReady) {
-				return {
-					audioPath: audioFile.path,
-					meetingFolder: currentParentPath || null,
-					dateParts,
-				};
-			}
-		}
-
-		const originalParentPath = currentParentPath;
-		let targetPath = `${meetingFolderPath}/${audioFile.name}`;
-		if (audioFile.path !== targetPath) {
-			await this.plugin.app.fileManager.renameFile(
-				audioFile,
-				targetPath
-			);
-		}
-
-		if (audioFieldKey && targetPath !== audioPath) {
-			await this.plugin.app.fileManager.processFrontMatter(
-				meetingFile,
-				(fm) => {
-					fm[audioFieldKey] = targetPath;
-				}
-			);
-		}
-
-		const updatedAudioFile =
-			this.plugin.app.vault.getAbstractFileByPath(targetPath);
-		if (!(updatedAudioFile instanceof TFile)) {
-			targetPath = audioFile.path;
-		}
-
-		if (meetingFolderPath !== originalParentPath) {
-			await this.cleanupLegacyAudioAncestors(originalParentPath);
-		}
-
-			return {
-				audioPath: targetPath,
-				meetingFolder: meetingFolderPath,
-				dateParts,
-			};
-	}
-
-	private async ensureFolder(path: string): Promise<boolean> {
-		if (!path) return false;
-		const normalizedPath = path.replace(/^\/+|\/+$/g, "");
-		if (!normalizedPath.length) return false;
-		const existingFile =
-			this.plugin.app.vault.getAbstractFileByPath(normalizedPath);
-		if (existingFile instanceof TFolder) {
-			return true;
-		}
-		if (existingFile instanceof TFile) {
-			console.warn(
-				`Audio Notes: Folder path ${normalizedPath} already exists as a file`
-			);
-			return false;
-		}
-		const parentPath = normalizedPath
-			.split("/")
-			.slice(0, -1)
-			.join("/");
-		if (parentPath && !(await this.ensureFolder(parentPath))) {
-			return false;
-		}
-		try {
-			await this.plugin.app.vault.createFolder(normalizedPath);
-			return true;
-		} catch (error) {
-			const retry =
-				this.plugin.app.vault.getAbstractFileByPath(normalizedPath);
-			if (retry instanceof TFolder) {
-				return true;
-			}
-			console.error(
-				"Audio Notes: Failed to create folder",
-				error
-			);
-			return false;
-		}
-	}
-
-	private async refreshAttachmentsList(): Promise<void> {
-		let attachments: SidebarAttachment[] = [];
-		if (this.attachmentFolderPath) {
-			const folder = this.plugin.app.vault.getAbstractFileByPath(
-				this.attachmentFolderPath
-			);
-			if (folder instanceof TFolder) {
-				attachments = folder.children
-					.filter((child): child is TFile => child instanceof TFile)
-					.filter((file) => file.path !== this.currentAudioPath)
-					.map((file) => ({
-						path: file.path,
-						name: file.name,
-						extension: file.extension ?? "",
-						size: this.formatFileSize(file.stat?.size ?? 0),
-					}))
-					.sort((a, b) => a.name.localeCompare(b.name));
-			}
-		}
-		this.currentAttachments = attachments;
+	private async syncAttachments(): Promise<void> {
+		const attachments = await this.attachments.refresh();
 		this.transcriptComponent?.$set({
 			attachments,
-			attachmentsEnabled: Boolean(this.attachmentFolderPath),
+			attachmentsEnabled: this.attachments.hasAttachmentSupport(),
 		});
 	}
-
-	private formatFileSize(bytes: number): string {
-		if (!bytes || bytes <= 0) {
-			return "0 B";
-		}
-		const units = ["B", "KB", "MB", "GB", "TB"];
-		const index = Math.min(
-			Math.floor(Math.log(bytes) / Math.log(1024)),
-			units.length - 1
-		);
-		const value = bytes / Math.pow(1024, index);
-		return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${
-			units[index]
-		}`;
-	}
-
 	private async handleAttachmentUpload(files: File[]): Promise<void> {
-		if (!files?.length) return;
-		const folderPath = await this.ensureAttachmentFolderReady();
-		if (!folderPath) {
-			new Notice(
-				"Unable to determine attachment folder for this meeting.",
-				4000
-			);
-			return;
-		}
-		for (const file of files) {
-			try {
-				const buffer = await file.arrayBuffer();
-				const { path, finalName, renamed } =
-					await this.getAvailableAttachmentPath(file.name);
-				await this.plugin.app.vault.createBinary(path, buffer);
-				if (renamed) {
-					new Notice(
-						`${file.name} exists. Saved as ${finalName}.`,
-						4000
-					);
-				}
-			} catch (error) {
-				console.error(
-					"Audio Notes: Failed to save attachment",
-					error
-				);
-				new Notice(
-					`Failed to save ${file.name}. See console for details.`,
-					5000
-				);
-			}
-		}
-		await this.refreshAttachmentsList();
-	}
-
-	private async ensureAttachmentFolderReady(): Promise<string | null> {
-		if (this.attachmentFolderPath) {
-			const ready = await this.ensureFolder(this.attachmentFolderPath);
-			if (ready) {
-				return this.attachmentFolderPath;
-			}
-			this.attachmentFolderPath = null;
-		}
-		if (!this.currentAudioPath) {
-			return null;
-		}
-		const audioFile =
-			this.plugin.app.vault.getAbstractFileByPath(this.currentAudioPath);
-		if (audioFile instanceof TFile && audioFile.parent) {
-			this.attachmentFolderPath = audioFile.parent.path;
-			return this.attachmentFolderPath;
-		}
-		return null;
-	}
-
-	private async getAvailableAttachmentPath(
-		fileName: string
-	): Promise<{
-		path: string;
-		finalName: string;
-		renamed: boolean;
-	}> {
-		const folderPath = await this.ensureAttachmentFolderReady();
-		if (!folderPath) {
-			throw new Error("Attachment folder is not ready");
-		}
-		const trimmedName = fileName?.trim() || "attachment";
-		const dotIndex = trimmedName.lastIndexOf(".");
-		const base =
-			dotIndex === -1
-				? trimmedName
-				: trimmedName.slice(0, dotIndex);
-		const ext = dotIndex === -1 ? "" : trimmedName.slice(dotIndex);
-		const safeBase = base || "attachment";
-		let finalName = trimmedName;
-		let counter = 1;
-		while (
-			this.plugin.app.vault.getAbstractFileByPath(
-				`${folderPath}/${finalName}`
-			)
-		) {
-			finalName = `${safeBase}-${counter}${ext}`;
-			counter++;
-		}
-		return {
-			path: `${folderPath}/${finalName}`,
-			finalName,
-			renamed: finalName !== trimmedName,
-		};
+		await this.attachments.upload(files);
+		await this.syncAttachments();
 	}
 
 	private async openAttachment(path: string): Promise<void> {
-		const file = this.plugin.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) {
-			new Notice("Attachment no longer exists.", 3000);
-			await this.refreshAttachmentsList();
-			return;
-		}
-		try {
-			let leaf = this.plugin.app.workspace.getLeaf(false);
-			if (!leaf) {
-				leaf = this.plugin.app.workspace.getLeaf(true);
-			}
-			await leaf.openFile(file);
-		} catch (error) {
-			console.error("Audio Notes: Failed to open attachment", error);
-			new Notice("Unable to open attachment.", 4000);
+		const opened = await this.attachments.open(path);
+		if (!opened) {
+			await this.syncAttachments();
 		}
 	}
 
 	private async deleteAttachment(path: string): Promise<void> {
-		const file = this.plugin.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) {
-			await this.refreshAttachmentsList();
+		const changed = await this.attachments.delete(path);
+		if (!changed) {
+			await this.syncAttachments();
 			return;
 		}
-		try {
-			await this.plugin.app.vault.delete(file);
-			await this.refreshAttachmentsList();
-		} catch (error) {
-			console.error(
-				"Audio Notes: Failed to delete attachment",
-				error
-			);
-			new Notice("Unable to delete attachment.", 4000);
-		}
+		await this.syncAttachments();
 	}
 
 	private async openFile(path: string, newLeaf: boolean) {
@@ -772,160 +619,115 @@ export class TranscriptSidebarView extends ItemView {
 		await leaf.openFile(file);
 	}
 
-	private getMeetingBasePath(audioFile: TFile): string {
-		const segments = audioFile.path.split("/").filter(Boolean);
-		const audioIndex = segments.indexOf("audio");
-		const dateParts = this.extractDateParts(
-			audioFile.basename,
-			audioFile
-		);
-		let baseSegments: string[] =
-			audioIndex === -1
-				? audioFile.parent?.path?.split("/").filter(Boolean) ?? []
-				: segments.slice(0, audioIndex);
-		if (audioIndex === -1 && baseSegments.length) {
-			const last = baseSegments[baseSegments.length - 1];
-			if (/^[a-z0-9]{4}-/.test(last)) {
-				baseSegments = baseSegments.slice(0, -1);
-			}
+	private async handleMeetingAudioUpload(files: File[]): Promise<void> {
+		const meetingFile = this.currentMeetingFile;
+		if (!meetingFile || !files?.length) {
+			new Notice("Open a meeting note before uploading audio.", 4000);
+			return;
 		}
-
-		const pushSegment = (value?: string) => {
-			if (!value) return;
-			if (baseSegments[baseSegments.length - 1] === value) return;
-			if (baseSegments.includes(value)) return;
-			baseSegments.push(value);
-		};
-
-		if (audioIndex !== -1) {
-			const yearSegment = segments[audioIndex + 1] ?? dateParts.year;
-			const monthSegment = segments[audioIndex + 2] ?? dateParts.month;
-			pushSegment(yearSegment);
-			pushSegment(monthSegment);
-		} else {
-			pushSegment(dateParts.year);
-			pushSegment(dateParts.month);
-		}
-
-		pushSegment(dateParts.day);
-
-		return baseSegments.join("/");
-	}
-
-	private buildMeetingFolderPath(
-		baseParentPath: string,
-		meetingTitle: string,
-		fallback: string
-	): string {
-		const slugBase = meetingTitle?.trim() || fallback || "meeting";
-		const slug = slugBase
-			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, "-")
-			.replace(/^-+|-+$/g, "")
-			.slice(0, 20) || "meeting";
-		let folderName = "";
-		let fullPath = "";
-		do {
-			const hash = generateRandomString(4).toLowerCase();
-			folderName = `${hash}-${slug}`;
-			fullPath = baseParentPath
-				? `${baseParentPath}/${folderName}`
-				: folderName;
-		} while (
-			this.plugin.app.vault.getAbstractFileByPath(fullPath) instanceof
-			TFolder
-		);
-		return fullPath;
-	}
-
-	private extractDateParts(value: string, file?: TFile): {
-		year?: string;
-		month?: string;
-		day?: string;
-	} {
-		const match = value.match(/(\d{4})-(\d{2})-(\d{2})/);
-		if (match) {
-			return {
-				year: match[1],
-				month: match[2],
-				day: match[3],
-			};
-		}
-		const timestamp =
-			file?.stat?.ctime ??
-			file?.stat?.mtime ??
-			Date.now();
-		const date = new Date(timestamp);
-		if (isNaN(date.getTime())) {
-			return {};
-		}
-		const year = date.getFullYear().toString();
-		const month = (date.getMonth() + 1).toString().padStart(2, "0");
-		const day = date.getDate().toString().padStart(2, "0");
-		return { year, month, day };
-	}
-
-	private async cleanupLegacyAudioAncestors(path: string | null) {
-		let current = path;
-		while (current) {
-			const folder = this.plugin.app.vault.getAbstractFileByPath(current);
-			if (!(folder instanceof TFolder)) break;
-			if (folder.children.length > 0) break;
-			const segments = current.split("/").filter(Boolean);
-			if (!segments.length) break;
-			const removedSegment = segments[segments.length - 1];
-			await this.plugin.app.vault.delete(folder);
-			segments.pop();
-			if (!segments.length) break;
-			if (removedSegment === "audio") {
-				break;
-			}
-			current = segments.join("/");
+		const upload = files[0];
+		if (!upload) return;
+		this.isUploadingMeetingAudio = true;
+		this.transcriptComponent?.$set({
+			audioUploadInProgress: true,
+		});
+		try {
+			const cache =
+				this.plugin.app.metadataCache.getFileCache(meetingFile);
+			const dateParts =
+				this.currentMeetingDateParts ??
+				this.meetingFiles.extractDatePartsFromFrontmatter(
+					(cache?.frontmatter ?? {}) as Record<string, unknown>
+				) ??
+				this.meetingFiles.deriveDatePartsFromNotePath(
+					meetingFile
+				) ?? {
+					year: new Date().getFullYear().toString(),
+					month: (new Date().getMonth() + 1)
+						.toString()
+						.padStart(2, "0"),
+					day: new Date()
+						.getDate()
+						.toString()
+						.padStart(2, "0"),
+				};
+			this.currentMeetingDateParts = dateParts;
+			const meetingTitle =
+				(cache?.frontmatter?.["title"] as string) ??
+				meetingFile.basename;
+			const audioInfo = await this.meetingFiles.saveUploadedAudioFile(
+				upload,
+				dateParts,
+				meetingTitle
+			);
+			await this.plugin.app.fileManager.processFrontMatter(
+				meetingFile,
+				(fm) => {
+					fm["media_uri"] = audioInfo.audioPath;
+				}
+			);
+			new Notice("Meeting audio uploaded.", 4000);
+			this.currentAudioPath = audioInfo.audioPath;
+			await this.attachments.setAttachmentFolder(
+				audioInfo.meetingFolder
+			);
+			this.attachments.setAudioPath(audioInfo.audioPath);
+			await this.showMeetingFile(meetingFile);
+		} catch (error) {
+			console.error("Audio Notes: Meeting audio upload failed.", error);
+			new Notice("Could not upload meeting audio.", 6000);
+		} finally {
+			this.isUploadingMeetingAudio = false;
+			this.transcriptComponent?.$set({
+				audioUploadInProgress: false,
+			});
 		}
 	}
 
-	private async ensureMeetingNoteFolder(
-		meetingFile: TFile,
-		dateParts: MeetingDateParts
-	): Promise<TFile | null> {
-		const { year, month, day } = dateParts;
-		if (!year || !month || !day) {
-			return null;
+	private async handleTranscriptionRequest(
+		provider: "deepgram" | "scriberr"
+	): Promise<void> {
+		if (!this.currentMeetingFile || !this.currentAudioPath) {
+			new Notice("Upload meeting audio before transcribing.", 4000);
+			return;
 		}
-		const parentPath = meetingFile.parent?.path ?? "";
-		if (!parentPath) {
-			return null;
+		if (
+			provider === "deepgram" &&
+			!this.transcriptionService.canUseDeepgram()
+		) {
+			new Notice("Deepgram is not configured in settings.", 4000);
+			return;
 		}
-		const segments = parentPath.split("/").filter(Boolean);
-		if (!segments.length) {
-			return null;
+		if (
+			provider === "scriberr" &&
+			!this.transcriptionService.canUseScriberr()
+		) {
+			new Notice("Scriberr is not configured in settings.", 4000);
+			return;
 		}
-
-		const lastThreeAreDate =
-			segments.length >= 3 &&
-			/^\d{4}$/.test(segments[segments.length - 3]) &&
-			/^\d{2}$/.test(segments[segments.length - 2]) &&
-			/^\d{2}$/.test(segments[segments.length - 1]);
-		const baseSegments = lastThreeAreDate
-			? segments.slice(0, -3)
-			: segments;
-		if (!baseSegments.length) {
-			return null;
+		this.isTranscribingMeeting = true;
+		this.transcriptComponent?.$set({ isTranscribing: true });
+		try {
+			const transcriptPath =
+				await this.transcriptionService.requestTranscription(
+					provider,
+					this.currentAudioPath
+				);
+			await this.plugin.app.fileManager.processFrontMatter(
+				this.currentMeetingFile,
+				(fm) => {
+					fm["transcript_uri"] = transcriptPath;
+				}
+			);
+			this.currentTranscriptPath = transcriptPath;
+			await this.loadTranscript(transcriptPath);
+			new Notice("Transcript saved.", 4000);
+		} catch (error) {
+			console.error("Audio Notes: Could not transcribe audio.", error);
+			new Notice("Could not transcribe audio.", 6000);
+		} finally {
+			this.isTranscribingMeeting = false;
+			this.transcriptComponent?.$set({ isTranscribing: false });
 		}
-		const basePath = baseSegments.join("/");
-		const desiredParent = `${basePath}/${year}/${month}/${day}`;
-		if (parentPath === desiredParent) {
-			return null;
-		}
-		const ready = await this.ensureFolder(desiredParent);
-		if (!ready) {
-			return null;
-		}
-		const targetPath = `${desiredParent}/${meetingFile.name}`;
-		await this.plugin.app.fileManager.renameFile(meetingFile, targetPath);
-		const updatedFile = this.plugin.app.vault.getAbstractFileByPath(
-			targetPath
-		);
-		return updatedFile instanceof TFile ? updatedFile : meetingFile;
-	}
+}
 }

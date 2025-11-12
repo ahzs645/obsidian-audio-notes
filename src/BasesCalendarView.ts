@@ -74,7 +74,8 @@ export class BasesCalendarView extends BasesView {
 	private renderCalendar() {
 		const events = collectMeetingEvents(
 			this.plugin.app,
-			this.plugin.settings.calendarTagColors
+			this.plugin.settings.calendarTagColors,
+			this.plugin.settings.meetingLabelCategories
 		);
 		if (
 			events.length &&

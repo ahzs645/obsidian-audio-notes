@@ -1,0 +1,111 @@
+import type { EventRef } from "obsidian";
+import SidebarPlanner from "../../sidebar/SidebarPlanner.svelte";
+import type { MeetingEvent } from "../../meeting-events";
+import {
+	collectMeetingEvents,
+	localDateKey,
+} from "../../meeting-events";
+import type AutomaticAudioNotes from "../../main";
+
+export class DashboardController {
+	private component: SidebarPlanner | undefined;
+	private refreshTimeout: number | null = null;
+	private listenersRegistered = false;
+	private events: MeetingEvent[] = [];
+	private selectedDate: string = localDateKey(new Date());
+
+	constructor(
+		private readonly plugin: AutomaticAudioNotes,
+		private readonly registerEvent: (ref: EventRef) => void,
+		private readonly openFile: (
+			path: string,
+			newLeaf: boolean
+		) => Promise<void>
+	) {}
+
+	ensure(container: HTMLDivElement | null) {
+		if (this.component || !container) {
+			return;
+		}
+		container.empty();
+		this.component = new SidebarPlanner({
+			target: container,
+			props: {
+				events: this.events,
+				selectedDate: this.selectedDate,
+				onSelectDate: (date: string) => this.handleSelectDate(date),
+				onOpenNote: (path: string, newLeaf: boolean) =>
+					this.openFile(path, newLeaf),
+				onRefresh: () => this.refreshEvents(),
+			},
+		});
+		this.registerListeners();
+		this.refreshEvents();
+	}
+
+	destroy() {
+		if (this.refreshTimeout) {
+			window.clearTimeout(this.refreshTimeout);
+			this.refreshTimeout = null;
+		}
+		this.component?.$destroy();
+		this.component = undefined;
+		this.listenersRegistered = false;
+	}
+
+	scheduleRefresh() {
+		if (this.refreshTimeout) {
+			window.clearTimeout(this.refreshTimeout);
+		}
+		this.refreshTimeout = window.setTimeout(() => {
+			this.refreshTimeout = null;
+			this.refreshEvents();
+		}, 200);
+	}
+
+	private registerListeners() {
+		if (this.listenersRegistered) {
+			return;
+		}
+		this.listenersRegistered = true;
+		const schedule = () => this.scheduleRefresh();
+		this.registerEvent(this.plugin.app.metadataCache.on("changed", schedule));
+		this.registerEvent(this.plugin.app.vault.on("create", schedule));
+		this.registerEvent(this.plugin.app.vault.on("delete", schedule));
+		this.registerEvent(this.plugin.app.vault.on("rename", schedule));
+		// @ts-ignore custom workspace signal
+		this.registerEvent(
+			(this.plugin.app.workspace as any).on(
+				"audio-notes:settings-updated",
+				schedule
+			)
+		);
+	}
+
+	private handleSelectDate(date: string) {
+		this.selectedDate = date;
+		this.component?.$set({
+			selectedDate: this.selectedDate,
+		});
+	}
+
+	private refreshEvents() {
+		this.events = collectMeetingEvents(
+			this.plugin.app,
+			this.plugin.settings.calendarTagColors,
+			this.plugin.settings.meetingLabelCategories
+		);
+		if (
+			this.events.length &&
+			!this.events.some(
+				(event) => event.displayDate === this.selectedDate
+			)
+		) {
+			this.selectedDate = this.events[0].displayDate;
+		}
+		this.component?.$set({
+			events: this.events,
+			selectedDate: this.selectedDate,
+		});
+	}
+}

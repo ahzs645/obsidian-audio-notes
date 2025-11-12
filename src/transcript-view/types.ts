@@ -32,3 +32,17 @@ export interface SidebarAttachment {
 	extension: string;
 	size: string;
 }
+
+export interface GroupedTranscript {
+	id: string;
+	speakerKey: string;
+	label: string;
+	startTime: number;
+	endTime: number;
+	segments: { segment: TranscriptSegmentWithSpeaker; index: number }[];
+}
+
+export interface TranscriptHighlightPart {
+	text: string;
+	highlight: boolean;
+}

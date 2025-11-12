@@ -39,18 +39,6 @@ let currentView: "dayGridMonth" | "timeGridWeek" | "timeGridDay" = "dayGridMonth
 			day: "numeric",
 		});
 
-	const jobLabel = (jobTag?: string) => {
-		if (!jobTag) return "";
-		const parts = jobTag.split("/");
-		const raw = parts[parts.length - 1] ?? jobTag;
-		return raw
-			.split(/[-_]/)
-			.map((segment) =>
-				segment.length ? segment[0].toUpperCase() + segment.slice(1) : segment
-			)
-			.join(" ");
-	};
-
 	const toCalendarEvents = () =>
 		events.map((event) => ({
 			id: event.path,
@@ -251,14 +239,24 @@ let currentView: "dayGridMonth" | "timeGridWeek" | "timeGridDay" = "dayGridMonth
 								{event.title}
 							</div>
 							<div class="aan-calendar-day-meta">
-								{#if event.jobTag}
-									<div class="aan-calendar-job-row">
-										<span class="aan-calendar-job-label">Job</span>
+								{#if event.label}
+									<div class="aan-calendar-label-row">
+										<span class="aan-calendar-label-caption">
+											{event.label.categoryName ?? "Label"}
+										</span>
 										<span
-											class="aan-calendar-chip aan-calendar-chip--job"
-											title={event.jobTag}
+											class="aan-calendar-chip aan-calendar-chip--label"
+											title={event.label.tag}
 										>
-											{jobLabel(event.jobTag)}
+											{#if event.label.icon}
+												<span
+													class="aan-calendar-label-icon"
+													aria-hidden="true"
+												>
+													{event.label.icon}
+												</span>
+											{/if}
+											{event.label.displayName}
 										</span>
 									</div>
 								{/if}

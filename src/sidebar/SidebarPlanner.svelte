@@ -93,7 +93,9 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 			}
 			weeks.push({ label: `week-${w}`, days });
 		}
-		return weeks;
+		return weeks.filter((week) =>
+			week.days.some((day) => day.isCurrentMonth)
+		);
 	}
 
 	function selectDay(iso: string) {
@@ -123,6 +125,21 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 	function openEvent(path: string, newLeaf: boolean) {
 		onOpenNote?.(path, newLeaf);
 	}
+
+	const formatTimeLabel = (date: Date) =>
+		date.toLocaleTimeString([], {
+			hour: "2-digit",
+			minute: "2-digit",
+		});
+
+	const formatTagForLabel = (tag?: string) => {
+		if (!tag) return "";
+		const slashIndex = tag.lastIndexOf("/");
+		if (slashIndex === -1) {
+			return tag;
+		}
+		return tag.slice(slashIndex + 1);
+	};
 </script>
 
 <div class="aan-sidebar-calendar">
@@ -144,7 +161,8 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 			{#each week.days as day}
 				<button
 					class={`aan-sidebar-calendar__cell ${day.isCurrentMonth ? "" : "is-outside"} ${day.isToday ? "is-today" : ""} ${day.isSelected ? "is-selected" : ""}`}
-					on:click={() => selectDay(day.iso)}
+					on:click={() => day.isCurrentMonth && selectDay(day.iso)}
+					disabled={!day.isCurrentMonth}
 				>
 					<span>{day.label}</span>
 					{#if day.meetingCount > 0}
@@ -174,46 +192,48 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 			<p class="aan-calendar-empty">No meetings scheduled.</p>
 		{:else}
 			<ul class="aan-calendar-day-list">
-				{#each selectedDayEvents as event}
-					<li class="aan-calendar-day-row">
-						<div class="aan-calendar-day-time">
-							<span>{event.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-							<span class="aan-calendar-day-time__end">
-								{event.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-							</span>
+			{#each selectedDayEvents as event}
+				<li class="aan-calendar-day-row">
+					<div class="aan-calendar-day-card">
+						<div class="aan-calendar-day-card-top">
+							<div class="aan-calendar-day-time">
+								<span>
+									{formatTimeLabel(event.start)} — {formatTimeLabel(event.end)}
+								</span>
+							</div>
+							{#if event.label}
+								<span class="aan-calendar-day-badge">
+									{event.label.name ?? formatTagForLabel(event.label.tag)}
+								</span>
+							{/if}
 						</div>
 						<div class="aan-calendar-day-content">
-							<div class="aan-calendar-day-title">
+							<div class="aan-calendar-day-title-row">
 								<span
 									class="aan-calendar-day-dot"
-									style={`background:${event.color || "var(--interactive-accent)"}`}
-								></span>
-								{event.title}
-							</div>
-							{#if event.tags?.length}
-								<div class="aan-calendar-day-meta">
-									<div class="aan-calendar-tag-row">
-										{#each event.tags as tag}
-											<span class="aan-calendar-chip--soft">{tag}</span>
-										{/each}
-									</div>
+										style={`background:${event.color || "var(--interactive-accent)"}`}
+									></span>
+									<span class="aan-calendar-day-title-text">{event.title}</span>
 								</div>
-							{/if}
+							<!-- Tags hidden per request -->
 							<div class="aan-calendar-day-actions">
-								<button
-									class="aan-calendar-icon-button"
-									title="Open note"
-									on:click={() => openEvent(event.path, false)}
-								>
-									<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide-icon lucide lucide-file-text "><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
-								</button>
-								<button
-									class="aan-calendar-icon-button"
-									title="Open in new pane"
-									on:click={() => openEvent(event.path, true)}
-								>
-									<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide-icon lucide lucide-external-link "><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-								</button>
+									<button
+										class="aan-calendar-action-btn"
+										title="Open note"
+										on:click={() => openEvent(event.path, false)}
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide-icon lucide lucide-file-text "><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
+										<span>Notes</span>
+									</button>
+									<button
+										class="aan-calendar-action-btn"
+										title="Open in new pane"
+										on:click={() => openEvent(event.path, true)}
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide-icon lucide lucide-external-link "><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+										<span>Open</span>
+									</button>
+								</div>
 							</div>
 						</div>
 					</li>
