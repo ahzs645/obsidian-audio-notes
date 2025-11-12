@@ -6,10 +6,10 @@
 	export let events: MeetingEvent[] = [];
 	export let selectedDate: string;
 	export let categories: NormalizedMeetingLabelCategory[] = [];
-	export let filterCategoryId: string = "";
+	export let filterValue: string = "";
 	export let onSelectDate: (date: string) => void;
 	export let onOpenNote: (path: string, newLeaf: boolean) => void;
-	export let onFilterChange: (filterId: string) => void = () => {};
+	export let onFilterChange: (value: string) => void = () => {};
 
 	const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 	const todayKey = localDateKey(new Date());
@@ -23,7 +23,7 @@
 		monthCursor = firstDayOfMonth(selectedDate);
 	}
 
-	$: filteredEvents = filterEvents(events, filterCategoryId);
+	$: filteredEvents = filterEvents(events, filterValue);
 	$: eventsByDate = buildEventsByDate(filteredEvents);
 	$: weeks = buildCalendar(monthCursor, eventsByDate);
 	$: selectedDayEvents = (filteredEvents || [])
@@ -151,27 +151,56 @@
 	};
 	function filterEvents(
 		source: MeetingEvent[],
-		categoryId: string
+		value: string
 	): MeetingEvent[] {
-		if (!categoryId) {
+		if (!value) {
 			return source || [];
 		}
-		if (categoryId === "__unlabeled__") {
-			return (source || []).filter((event) => !event.label?.categoryId);
+		if (value === "__unlabeled__") {
+			return (source || []).filter((event) => !event.label?.tag);
 		}
-		return (source || []).filter(
-			(event) => event.label?.categoryId === categoryId
+		if (value.startsWith("category:")) {
+			const categoryId = value.slice("category:".length);
+			return (source || []).filter(
+				(event) => event.label?.categoryId === categoryId
+			);
+		}
+		if (value.startsWith("tag:")) {
+			const tag = value.slice("tag:".length);
+			return (source || []).filter(
+				(event) => event.label?.tag === tag
+			);
+		}
+		return source || [];
+	}
+
+	function buildLabelOptions(list: MeetingEvent[]) {
+		const map = new Map<
+			string,
+			{ tag: string; displayName: string; categoryName?: string }
+		>();
+		for (const event of list || []) {
+			const tag = event.label?.tag;
+			if (!tag) continue;
+			if (map.has(tag)) continue;
+			map.set(tag, {
+				tag,
+				displayName:
+					event.label?.displayName || formatTagForLabel(tag),
+				categoryName: event.label?.categoryName,
+			});
+		}
+		return Array.from(map.values()).sort((a, b) =>
+			a.displayName.localeCompare(b.displayName)
 		);
 	}
 
-	function handleFilterChange(value: string) {
-		onFilterChange?.(value);
-	}
+	$: labelOptions = buildLabelOptions(events);
 
 	function handleFilterSelectChange(event: Event) {
 		const target = event.currentTarget as HTMLSelectElement | null;
 		if (!target) return;
-		handleFilterChange(target.value);
+		onFilterChange?.(target.value);
 	}
 </script>
 
@@ -190,15 +219,34 @@
 			id="aan-calendar-filter"
 			on:change={handleFilterSelectChange}
 		>
-			<option value="" selected={!filterCategoryId}>All labels</option>
-			<option value="__unlabeled__" selected={filterCategoryId === "__unlabeled__"}>
+			<option value="" selected={!filterValue}>All meetings</option>
+			<option value="__unlabeled__" selected={filterValue === "__unlabeled__"}>
 				No label
 			</option>
-			{#each categories as category}
-				<option value={category.id} selected={filterCategoryId === category.id}>
-					{category.name}
-				</option>
-			{/each}
+			{#if categories.length}
+				<optgroup label="Categories">
+					{#each categories as category}
+						<option
+							value={`category:${category.id}`}
+							selected={filterValue === `category:${category.id}`}
+						>
+							{category.name}
+						</option>
+					{/each}
+				</optgroup>
+			{/if}
+			{#if labelOptions.length}
+				<optgroup label="Labels">
+					{#each labelOptions as option}
+						<option
+							value={`tag:${option.tag}`}
+							selected={filterValue === `tag:${option.tag}`}
+						>
+							{option.displayName}
+						</option>
+					{/each}
+				</optgroup>
+			{/if}
 		</select>
 	</div>
 	<div class="aan-sidebar-calendar__weekdays">

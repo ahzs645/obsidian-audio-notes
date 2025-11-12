@@ -14,7 +14,7 @@ export class DashboardController {
 	private listenersRegistered = false;
 	private events: MeetingEvent[] = [];
 	private selectedDate: string = localDateKey(new Date());
-	private filterCategoryId = "";
+	private filterValue = "";
 
 	constructor(
 		private readonly plugin: AutomaticAudioNotes,
@@ -36,13 +36,12 @@ export class DashboardController {
 				events: this.events,
 				selectedDate: this.selectedDate,
 				categories: this.getCategories(),
-				filterCategoryId: this.filterCategoryId,
+				filterValue: this.filterValue,
 				onSelectDate: (date: string) => this.handleSelectDate(date),
 				onOpenNote: (path: string, newLeaf: boolean) =>
 					this.openFile(path, newLeaf),
-				onRefresh: () => this.refreshEvents(),
-				onFilterChange: (filterId: string) =>
-					this.handleFilterChange(filterId),
+				onFilterChange: (value: string) =>
+					this.handleFilterChange(value),
 			},
 		});
 		this.registerListeners();
@@ -106,14 +105,14 @@ export class DashboardController {
 			events: this.events,
 			selectedDate: this.selectedDate,
 			categories,
-			filterCategoryId: this.filterCategoryId,
+			filterValue: this.filterValue,
 		});
 	}
 
 	private handleFilterChange(filterId: string) {
-		this.filterCategoryId = filterId || "";
+		this.filterValue = filterId || "";
 		this.component?.$set({
-			filterCategoryId: this.filterCategoryId,
+			filterValue: this.filterValue,
 		});
 	}
 
