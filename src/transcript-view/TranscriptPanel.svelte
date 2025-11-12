@@ -125,11 +125,37 @@ $: canTranscribe = canTranscribeDeepgram || canTranscribeScriberr;
 				</div>
 				<div class="audio-note-transcript-actions">
 					<button
-						class="aan-transcript-btn"
+						class="aan-transcript-btn icon-only collapse-toggle"
 						type="button"
 						on:click={() => (collapsed = !collapsed)}
+						aria-expanded={!collapsed}
+						title={collapsed ? "Expand transcript" : "Collapse transcript"}
+						aria-label={collapsed ? "Expand transcript" : "Collapse transcript"}
+						class:collapsed={collapsed}
 					>
-						{collapsed ? "Expand transcript" : "Collapse transcript"}
+						<svg
+							aria-hidden="true"
+							viewBox="0 0 24 24"
+							focusable="false"
+							class="aan-transcript-icon"
+						>
+							<path
+								d="M7 10l5 5 5-5"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/>
+						</svg>
+					</button>
+					<button
+						class="aan-transcript-btn"
+						type="button"
+						on:click={toggleSearch}
+						aria-pressed={showSearch}
+					>
+						Search
 					</button>
 					<button
 						class="aan-transcript-btn icon-only"
@@ -169,16 +195,9 @@ $: canTranscribe = canTranscribeDeepgram || canTranscribeScriberr;
 			</header>
 
 			{#if !collapsed}
-				<section class="audio-note-transcript-toolbar">
-					<div class="aan-transcript-search-controls">
-						<button
-							class="aan-transcript-btn"
-							type="button"
-							on:click={toggleSearch}
-						>
-							Search
-						</button>
-						{#if searchMatches.length}
+				{#if searchMatches.length}
+					<section class="audio-note-transcript-toolbar">
+						<div class="aan-transcript-search-controls">
 							<span class="aan-transcript-match-count">
 								{currentMatchIndex + 1} / {searchMatches.length}
 							</span>
@@ -186,9 +205,9 @@ $: canTranscribe = canTranscribeDeepgram || canTranscribeScriberr;
 								<button type="button" on:click={goToPreviousMatch}>▲</button>
 								<button type="button" on:click={goToNextMatch}>▼</button>
 							</div>
-						{/if}
-					</div>
-				</section>
+						</div>
+					</section>
+				{/if}
 
 				{#if showSearch}
 					<div class="aan-transcript-search-bar">

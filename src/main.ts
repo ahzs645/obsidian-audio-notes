@@ -400,6 +400,11 @@ export default class AutomaticAudioNotes extends Plugin {
 					void this.handleAttachmentCreate(file);
 				})
 			);
+			this.registerEvent(
+				this.app.vault.on("rename", (file, oldPath) => {
+					void this.handleMeetingRename(file, oldPath);
+				})
+			);
 			void this.syncTranscriptSidebar(
 				this.app.workspace.getActiveFile() ?? null,
 				false
@@ -734,6 +739,61 @@ export default class AutomaticAudioNotes extends Plugin {
 		} catch (error) {
 			console.error("Audio Notes: Could not move attachment", error);
 		}
+	}
+
+	private async handleMeetingRename(
+		file: TAbstractFile,
+		oldPath: string
+	): Promise<void> {
+		if (!(file instanceof TFile) || file.extension !== "md") {
+			return;
+		}
+		if (!this.isMeetingFile(file)) {
+			return;
+		}
+		const oldBasename = this.extractBasename(oldPath);
+		if (!oldBasename) {
+			return;
+		}
+		const cache = this.app.metadataCache.getFileCache(file);
+		const frontmatterTitle =
+			typeof cache?.frontmatter?.title === "string"
+				? cache.frontmatter.title.trim()
+				: "";
+		if (!frontmatterTitle || frontmatterTitle !== oldBasename) {
+			return;
+		}
+		const newTitle = file.basename.trim();
+		if (!newTitle || newTitle === frontmatterTitle) {
+			return;
+		}
+		try {
+			await this.app.fileManager.processFrontMatter(file, (fm) => {
+				if (typeof fm.title === "string") {
+					const current = fm.title.trim();
+					if (current === frontmatterTitle) {
+						fm.title = newTitle;
+					}
+				}
+			});
+		} catch (error) {
+			console.error(
+				"Audio Notes: Could not synchronize meeting title after rename",
+				error
+			);
+		}
+	}
+
+	private extractBasename(path: string): string {
+		if (!path) {
+			return "";
+		}
+		const parts = path.split("/");
+		const filename = parts[parts.length - 1] || path;
+		const dotIndex = filename.lastIndexOf(".");
+		return dotIndex === -1
+			? filename.trim()
+			: filename.substring(0, dotIndex).trim();
 	}
 
 	public async createNewMeeting(details: NewMeetingDetails): Promise<void> {

@@ -9,7 +9,6 @@ import {
 	TextComponent,
 } from "obsidian";
 import { secondsToTimeString } from "./utils";
-import { ensureDashboardNote } from "./dashboard";
 import { MeetingLabelIconPickerModal } from "./settings/MeetingLabelIconPickerModal";
 import {
 	DEFAULT_MEETING_LABEL_CATEGORIES,
@@ -396,50 +395,6 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					})
 			);
 
-		containerEl.createEl("h3", { text: "Calendar view" });
-		new Setting(containerEl)
-			.setName("Pin calendar in right sidebar")
-			.setDesc(
-				"Keep the Audio Notes calendar docked next to your working notes. Disable if you prefer to open it manually."
-			)
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.calendarSidebarPinned)
-					.onChange(async (value) => {
-						this.plugin.settings.calendarSidebarPinned = value;
-						await this.plugin.saveSettings();
-						await this.plugin.syncCalendarSidebar(value);
-					})
-			);
-		new Setting(containerEl)
-			.setName("Store meeting attachments with the note")
-			.setDesc(
-				"When enabled, new attachments dropped into a meeting note are automatically moved into the same folder as that note."
-			)
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.storeAttachmentsWithMeeting)
-					.onChange(async (value) => {
-						this.plugin.settings.storeAttachmentsWithMeeting = value;
-						await this.plugin.saveSettings();
-					})
-			);
-		new Setting(containerEl)
-			.setName("Tag colors")
-			.setDesc(
-				"One entry per line using the format tag:#color. Tags are matched case-insensitively."
-			)
-			.addTextArea((text) => {
-				text.inputEl.rows = 4;
-				text.setPlaceholder("job/williams:#4f46e5")
-					.setValue(formatColorMap(this.plugin.settings.calendarTagColors))
-					.onChange(async (value) => {
-						this.plugin.settings.calendarTagColors =
-							parseColorMap(value);
-						await this.plugin.saveSettings();
-					});
-			});
-
 		containerEl.createEl("h3", { text: "Meeting labels" });
 			const labelsDescription = containerEl.createEl("p");
 			labelsDescription.textContent =
@@ -633,37 +588,6 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 			.setName(" ");
 
 		renderLabelCategories();
-
-		containerEl.createEl("h3", { text: "Dashboard" });
-		new Setting(containerEl)
-			.setName("Dashboard note path")
-			.setDesc(
-				"Path to the Dataview dashboard that lists upcoming meetings and open tasks."
-			)
-			.addText((text) =>
-				text
-					.setPlaceholder("Audio Notes Dashboard.md")
-					.setValue(this.plugin.settings.dashboardNotePath)
-					.onChange(async (value) => {
-						this.plugin.settings.dashboardNotePath =
-							value?.trim() || "Audio Notes Dashboard.md";
-						await this.plugin.saveSettings();
-					})
-			)
-			.addExtraButton((button) =>
-				button
-					.setIcon("refresh-ccw")
-					.setTooltip("Create or refresh the dashboard note now")
-					.onClick(async () => {
-						try {
-							const result = await ensureDashboardNote(this.plugin, true);
-							new Notice(result);
-						} catch (error) {
-							console.error(error);
-							new Notice("Could not update dashboard note");
-						}
-					})
-			);
 
 		containerEl.createEl("hr");
 		containerEl.createDiv(

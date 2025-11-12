@@ -89,6 +89,9 @@ If your plugin does not need CSS, delete this file.
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 12px;
 	padding: 8px;
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
 }
 
 .aan-sidebar-calendar__toolbar {
@@ -188,6 +191,7 @@ If your plugin does not need CSS, delete this file.
 	gap: 16px;
 	min-height: 0;
 	box-shadow: var(--shadow-s);
+	overflow: hidden;
 }
 
 .aan-sidebar-agenda header {
@@ -215,6 +219,10 @@ If your plugin does not need CSS, delete this file.
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding-right: 4px;
 }
 
 .aan-sidebar-agenda .aan-calendar-day-row {
@@ -990,6 +998,15 @@ If your plugin does not need CSS, delete this file.
 	background: var(--interactive-accent);
 	color: var(--text-on-accent);
 	border-color: transparent;
+}
+
+.aan-transcript-btn.collapse-toggle .aan-transcript-icon {
+	transition: transform 0.15s ease;
+	transform-origin: center;
+}
+
+.aan-transcript-btn.collapse-toggle.collapsed .aan-transcript-icon {
+	transform: rotate(-90deg);
 }
 
 .audio-note-transcript-toolbar {
