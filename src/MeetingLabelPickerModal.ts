@@ -40,6 +40,8 @@ type MeetingLabelSuggestion =
 
 interface MeetingLabelPickerOptions {
 	onCreateCategory?: (query: string) => void;
+	currentTags?: string[];
+	onRemoveTag?: (tag: string) => void;
 }
 
 export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion> {
@@ -48,6 +50,7 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 	private options: MeetingLabelPickerOptions;
 	private lastQuery = "";
 	private initialQuery = "";
+	private selectedTagsContainer: HTMLElement | null = null;
 
 	constructor(
 		app: App,
@@ -71,10 +74,74 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 
 	onOpen() {
 		this.availableLabels = this.computeAvailableLabels();
+		this.renderSelectedTags();
 		if (this.initialQuery) {
 			this.inputEl.value = this.initialQuery;
 			this.inputEl.dispatchEvent(new Event("input"));
 		}
+	}
+
+	private renderSelectedTags() {
+		if (!this.options.currentTags || this.options.currentTags.length === 0) {
+			return;
+		}
+
+		// Find the prompt div and add selected tags above it
+		const promptDiv = this.modalEl.querySelector('.prompt');
+		if (!promptDiv) return;
+
+		this.selectedTagsContainer = promptDiv.createDiv({
+			cls: 'aan-selected-tags-container'
+		});
+
+		this.selectedTagsContainer.createEl('div', {
+			text: 'Selected tags:',
+			cls: 'aan-selected-tags-title'
+		});
+
+		const tagsListDiv = this.selectedTagsContainer.createDiv({
+			cls: 'aan-selected-tags-list'
+		});
+
+		for (const tag of this.options.currentTags) {
+			const labelInfo = buildMeetingLabelInfo(tag, this.categories);
+			const tagEl = tagsListDiv.createDiv({
+				cls: 'aan-selected-tag-item'
+			});
+
+			if (labelInfo.icon) {
+				tagEl.createSpan({
+					text: labelInfo.icon,
+					cls: 'aan-selected-tag-icon'
+				});
+			}
+
+			tagEl.createSpan({
+				text: labelInfo.displayName,
+				cls: 'aan-selected-tag-name'
+			});
+
+			const removeBtn = tagEl.createEl('button', {
+				text: '×',
+				cls: 'aan-selected-tag-remove'
+			});
+
+			removeBtn.addEventListener('click', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				this.options.onRemoveTag?.(tag);
+				tagEl.remove();
+
+				// If no more tags, remove the container
+				if (tagsListDiv.children.length === 0 && this.selectedTagsContainer) {
+					this.selectedTagsContainer.remove();
+					this.selectedTagsContainer = null;
+				}
+			});
+		}
+
+		// Insert at the beginning of the prompt
+		promptDiv.insertBefore(this.selectedTagsContainer, promptDiv.firstChild);
 	}
 
 	getSuggestions(query: string): MeetingLabelSuggestion[] {

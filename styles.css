@@ -500,6 +500,70 @@ If your plugin does not need CSS, delete this file.
 	cursor: default;
 }
 
+/* Selected tags in label picker modal */
+.aan-selected-tags-container {
+	padding: 12px;
+	background: var(--background-secondary);
+	border-radius: 8px;
+	margin-bottom: 12px;
+}
+
+.aan-selected-tags-title {
+	font-size: 0.85em;
+	font-weight: 600;
+	color: var(--text-muted);
+	margin-bottom: 8px;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.aan-selected-tags-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.aan-selected-tag-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 8px 4px 10px;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-radius: 999px;
+	font-size: 0.9em;
+	font-weight: 500;
+}
+
+.aan-selected-tag-icon {
+	font-size: 1em;
+}
+
+.aan-selected-tag-name {
+	line-height: 1;
+}
+
+.aan-selected-tag-remove {
+	border: none;
+	background: rgba(0, 0, 0, 0.2);
+	color: var(--text-on-accent);
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	font-size: 1.2em;
+	line-height: 1;
+	padding: 0;
+	transition: background 0.15s ease;
+}
+
+.aan-selected-tag-remove:hover {
+	background: rgba(0, 0, 0, 0.35);
+}
+
 .audio-notes-transcript-view .audio-note-transcript-wrapper {
 	flex: 1;
 	display: flex;

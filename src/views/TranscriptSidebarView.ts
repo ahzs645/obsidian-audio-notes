@@ -471,6 +471,16 @@ export class TranscriptSidebarView extends ItemView {
 			new Notice("Open a meeting note to assign a label.", 4000);
 			return;
 		}
+
+		// Get current tags from the file
+		const cache = this.app.metadataCache.getFileCache(this.currentMeetingFile);
+		const currentTags = collectTags(cache).filter((tag) => {
+			const categories = getEffectiveMeetingLabelCategories(
+				this.plugin.settings.meetingLabelCategories
+			);
+			return categories.some((cat) => tag.startsWith(cat.tagPrefix));
+		});
+
 		const picker = new MeetingLabelPickerModal(
 			this.app,
 			this.plugin,
@@ -480,6 +490,10 @@ export class TranscriptSidebarView extends ItemView {
 			{
 				onCreateCategory: (query) =>
 					this.openCategoryModal(query, true),
+				currentTags,
+				onRemoveTag: (tag) => {
+					void this.removeMeetingTag(tag);
+				},
 			}
 		);
 		if (initialQuery) {
@@ -510,6 +524,34 @@ export class TranscriptSidebarView extends ItemView {
 		} catch (error) {
 			console.error(error);
 			new Notice("Could not update meeting label.", 6000);
+		}
+	}
+
+	private async removeMeetingTag(tag: string) {
+		if (!this.currentMeetingFile) {
+			return;
+		}
+		try {
+			await this.app.fileManager.processFrontMatter(
+				this.currentMeetingFile,
+				(frontmatter) => {
+					// Remove from tags array
+					if (Array.isArray(frontmatter.tags)) {
+						frontmatter.tags = frontmatter.tags.filter(
+							(t: string) => t !== tag && t !== `#${tag}`
+						);
+					}
+					// If this was the meeting_label, clear it
+					if (frontmatter.meeting_label === tag) {
+						delete frontmatter.meeting_label;
+					}
+				}
+			);
+			this.updateLabelHeader();
+			new Notice(`Removed tag: ${tag}`);
+		} catch (error) {
+			console.error(error);
+			new Notice("Could not remove tag.", 6000);
 		}
 	}
 
