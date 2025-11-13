@@ -370,21 +370,23 @@ If your plugin does not need CSS, delete this file.
 
 .aan-transcript-sidebar-header {
 	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 8px;
 }
 
 .aan-transcript-title {
 	margin: 0;
 	font-size: 1rem;
-	flex: 1;
+	width: 100%;
 }
 
 .aan-transcript-sidebar-actions {
 	display: flex;
 	gap: 8px;
-	align-items: flex-end;
+	align-items: stretch;
+	flex-wrap: wrap;
+	width: 100%;
 }
 
 .aan-transcript-label-field {
@@ -392,6 +394,7 @@ If your plugin does not need CSS, delete this file.
 	flex-direction: column;
 	gap: 4px;
 	min-width: 190px;
+	flex: 1;
 }
 
 .aan-transcript-label-input {
@@ -402,6 +405,9 @@ If your plugin does not need CSS, delete this file.
 	color: var(--text-normal);
 	cursor: pointer;
 	outline: none;
+	height: var(--input-height, 36px);
+	box-sizing: border-box;
+	width: 100%;
 }
 
 .aan-transcript-label-input.is-placeholder {
@@ -988,6 +994,13 @@ If your plugin does not need CSS, delete this file.
 	align-items: center;
 	justify-content: center;
 	gap: 4px;
+}
+
+.aan-transcript-sidebar-actions .aan-transcript-btn {
+	min-height: var(--input-height, 36px);
+	height: var(--input-height, 36px);
+	box-sizing: border-box;
+	padding: 6px 12px;
 }
 
 .aan-transcript-btn:hover:not(:disabled) {
