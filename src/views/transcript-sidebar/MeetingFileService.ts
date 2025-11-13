@@ -427,16 +427,26 @@ export class MeetingFileService {
 		dateParts: MeetingDateParts
 	): string {
 		const segments = rootPath.split("/").filter(Boolean);
-		const pushSegment = (value?: string) => {
-			if (!value) return;
-			if (segments[segments.length - 1] === value) {
-				return;
+
+		// Build expected date path components
+		const datePath: string[] = [];
+		if (dateParts.year) datePath.push(dateParts.year);
+		if (dateParts.month) datePath.push(dateParts.month);
+		if (dateParts.day) datePath.push(dateParts.day);
+
+		// Check if the path already ends with the complete date pattern
+		if (datePath.length > 0) {
+			const endSegments = segments.slice(-datePath.length);
+			const alreadyComplete =
+				endSegments.length === datePath.length &&
+				endSegments.every((seg, idx) => seg === datePath[idx]);
+
+			if (!alreadyComplete) {
+				// Append all date components
+				segments.push(...datePath);
 			}
-			segments.push(value);
-		};
-		pushSegment(dateParts.year);
-		pushSegment(dateParts.month);
-		pushSegment(dateParts.day);
+		}
+
 		return segments.join("/");
 	}
 
