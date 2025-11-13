@@ -282,6 +282,22 @@ export class MeetingFileService {
 		};
 	}
 
+	async saveUploadedTranscriptFile(file: File): Promise<string> {
+		const folder = normalizeFolderPath(
+			this.plugin.settings.DGTranscriptFolder,
+			"transcripts"
+		);
+		await this.ensureFolder(folder);
+		const baseName = file.name?.trim() || "transcript.vtt";
+		const filename = this.sanitizeFilename(
+			baseName.includes(".") ? baseName : `${baseName}.vtt`
+		);
+		const targetPath = await this.getAvailableChildPath(folder, filename);
+		const contents = await file.text();
+		await this.plugin.app.vault.create(targetPath, contents);
+		return targetPath;
+	}
+
 	getAudioLibraryRoot(): string {
 		return normalizeFolderPath(
 			this.plugin.settings.whisperAudioFolder,

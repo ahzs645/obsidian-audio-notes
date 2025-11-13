@@ -98,6 +98,13 @@
 	color: var(--text-muted);
 }
 
+.aan-audio-upload-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	align-items: stretch;
+}
+
 .aan-attachments-header {
 	display: flex;
 	justify-content: space-between;

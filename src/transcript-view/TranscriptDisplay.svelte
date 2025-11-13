@@ -34,6 +34,9 @@ export let needsAudioUpload = false;
 export let audioUploadInProgress = false;
 export let onUploadMeetingAudio: (files: File[]) => Promise<void> = async () =>
 	Promise.resolve();
+export let transcriptUploadInProgress = false;
+export let onUploadTranscript: (files: File[]) => Promise<void> = async () =>
+	Promise.resolve();
 export let canTranscribeDeepgram = false;
 export let canTranscribeScriberr = false;
 export let hasTranscript = false;
@@ -73,6 +76,7 @@ let isUploadingAttachments = false;
 let filePicker: HTMLInputElement | null = null;
 let attachmentsCollapsed = true;
 let audioUploadInput: HTMLInputElement | null = null;
+let transcriptUploadInput: HTMLInputElement | null = null;
 
 	$: hasSegments = segments?.length > 0;
 
@@ -123,6 +127,8 @@ let audioUploadInput: HTMLInputElement | null = null;
 
 	$: showTranscriptionCta =
 		!needsAudioUpload && !hasTranscript;
+
+	$: showTranscriptPanel = !needsAudioUpload || hasTranscript;
 
 	$: if (playerHost && mountedPlayerEl !== playerContainer) {
 		while (playerHost.firstChild) {
@@ -579,6 +585,22 @@ let audioUploadInput: HTMLInputElement | null = null;
 		input.value = "";
 	}
 
+	function triggerTranscriptPicker() {
+		if (transcriptUploadInProgress) {
+			return;
+		}
+		transcriptUploadInput?.click();
+	}
+
+	function handleTranscriptFileInput(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const files = input.files ? Array.from(input.files) : [];
+		if (files.length) {
+			onUploadTranscript(files);
+		}
+		input.value = "";
+	}
+
 	function requestTranscription(provider: "deepgram" | "scriberr") {
 		onTranscribeMeeting(provider);
 	}
@@ -610,9 +632,13 @@ let audioUploadInput: HTMLInputElement | null = null;
 			{triggerAudioPicker}
 			{handleAudioFileInput}
 			bind:audioUploadInput={audioUploadInput}
+			{transcriptUploadInProgress}
+			{triggerTranscriptPicker}
+			{handleTranscriptFileInput}
+			bind:transcriptUploadInput={transcriptUploadInput}
 		/>
 	{/if}
-	{#if !needsAudioUpload}
+	{#if showTranscriptPanel}
 		<div
 			class="audio-note-player-host"
 			class:has-player={Boolean(playerContainer)}

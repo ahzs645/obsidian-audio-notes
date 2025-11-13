@@ -53,6 +53,7 @@ export class TranscriptSidebarView extends ItemView {
 	private currentMeetingDateParts: MeetingDateParts | null = null;
 	private mode: "meeting" | "dashboard" = "dashboard";
 	private isUploadingMeetingAudio = false;
+	private isUploadingTranscript = false;
 	private isTranscribingMeeting = false;
 	private isDeletingMeeting = false;
 	private currentAudioPath: string | null = null;
@@ -351,11 +352,14 @@ export class TranscriptSidebarView extends ItemView {
 			isTranscribing: this.isTranscribingMeeting,
 			needsAudioUpload: !hasAudio,
 			audioUploadInProgress: this.isUploadingMeetingAudio,
+			transcriptUploadInProgress: this.isUploadingTranscript,
 			canTranscribeDeepgram: this.transcriptionService.canUseDeepgram(),
 			canTranscribeScriberr: this.transcriptionService.canUseScriberr(),
 			hasTranscript: Boolean(this.currentTranscriptPath),
 			onUploadMeetingAudio: (files: File[]) =>
 				this.handleMeetingAudioUpload(files),
+			onUploadTranscript: (files: File[]) =>
+				this.handleTranscriptFileUpload(files),
 			onTranscribeMeeting: (provider: "deepgram" | "scriberr") =>
 				this.handleTranscriptionRequest(provider),
 		});
@@ -794,6 +798,45 @@ export class TranscriptSidebarView extends ItemView {
 			this.isUploadingMeetingAudio = false;
 			this.transcriptComponent?.$set({
 				audioUploadInProgress: false,
+			});
+		}
+	}
+
+	private async handleTranscriptFileUpload(files: File[]): Promise<void> {
+		const meetingFile = this.currentMeetingFile;
+		if (!meetingFile || !files?.length) {
+			new Notice("Open a meeting note before uploading a transcript.", 4000);
+			return;
+		}
+		const upload = files[0];
+		if (!upload) return;
+		this.isUploadingTranscript = true;
+		this.transcriptComponent?.$set({
+			transcriptUploadInProgress: true,
+		});
+		try {
+			const transcriptPath =
+				await this.meetingFiles.saveUploadedTranscriptFile(upload);
+			await this.plugin.app.fileManager.processFrontMatter(
+				meetingFile,
+				(fm) => {
+					fm["transcript_uri"] = transcriptPath;
+				}
+			);
+			this.currentTranscriptPath = transcriptPath;
+			this.transcriptComponent?.$set({
+				hasTranscript: true,
+				needsAudioUpload: !this.currentAudioPath,
+			});
+			await this.loadTranscript(transcriptPath);
+			new Notice("Transcript uploaded.", 4000);
+		} catch (error) {
+			console.error("Audio Notes: Transcript upload failed.", error);
+			new Notice("Could not upload transcript.", 6000);
+		} finally {
+			this.isUploadingTranscript = false;
+			this.transcriptComponent?.$set({
+				transcriptUploadInProgress: false,
 			});
 		}
 	}
