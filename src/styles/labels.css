@@ -1,0 +1,259 @@
+.aan-transcript-sidebar-header {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 8px;
+}
+
+.aan-transcript-title {
+	margin: 0;
+	font-size: 1rem;
+	width: 100%;
+}
+
+.aan-transcript-sidebar-actions {
+	display: flex;
+	gap: 8px;
+	align-items: stretch;
+	flex-wrap: wrap;
+	width: 100%;
+}
+
+.aan-transcript-schedule {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 8px 12px;
+	background: var(--background-secondary);
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	font-size: 0.9em;
+}
+
+.aan-transcript-schedule-date {
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.aan-transcript-schedule-time {
+	color: var(--text-muted);
+}
+
+.aan-transcript-schedule.is-placeholder {
+	color: var(--text-muted);
+}
+
+.aan-transcript-schedule.is-placeholder .aan-transcript-schedule-date,
+.aan-transcript-schedule.is-placeholder .aan-transcript-schedule-time {
+	color: inherit;
+	font-weight: 500;
+}
+
+.aan-transcript-label-field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 190px;
+	flex: 1;
+}
+
+.aan-transcript-label-input {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 6px 10px;
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	cursor: pointer;
+	outline: none;
+	height: var(--input-height, 36px);
+	box-sizing: border-box;
+	width: 100%;
+}
+
+.aan-transcript-label-input.is-placeholder {
+	color: var(--text-muted);
+}
+
+.aan-transcript-label-input:focus {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.aan-transcript-label-input:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.aan-transcript-empty-state {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.aan-settings-label-list-title {
+	font-size: 0.8em;
+	color: var(--text-muted);
+	margin-right: 4px;
+}
+
+.aan-settings-label-empty {
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
+.aan-settings-label-category-list .setting-item {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 0;
+}
+
+.aan-settings-label-tree {
+	margin-top: 8px;
+	padding: 12px;
+	border-left: 3px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	border-radius: 6px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	width: 100%;
+	grid-column: 1 / -1;
+}
+
+.aan-settings-label-tree-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	user-select: none;
+	padding: 4px;
+	border-radius: 4px;
+	transition: background 0.15s ease;
+}
+
+.aan-settings-label-tree-header:hover {
+	background: var(--background-modifier-hover);
+}
+
+.aan-settings-label-toggle-icon {
+	font-size: 0.8em;
+	color: var(--text-muted);
+	min-width: 16px;
+	text-align: center;
+}
+
+.aan-settings-label-tree-content {
+	display: block;
+	transition: max-height 0.2s ease, opacity 0.2s ease;
+}
+
+.aan-settings-label-tree-content.is-collapsed {
+	display: none;
+}
+
+.aan-settings-label-tree-list {
+	list-style: none;
+	margin: 4px 0 0 0;
+	padding-left: 20px;
+}
+
+.aan-settings-label-tree-list > li {
+	margin: 4px 0;
+	font-size: 0.9em;
+	color: var(--text-muted);
+	position: relative;
+}
+
+.aan-settings-label-tree-list > li::before {
+	content: "└─";
+	position: absolute;
+	left: -16px;
+	color: var(--background-modifier-border);
+	font-size: 0.85em;
+}
+
+.aan-settings-label-tree-list > li:not(:last-child)::before {
+	content: "├─";
+}
+
+.aan-settings-label-tree-list ul {
+	margin-top: 4px;
+}
+
+.aan-settings-label-with-count {
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.aan-settings-label-branch {
+	font-weight: 500;
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.aan-settings-label-tree-list > li > span:hover {
+	color: var(--text-normal);
+	cursor: default;
+}
+
+/* Selected tags in label picker modal */
+.aan-selected-tags-container {
+	padding: 12px;
+	background: var(--background-secondary);
+	border-radius: 8px;
+	margin-bottom: 12px;
+}
+
+.aan-selected-tags-title {
+	font-size: 0.85em;
+	font-weight: 600;
+	color: var(--text-muted);
+	margin-bottom: 8px;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.aan-selected-tags-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.aan-selected-tag-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 8px 4px 10px;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-radius: 999px;
+	font-size: 0.9em;
+	font-weight: 500;
+}
+
+.aan-selected-tag-icon {
+	font-size: 1em;
+}
+
+.aan-selected-tag-name {
+	line-height: 1;
+}
+
+.aan-selected-tag-remove {
+	border: none;
+	background: rgba(0, 0, 0, 0.2);
+	color: var(--text-on-accent);
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	font-size: 1.2em;
+	line-height: 1;
+	padding: 0;
+	transition: background 0.15s ease;
+}
+
+.aan-selected-tag-remove:hover {
+	background: rgba(0, 0, 0, 0.35);
+}

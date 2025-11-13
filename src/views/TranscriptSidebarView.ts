@@ -1,4 +1,11 @@
-import { ItemView, Notice, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import {
+	ItemView,
+	Notice,
+	TFile,
+	TFolder,
+	WorkspaceLeaf,
+	setIcon,
+} from "obsidian";
 import TranscriptDisplay from "../transcript-view/TranscriptDisplay.svelte";
 import type {
 	TranscriptSegmentWithSpeaker,
@@ -33,11 +40,31 @@ import {
 } from "../meeting-label-manager";
 import { collectTags } from "../meeting-events";
 import { confirmWithModal } from "../modals/ConfirmModal";
+import {
+	buildScheduleCallout,
+	resolveMeetingContext,
+} from "../MeetingNoteTemplate";
+import {
+	EditMeetingScheduleModal,
+	type MeetingScheduleUpdate,
+} from "../modals/EditMeetingScheduleModal";
 
 export const AUDIO_NOTES_TRANSCRIPT_VIEW = "audio-notes-transcript-view";
+const SPEAKER_LABELS_FIELD = "aan_speaker_labels";
 
 interface TranscriptSidebarState {
 	file?: string;
+}
+
+interface MeetingScheduleInfo {
+	start: Date;
+	end: Date;
+	startDate: string;
+	startTime: string;
+	endDate: string;
+	endTime: string;
+	dateLabel: string;
+	timeLabel: string;
 }
 
 export class TranscriptSidebarView extends ItemView {
@@ -46,6 +73,10 @@ export class TranscriptSidebarView extends ItemView {
 	private headerEl: HTMLDivElement | null = null;
 	private labelActionsEl: HTMLDivElement | null = null;
 	private labelInputEl: HTMLInputElement | null = null;
+	private scheduleSummaryEl: HTMLDivElement | null = null;
+	private scheduleDateEl: HTMLDivElement | null = null;
+	private scheduleTimeEl: HTMLDivElement | null = null;
+	private scheduleEditButtonEl: HTMLButtonElement | null = null;
 	private meetingContainer: HTMLDivElement | null = null;
 	private dashboardContainer: HTMLDivElement | null = null;
 	private dashboardPlaceholder: HTMLParagraphElement | null = null;
@@ -64,6 +95,8 @@ export class TranscriptSidebarView extends ItemView {
 	private readonly dashboardController: DashboardController;
 	private readonly transcriptionService: TranscriptionService;
 	private currentMeetingLabel: MeetingLabelInfo | undefined;
+	private speakerLabelOverrides: Record<string, string> = {};
+	private currentScheduleInfo: MeetingScheduleInfo | null = null;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -249,6 +282,10 @@ export class TranscriptSidebarView extends ItemView {
 			await this.attachments.setAttachmentFolder(noteFolderPath);
 		}
 
+		this.updateSpeakerLabelOverrides(
+			this.extractSpeakerLabelOverrides(frontmatter)
+		);
+
 		this.currentMeetingFile = activeFile;
 		this.currentMeetingDateParts =
 			meetingFolderResult?.dateParts ??
@@ -256,6 +293,7 @@ export class TranscriptSidebarView extends ItemView {
 				frontmatter
 			) ??
 			this.meetingFiles.deriveDatePartsFromNotePath(activeFile);
+		this.updateScheduleSummary(frontmatter);
 		this.updateDeleteButtonState();
 
 		const resolvedAudioFile = hasAudio && audioPath
@@ -369,6 +407,17 @@ export class TranscriptSidebarView extends ItemView {
 			text: "Transcript",
 		});
 		titleEl.classList.add("aan-transcript-title");
+		this.scheduleSummaryEl = this.headerEl.createDiv({
+			cls: "aan-transcript-schedule is-placeholder",
+		});
+		this.scheduleDateEl = this.scheduleSummaryEl.createDiv({
+			cls: "aan-transcript-schedule-date",
+			text: "Open a meeting note to view schedule",
+		});
+		this.scheduleTimeEl = this.scheduleSummaryEl.createDiv({
+			cls: "aan-transcript-schedule-time",
+			text: "",
+		});
 		this.buildHeaderActions();
 
 		this.transcriptWrapper = this.meetingContainer.createDiv({
@@ -393,6 +442,13 @@ export class TranscriptSidebarView extends ItemView {
 					this.openAttachment(path),
 				onDeleteAttachment: (path: string) =>
 					this.deleteAttachment(path),
+				speakerLabelOverrides: this.speakerLabelOverrides,
+				onRenameSpeaker: async (
+					speakerKey: string,
+					newLabel: string
+				) => {
+					await this.handleSpeakerRename(speakerKey, newLabel);
+				},
 			},
 		});
 
@@ -430,10 +486,27 @@ export class TranscriptSidebarView extends ItemView {
 				this.openLabelPicker();
 			}
 		});
-		this.deleteButtonEl = this.labelActionsEl.createEl("button", {
-			text: "Delete meeting",
-			cls: "aan-transcript-btn danger",
+		this.scheduleEditButtonEl = this.labelActionsEl.createEl("button", {
+			cls: "aan-transcript-btn icon-only",
+			attr: {
+				type: "button",
+				title: "Edit meeting date & time",
+				"aria-label": "Edit meeting date and time",
+			},
 		});
+		setIcon(this.scheduleEditButtonEl, "calendar-clock");
+		this.scheduleEditButtonEl.addEventListener("click", () => {
+			this.openScheduleEditor();
+		});
+		this.deleteButtonEl = this.labelActionsEl.createEl("button", {
+			cls: "aan-transcript-btn icon-only danger",
+			attr: {
+				type: "button",
+				title: "Delete meeting",
+				"aria-label": "Delete meeting",
+			},
+		});
+		setIcon(this.deleteButtonEl, "trash");
 		this.deleteButtonEl.addEventListener("click", () => {
 			void this.confirmDeleteCurrentMeeting();
 		});
@@ -446,6 +519,7 @@ export class TranscriptSidebarView extends ItemView {
 			?.setText(file.basename);
 		this.updateLabelHeader();
 		this.updateDeleteButtonState();
+		this.updateScheduleSummary();
 	}
 
 	private renderEmpty(message: string) {
@@ -455,6 +529,129 @@ export class TranscriptSidebarView extends ItemView {
 			text: message,
 			cls: "aan-transcript-empty-state",
 		});
+	}
+
+	private updateScheduleSummary(
+		frontmatter?: Record<string, unknown> | null
+	) {
+		if (
+			!this.scheduleSummaryEl ||
+			!this.scheduleDateEl ||
+			!this.scheduleTimeEl
+		) {
+			return;
+		}
+		const canEdit =
+			this.mode === "meeting" && Boolean(this.currentMeetingFile);
+		this.scheduleEditButtonEl?.toggleAttribute("disabled", !canEdit);
+		if (!canEdit) {
+			this.currentScheduleInfo = null;
+			this.scheduleSummaryEl.classList.add("is-placeholder");
+			this.scheduleDateEl.setText(
+				"Open a meeting note to view schedule"
+			);
+			this.scheduleTimeEl.setText("");
+			return;
+		}
+		const source =
+			frontmatter ??
+			((this.currentMeetingFile &&
+				(this.plugin.app.metadataCache.getFileCache(
+					this.currentMeetingFile
+				)?.frontmatter as Record<string, unknown> | undefined)) ??
+				null);
+		const info = this.extractScheduleInfo(source);
+		if (!info) {
+			this.currentScheduleInfo = null;
+			this.scheduleSummaryEl.classList.add("is-placeholder");
+			this.scheduleDateEl.setText("Set meeting date");
+			this.scheduleTimeEl.setText(
+				"Use the calendar button to pick a time"
+			);
+			return;
+		}
+		this.currentScheduleInfo = info;
+		this.scheduleSummaryEl.classList.remove("is-placeholder");
+		this.scheduleDateEl.setText(info.dateLabel);
+		this.scheduleTimeEl.setText(info.timeLabel);
+	}
+
+	private extractScheduleInfo(
+		frontmatter?: Record<string, unknown> | null
+	): MeetingScheduleInfo | null {
+		if (!frontmatter) {
+			return null;
+		}
+		const start =
+			this.parseDateTime(
+				this.normalizeDateValue(frontmatter["start_date"]),
+				this.normalizeTimeValue(frontmatter["start_time"])
+			) ?? this.parseIsoDate(frontmatter["start"]);
+		if (!start) {
+			return null;
+		}
+		const end =
+			this.parseDateTime(
+				this.normalizeDateValue(
+					frontmatter["end_date"] ?? frontmatter["start_date"]
+				),
+				this.normalizeTimeValue(
+					frontmatter["end_time"] ?? frontmatter["start_time"]
+				)
+			) ?? this.parseIsoDate(frontmatter["end"]) ?? start;
+		const context = resolveMeetingContext(this.plugin.settings, {
+			title: this.currentMeetingFile?.basename ?? "Meeting",
+			audioPath: this.currentAudioPath ?? "",
+			transcriptPath: this.currentTranscriptPath ?? undefined,
+			start,
+			end,
+		});
+		return {
+			start,
+			end,
+			startDate: context.startDate,
+			startTime: context.startTime,
+			endDate: context.endDate,
+			endTime: context.endTime,
+			dateLabel: context.dateLabel,
+			timeLabel: context.timeLabel,
+		};
+	}
+
+	private normalizeDateValue(value: unknown): string | null {
+		if (typeof value === "string" && value.trim().length) {
+			return value.trim();
+		}
+		return null;
+	}
+
+	private normalizeTimeValue(value: unknown): string | null {
+		if (typeof value === "string" && value.trim().length) {
+			return value.trim();
+		}
+		return null;
+	}
+
+	private parseDateTime(
+		dateStr?: string | null,
+		timeStr?: string | null
+	): Date | null {
+		if (!dateStr) {
+			return null;
+		}
+		const timePart =
+			timeStr && timeStr.trim().length ? timeStr.trim() : "00:00";
+		const iso = `${dateStr}T${timePart}`;
+		const parsed = new Date(iso);
+		return Number.isNaN(parsed.getTime()) ? null : parsed;
+	}
+
+	private parseIsoDate(value: unknown): Date | null {
+		if (typeof value !== "string" || !value.trim().length) {
+			return null;
+		}
+		const parsed = new Date(value);
+		return Number.isNaN(parsed.getTime()) ? null : parsed;
 	}
 
 	private updateLabelHeader() {
@@ -491,6 +688,161 @@ export class TranscriptSidebarView extends ItemView {
 			return;
 		}
 		this.deleteButtonEl.toggleAttribute("disabled", !enabled);
+	}
+
+	private openScheduleEditor() {
+		if (this.mode !== "meeting" || !this.currentMeetingFile) {
+			new Notice("Open a meeting note to edit its schedule.", 4000);
+			return;
+		}
+		new EditMeetingScheduleModal(this.app, {
+			initialStartDate: this.currentScheduleInfo?.startDate,
+			initialStartTime: this.currentScheduleInfo?.startTime,
+			initialEndDate: this.currentScheduleInfo?.endDate,
+			initialEndTime: this.currentScheduleInfo?.endTime,
+			onSubmit: (update) => {
+				void this.applyScheduleUpdate(update);
+			},
+		}).open();
+	}
+
+	private async applyScheduleUpdate(
+		update: MeetingScheduleUpdate
+	): Promise<void> {
+		if (this.mode !== "meeting" || !this.currentMeetingFile) {
+			new Notice("Open a meeting note to edit its schedule.", 4000);
+			return;
+		}
+		const start = this.combineDateAndTime(
+			update.startDate,
+			update.startTime
+		);
+		if (!start) {
+			new Notice("Invalid start date or time.", 4000);
+			return;
+		}
+		const endInput = this.combineDateAndTime(
+			update.endDate || update.startDate,
+			update.endTime || update.startTime
+		);
+		const end =
+			endInput && endInput.getTime() >= start.getTime()
+				? endInput
+				: new Date(start.getTime() + 60 * 60 * 1000);
+		const startDateStr = this.formatFrontmatterDate(start);
+		const endDateStr = this.formatFrontmatterDate(end);
+		const startTimeStr = this.formatFrontmatterTime(start);
+		const endTimeStr = this.formatFrontmatterTime(end);
+		try {
+			await this.plugin.app.fileManager.processFrontMatter(
+				this.currentMeetingFile,
+				(fm) => {
+					fm.start = start.toISOString();
+					fm.end = end.toISOString();
+					fm.start_date = startDateStr;
+					fm.start_time = startTimeStr;
+					fm.end_date = endDateStr;
+					fm.end_time = endTimeStr;
+					fm.date = startDateStr;
+				}
+			);
+			this.currentMeetingDateParts = {
+				year: startDateStr.slice(0, 4),
+				month: startDateStr.slice(5, 7),
+				day: startDateStr.slice(8, 10),
+			};
+			const updatedFrontmatter = {
+				start_date: startDateStr,
+				start_time: startTimeStr,
+				end_date: endDateStr,
+				end_time: endTimeStr,
+				start: start.toISOString(),
+				end: end.toISOString(),
+			};
+			this.updateScheduleSummary(updatedFrontmatter);
+			await this.refreshScheduleCallout(start, end);
+			this.dashboardController.scheduleRefresh();
+			new Notice("Meeting schedule updated.", 4000);
+		} catch (error) {
+			console.error(
+				"Audio Notes: Could not update meeting schedule.",
+				error
+			);
+			new Notice("Could not update meeting schedule.", 6000);
+		}
+	}
+
+	private combineDateAndTime(
+		dateStr?: string,
+		timeStr?: string
+	): Date | null {
+		if (!dateStr) {
+			return null;
+		}
+		const timePart =
+			timeStr && timeStr.trim().length ? timeStr.trim() : "00:00";
+		const iso = `${dateStr}T${timePart}`;
+		const parsed = new Date(iso);
+		return Number.isNaN(parsed.getTime()) ? null : parsed;
+	}
+
+	private formatFrontmatterDate(date: Date): string {
+		const year = date.getFullYear().toString().padStart(4, "0");
+		const month = (date.getMonth() + 1).toString().padStart(2, "0");
+		const day = date.getDate().toString().padStart(2, "0");
+		return `${year}-${month}-${day}`;
+	}
+
+	private formatFrontmatterTime(date: Date): string {
+		const hours = date.getHours().toString().padStart(2, "0");
+		const minutes = date.getMinutes().toString().padStart(2, "0");
+		return `${hours}:${minutes}`;
+	}
+
+	private async refreshScheduleCallout(
+		start: Date,
+		end: Date
+	): Promise<void> {
+		const file = this.currentMeetingFile;
+		if (!file) {
+			return;
+		}
+		try {
+			const content = await this.app.vault.read(file);
+			const lines = content.split("\n");
+			const scheduleIndex = lines.findIndex((line) =>
+				line.trim().startsWith("> [!info] Schedule")
+			);
+			if (scheduleIndex === -1) {
+				return;
+			}
+			let endIndex = scheduleIndex + 1;
+			while (
+				endIndex < lines.length &&
+				lines[endIndex].trim().startsWith(">")
+			) {
+				endIndex += 1;
+			}
+			const context = resolveMeetingContext(this.plugin.settings, {
+				title: file.basename,
+				audioPath: this.currentAudioPath ?? "",
+				transcriptPath: this.currentTranscriptPath ?? undefined,
+				start,
+				end,
+			});
+			const replacement = buildScheduleCallout(context).split("\n");
+			lines.splice(
+				scheduleIndex,
+				Math.max(endIndex - scheduleIndex, 1),
+				...replacement
+			);
+			await this.app.vault.modify(file, lines.join("\n"));
+		} catch (error) {
+			console.error(
+				"Audio Notes: Could not refresh schedule callout.",
+				error
+			);
+		}
 	}
 
 	private async confirmDeleteCurrentMeeting() {
@@ -637,11 +989,35 @@ export class TranscriptSidebarView extends ItemView {
 
 		// Get current tags from the file
 		const cache = this.app.metadataCache.getFileCache(this.currentMeetingFile);
-		const currentTags = collectTags(cache).filter((tag) => {
-			const categories = getEffectiveMeetingLabelCategories(
-				this.plugin.settings.meetingLabelCategories
-			);
-			return categories.some((cat) => tag.startsWith(cat.tagPrefix));
+		const categories = getEffectiveMeetingLabelCategories(
+			this.plugin.settings.meetingLabelCategories
+		);
+		const currentTagSet = new Set<string>();
+		const frontmatterLabel = getMeetingLabelFromFrontmatter(
+			(cache?.frontmatter as Record<string, unknown> | undefined) ?? undefined
+		);
+		if (frontmatterLabel) {
+			currentTagSet.add(frontmatterLabel);
+		}
+		if (!currentTagSet.size && cache) {
+			for (const tag of collectTags(cache)) {
+				if (
+					!categories.length ||
+					categories.some((cat) => tag.startsWith(cat.tagPrefix))
+				) {
+					currentTagSet.add(tag);
+				}
+			}
+		}
+		if (this.currentMeetingLabel?.tag) {
+			currentTagSet.add(this.currentMeetingLabel.tag);
+		}
+		const currentTags = Array.from(currentTagSet);
+		console.log("Audio Notes: Meeting label picker tags", {
+			file: this.currentMeetingFile?.path,
+			currentTags,
+			frontmatterLabel,
+			currentMeetingLabel: this.currentMeetingLabel?.tag,
 		});
 
 		const picker = new MeetingLabelPickerModal(
@@ -762,6 +1138,71 @@ export class TranscriptSidebarView extends ItemView {
 		);
 	}
 
+	private extractSpeakerLabelOverrides(
+		source: Record<string, unknown> | undefined
+	): Record<string, string> {
+		if (!source) {
+			return {};
+		}
+		const raw = source[SPEAKER_LABELS_FIELD];
+		if (!raw || typeof raw !== "object") {
+			return {};
+		}
+		const overrides: Record<string, string> = {};
+		for (const [key, value] of Object.entries(
+			raw as Record<string, unknown>
+		)) {
+			if (typeof value === "string") {
+				const trimmed = value.trim();
+				if (trimmed.length) {
+					overrides[key] = trimmed;
+				}
+			}
+		}
+		return overrides;
+	}
+
+	private async handleSpeakerRename(
+		speakerKey: string,
+		newLabel: string
+	): Promise<void> {
+		if (!this.currentMeetingFile) {
+			new Notice("Open a meeting note to rename speakers.", 4000);
+			return;
+		}
+		const trimmed = newLabel?.trim();
+		if (!trimmed) {
+			new Notice("Enter a speaker name.", 4000);
+			return;
+		}
+		if (this.speakerLabelOverrides[speakerKey] === trimmed) {
+			return;
+		}
+		try {
+			await this.app.fileManager.processFrontMatter(
+				this.currentMeetingFile,
+				(frontmatter) => {
+					const overrides = this.extractSpeakerLabelOverrides(
+						frontmatter as Record<string, unknown>
+					);
+					overrides[speakerKey] = trimmed;
+					(frontmatter as Record<string, unknown>)[
+						SPEAKER_LABELS_FIELD
+					] = overrides;
+				}
+			);
+			this.updateSpeakerLabelOverrides({
+				...this.speakerLabelOverrides,
+				[speakerKey]: trimmed,
+			});
+			new Notice(`Speaker renamed to ${trimmed}`, 3000);
+		} catch (error) {
+			console.error("Audio Notes: Could not rename speaker.", error);
+			new Notice("Could not rename speaker.", 4000);
+			throw error;
+		}
+	}
+
 	public async showDashboard(): Promise<void> {
 		this.currentFilePath = null;
 		this.currentTranscriptPath = null;
@@ -771,6 +1212,7 @@ export class TranscriptSidebarView extends ItemView {
 		this.resetAttachments();
 		this.setMode("dashboard");
 		this.updateDeleteButtonState();
+		this.updateScheduleSummary(null);
 		this.meetingContainer?.addClass("is-hidden");
 		this.dashboardContainer?.removeClass("is-hidden");
 		this.dashboardController.ensure(this.dashboardContainer);
@@ -786,6 +1228,16 @@ export class TranscriptSidebarView extends ItemView {
 		});
 		this.currentMeetingFile = null;
 		this.currentMeetingDateParts = null;
+		this.updateSpeakerLabelOverrides({});
+	}
+
+	private updateSpeakerLabelOverrides(
+		overrides: Record<string, string>
+	): void {
+		this.speakerLabelOverrides = overrides;
+		this.transcriptComponent?.$set({
+			speakerLabelOverrides: { ...overrides },
+		});
 	}
 
 	private async syncAttachments(): Promise<void> {

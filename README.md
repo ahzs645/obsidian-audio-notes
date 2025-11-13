@@ -40,6 +40,15 @@ Audio Notes is still in beta, so the easiest way to try it is through the commun
 
 Remove the entry inside BRAT's settings if you ever want to uninstall the beta.
 
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+The dev script now watches both the TypeScript bundle and the CSS pipeline. All source styles live under `src/styles/` (split into focused partials such as `base.css`, `transcript.css`, `calendar.css`, etc.). `src/styles/main.css` keeps their import order, and esbuild bundles them into the plugin-level `styles.css`. Change a partial, keep the dev watcher running, and the generated stylesheet in the repo stays in sync.
+
 ## Calendar view and Bases
 
 You can see meetings in two places:

@@ -1,4 +1,5 @@
 <script lang="ts">
+import { tick } from "svelte";
 import type { Action } from "svelte/action";
 import type {
 	TranscriptSegmentWithSpeaker,
@@ -50,8 +51,72 @@ export let segmentRefAction: Action<HTMLElement, number> = noopAction;
 export let jumpToTime: (time: number | undefined) => void = () => {};
 export let formatTime: (time: number | null | undefined) => string = () => "";
 export let getSpeakerColorClass: (key: string) => string = () => "blue";
+export let speakerLabelOverrides: Record<string, string> = {};
+export let onRenameSpeaker: (
+	key: string,
+	label: string
+) => Promise<void> = async () => Promise.resolve();
 
 $: canTranscribe = canTranscribeDeepgram || canTranscribeScriberr;
+
+let activeRenameKey: string | null = null;
+let renameDraft = "";
+let renameLoading = false;
+let renameInputEl: HTMLInputElement | null = null;
+
+function toggleRenameMenu(group: GroupedTranscript) {
+	if (activeRenameKey === group.speakerKey) {
+		closeRenameMenu();
+		return;
+	}
+	activeRenameKey = group.speakerKey;
+	renameDraft =
+		speakerLabelOverrides[group.speakerKey]?.trim() || group.label || "";
+	renameLoading = false;
+	tick().then(() => {
+		renameInputEl?.focus();
+		renameInputEl?.select();
+	});
+}
+
+function closeRenameMenu() {
+	activeRenameKey = null;
+	renameDraft = "";
+	renameLoading = false;
+}
+
+function isRenameDisabled(group: GroupedTranscript): boolean {
+	const trimmed = renameDraft.trim();
+	if (!trimmed) return true;
+	const current =
+		speakerLabelOverrides[group.speakerKey]?.trim() || group.label || "";
+	return trimmed === current || renameLoading;
+}
+
+async function handleRename(group: GroupedTranscript) {
+	if (isRenameDisabled(group)) return;
+	renameLoading = true;
+	try {
+		await onRenameSpeaker(group.speakerKey, renameDraft.trim());
+		closeRenameMenu();
+	} catch (error) {
+		console.error("Audio Notes: speaker rename failed", error);
+		renameLoading = false;
+	}
+}
+
+function handleRenameKeydown(
+	event: KeyboardEvent,
+	group: GroupedTranscript
+) {
+	if (event.key === "Enter") {
+		event.preventDefault();
+		void handleRename(group);
+	} else if (event.key === "Escape") {
+		event.preventDefault();
+		closeRenameMenu();
+	}
+}
 </script>
 
 <div class="audio-note-transcript-panel">
@@ -261,12 +326,76 @@ $: canTranscribe = canTranscribeDeepgram || canTranscribeScriberr;
 									class:is-active={group.segments.some(({ index }) => index === activeSegmentIndex)}
 								>
 									<div class="aan-transcript-group-header">
-										<div
-											class={`aan-transcript-speaker-badge speaker-${getSpeakerColorClass(
-												group.speakerKey
-											)}`}
-										>
-											{group.label}
+										<div class="aan-speaker-chip">
+											<button
+												type="button"
+												class={`aan-transcript-speaker-badge speaker-${getSpeakerColorClass(
+													group.speakerKey
+												)}`}
+												on:click={() => toggleRenameMenu(group)}
+												aria-expanded={activeRenameKey === group.speakerKey}
+												aria-haspopup="dialog"
+												class:has-menu={activeRenameKey === group.speakerKey}
+											>
+												<span>{group.label}</span>
+												<svg
+													width="14"
+													height="14"
+													viewBox="0 0 24 24"
+													fill="none"
+													xmlns="http://www.w3.org/2000/svg"
+													aria-hidden="true"
+												>
+													<path
+														d="M4 21h4.586a2 2 0 0 0 1.414-.586L20.5 9.914a2 2 0 0 0 0-2.828l-3.586-3.586a2 2 0 0 0-2.828 0L3.586 14.586A2 2 0 0 0 3 16v4a1 1 0 0 0 1 1Z"
+														stroke="currentColor"
+														stroke-width="1.5"
+														stroke-linecap="round"
+														stroke-linejoin="round"
+													/>
+													<path
+														d="M13.5 6.5 17 10"
+														stroke="currentColor"
+														stroke-width="1.5"
+														stroke-linecap="round"
+														stroke-linejoin="round"
+													/>
+												</svg>
+											</button>
+											{#if activeRenameKey === group.speakerKey}
+												<div class="aan-speaker-rename-menu" role="dialog">
+													<p class="aan-speaker-rename-title">
+														Rename speaker
+													</p>
+													<input
+														type="text"
+														placeholder="Type a name…"
+														bind:value={renameDraft}
+														bind:this={renameInputEl}
+														on:keydown={(event) =>
+															handleRenameKeydown(event, group)
+														}
+													/>
+													<div class="aan-speaker-rename-actions">
+														<button
+															type="button"
+															class="aan-transcript-btn primary"
+															on:click={() => void handleRename(group)}
+															disabled={isRenameDisabled(group)}
+														>
+															{renameLoading ? "Saving…" : "Save"}
+														</button>
+														<button
+															type="button"
+															class="aan-transcript-btn"
+															on:click={closeRenameMenu}
+															disabled={renameLoading}
+														>
+															Cancel
+														</button>
+													</div>
+												</div>
+											{/if}
 										</div>
 										<button
 											type="button"

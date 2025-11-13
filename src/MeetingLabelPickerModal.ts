@@ -73,6 +73,7 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 	}
 
 	onOpen() {
+		super.onOpen();
 		this.availableLabels = this.computeAvailableLabels();
 		this.renderSelectedTags();
 		if (this.initialQuery) {
@@ -82,66 +83,79 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 	}
 
 	private renderSelectedTags() {
-		if (!this.options.currentTags || this.options.currentTags.length === 0) {
+		const promptDiv = this.inputEl?.closest(".prompt");
+		if (!promptDiv) {
+			console.warn("Audio Notes: Could not locate prompt container for label picker.");
 			return;
 		}
 
-		// Find the prompt div and add selected tags above it
-		const promptDiv = this.modalEl.querySelector('.prompt');
-		if (!promptDiv) return;
+		if (this.selectedTagsContainer) {
+			this.selectedTagsContainer.remove();
+			this.selectedTagsContainer = null;
+		}
+
+		const currentTags = this.options.currentTags ?? [];
+		if (!currentTags.length) {
+			return;
+		}
 
 		this.selectedTagsContainer = promptDiv.createDiv({
-			cls: 'aan-selected-tags-container'
+			cls: "aan-selected-tags-container",
 		});
-
-		this.selectedTagsContainer.createEl('div', {
-			text: 'Selected tags:',
-			cls: 'aan-selected-tags-title'
+		const header = this.selectedTagsContainer.createEl("div", {
+			text: "Selected tags",
+			cls: "aan-selected-tags-title",
 		});
+		header.setAttribute("aria-live", "polite");
 
 		const tagsListDiv = this.selectedTagsContainer.createDiv({
-			cls: 'aan-selected-tags-list'
+			cls: "aan-selected-tags-list",
 		});
 
-		for (const tag of this.options.currentTags) {
+		for (const tag of currentTags) {
 			const labelInfo = buildMeetingLabelInfo(tag, this.categories);
 			const tagEl = tagsListDiv.createDiv({
-				cls: 'aan-selected-tag-item'
+				cls: "aan-selected-tag-item",
 			});
 
 			if (labelInfo.icon) {
 				tagEl.createSpan({
 					text: labelInfo.icon,
-					cls: 'aan-selected-tag-icon'
+					cls: "aan-selected-tag-icon",
 				});
 			}
 
 			tagEl.createSpan({
 				text: labelInfo.displayName,
-				cls: 'aan-selected-tag-name'
+				cls: "aan-selected-tag-name",
 			});
 
-			const removeBtn = tagEl.createEl('button', {
-				text: '×',
-				cls: 'aan-selected-tag-remove'
+			const removeBtn = tagEl.createEl("button", {
+				text: "×",
+				cls: "aan-selected-tag-remove",
 			});
 
-			removeBtn.addEventListener('click', (e) => {
-				e.preventDefault();
-				e.stopPropagation();
+			removeBtn.addEventListener("click", (event) => {
+				event.preventDefault();
+				event.stopPropagation();
 				this.options.onRemoveTag?.(tag);
 				tagEl.remove();
-
-				// If no more tags, remove the container
-				if (tagsListDiv.children.length === 0 && this.selectedTagsContainer) {
+				if (
+					tagsListDiv.children.length === 0 &&
+					this.selectedTagsContainer
+				) {
 					this.selectedTagsContainer.remove();
 					this.selectedTagsContainer = null;
 				}
 			});
 		}
 
-		// Insert at the beginning of the prompt
-		promptDiv.insertBefore(this.selectedTagsContainer, promptDiv.firstChild);
+		const promptResults = promptDiv.querySelector(".prompt-results");
+		if (promptResults) {
+			promptDiv.insertBefore(this.selectedTagsContainer, promptResults);
+		} else {
+			promptDiv.appendChild(this.selectedTagsContainer);
+		}
 	}
 
 	getSuggestions(query: string): MeetingLabelSuggestion[] {

@@ -40,6 +40,11 @@ export let hasTranscript = false;
 export let onTranscribeMeeting: (
 	provider: "deepgram" | "scriberr"
 ) => Promise<void> = async () => Promise.resolve();
+export let speakerLabelOverrides: Record<string, string> = {};
+export let onRenameSpeaker: (
+	speakerKey: string,
+	newLabel: string
+) => Promise<void> = async () => Promise.resolve();
 
 	const speakerColorAssignments = new Map<string, string>();
 	const speakerColorClasses = [
@@ -81,12 +86,13 @@ let audioUploadInput: HTMLInputElement | null = null;
 			  )
 			: null);
 
-	$: groupedSegments = buildGroups(segments);
+	$: groupedSegments = buildGroups(segments, speakerLabelOverrides);
 
 	$: searchMatches = computeSearchMatches(
 		segments,
 		transcriptText,
-		searchQuery
+		searchQuery,
+		speakerLabelOverrides
 	);
 
 	$: {
@@ -352,6 +358,11 @@ let audioUploadInput: HTMLInputElement | null = null;
 		segment: TranscriptSegmentWithSpeaker,
 		index: number
 	): string {
+		const key = getSpeakerKey(segment, index);
+		const override = speakerLabelOverrides?.[key];
+		if (override?.trim()) {
+			return override.trim();
+		}
 		return (
 			segment.speakerLabel ??
 			segment.speakerName ??
@@ -418,7 +429,8 @@ let audioUploadInput: HTMLInputElement | null = null;
 	}
 
 	function buildGroups(
-		source: TranscriptSegmentWithSpeaker[]
+		source: TranscriptSegmentWithSpeaker[],
+		overrides: Record<string, string>
 	): GroupedTranscript[] {
 		const groups: GroupedTranscript[] = [];
 		let current: GroupedTranscript | null = null;
@@ -428,7 +440,7 @@ let audioUploadInput: HTMLInputElement | null = null;
 				current = {
 					id: `${speakerKey}-${groups.length}`,
 					speakerKey,
-					label: getSpeakerLabel(segment, index),
+					label: overrides?.[speakerKey]?.trim() || getSpeakerLabel(segment, index),
 					startTime: Number(segment.start ?? 0),
 					endTime: Number(segment.end ?? segment.start ?? 0),
 					segments: [],
@@ -444,7 +456,8 @@ let audioUploadInput: HTMLInputElement | null = null;
 	function computeSearchMatches(
 		source: TranscriptSegmentWithSpeaker[],
 		text: string,
-		query: string
+		query: string,
+		overrides: Record<string, string>
 	): TranscriptSearchMatch[] {
 		if (!query?.trim()) {
 			return [];
@@ -466,8 +479,10 @@ let audioUploadInput: HTMLInputElement | null = null;
 					});
 					startIndex = matchIndex + lowerQuery.length;
 				}
-				const speakerName =
-					getSpeakerLabel(segment, index).toLowerCase() ?? "";
+				const label =
+					(overrides?.[getSpeakerKey(segment, index)] ??
+						getSpeakerLabel(segment, index)) || "";
+				const speakerName = label.toLowerCase();
 				if (speakerName.includes(lowerQuery)) {
 					matches.push({
 						type: "speaker",
@@ -639,6 +654,8 @@ let audioUploadInput: HTMLInputElement | null = null;
 			{jumpToTime}
 			{formatTime}
 			{getSpeakerColorClass}
+			{speakerLabelOverrides}
+			{onRenameSpeaker}
 		/>
 	{/if}
 </div>
