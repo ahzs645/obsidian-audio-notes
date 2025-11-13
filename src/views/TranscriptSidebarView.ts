@@ -1013,12 +1013,6 @@ export class TranscriptSidebarView extends ItemView {
 			currentTagSet.add(this.currentMeetingLabel.tag);
 		}
 		const currentTags = Array.from(currentTagSet);
-		console.log("Audio Notes: Meeting label picker tags", {
-			file: this.currentMeetingFile?.path,
-			currentTags,
-			frontmatterLabel,
-			currentMeetingLabel: this.currentMeetingLabel?.tag,
-		});
 
 		const picker = new MeetingLabelPickerModal(
 			this.app,

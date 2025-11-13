@@ -1,4 +1,5 @@
 <script lang="ts">
+import { onMount } from "svelte";
 import { tick } from "svelte";
 import type { Action } from "svelte/action";
 import type {
@@ -59,17 +60,31 @@ export let onRenameSpeaker: (
 
 $: canTranscribe = canTranscribeDeepgram || canTranscribeScriberr;
 
-let activeRenameKey: string | null = null;
+let activeRenameGroupId: string | null = null;
 let renameDraft = "";
 let renameLoading = false;
 let renameInputEl: HTMLInputElement | null = null;
+let availableSpeakerLabels: string[] = [];
+
+$: availableSpeakerLabels = Array.from(
+	new Set(
+		[
+			...groupedSegments
+				.map((group) => group.label?.trim())
+				.filter((label): label is string => Boolean(label)),
+			...Object.values(speakerLabelOverrides ?? {}).map((value) =>
+				value.trim()
+			),
+		].filter((label) => label.length)
+	)
+);
 
 function toggleRenameMenu(group: GroupedTranscript) {
-	if (activeRenameKey === group.speakerKey) {
+	if (activeRenameGroupId === group.id) {
 		closeRenameMenu();
 		return;
 	}
-	activeRenameKey = group.speakerKey;
+	activeRenameGroupId = group.id;
 	renameDraft =
 		speakerLabelOverrides[group.speakerKey]?.trim() || group.label || "";
 	renameLoading = false;
@@ -80,24 +95,28 @@ function toggleRenameMenu(group: GroupedTranscript) {
 }
 
 function closeRenameMenu() {
-	activeRenameKey = null;
+	activeRenameGroupId = null;
 	renameDraft = "";
 	renameLoading = false;
 }
 
 function isRenameDisabled(group: GroupedTranscript): boolean {
 	const trimmed = renameDraft.trim();
-	if (!trimmed) return true;
-	const current =
-		speakerLabelOverrides[group.speakerKey]?.trim() || group.label || "";
-	return trimmed === current || renameLoading;
+	return !trimmed || renameLoading;
 }
 
-async function handleRename(group: GroupedTranscript) {
-	if (isRenameDisabled(group)) return;
+async function handleRename(group: GroupedTranscript, preset?: string) {
+	const nextLabel = (preset ?? renameDraft).trim();
+	const currentLabel =
+		speakerLabelOverrides[group.speakerKey]?.trim() ||
+		group.label?.trim() ||
+		"";
+	if (!nextLabel || renameLoading || nextLabel === currentLabel) {
+		return;
+	}
 	renameLoading = true;
 	try {
-		await onRenameSpeaker(group.speakerKey, renameDraft.trim());
+		await onRenameSpeaker(group.speakerKey, nextLabel);
 		closeRenameMenu();
 	} catch (error) {
 		console.error("Audio Notes: speaker rename failed", error);
@@ -117,6 +136,37 @@ function handleRenameKeydown(
 		closeRenameMenu();
 	}
 }
+
+function handleSpeakerBadgeKeydown(
+	event: KeyboardEvent,
+	group: GroupedTranscript
+) {
+	if (event.key === "Enter" || event.key === " ") {
+		event.preventDefault();
+		toggleRenameMenu(group);
+	} else if (event.key === "Escape" && activeRenameGroupId === group.id) {
+		event.preventDefault();
+		closeRenameMenu();
+	}
+}
+
+function applySuggestedLabel(label: string, group: GroupedTranscript) {
+	renameDraft = label;
+	void handleRename(group, label);
+}
+
+onMount(() => {
+	const handleDocumentClick = (event: MouseEvent) => {
+		if (!activeRenameGroupId) return;
+		const target = event.target as HTMLElement | null;
+		if (!target) return;
+		if (!target.closest(".aan-speaker-chip")) {
+			closeRenameMenu();
+		}
+	};
+	document.addEventListener("click", handleDocumentClick);
+	return () => document.removeEventListener("click", handleDocumentClick);
+});
 </script>
 
 <div class="audio-note-transcript-panel">
@@ -327,42 +377,22 @@ function handleRenameKeydown(
 								>
 									<div class="aan-transcript-group-header">
 										<div class="aan-speaker-chip">
-											<button
-												type="button"
+											<div
+												role="button"
+												tabindex="0"
 												class={`aan-transcript-speaker-badge speaker-${getSpeakerColorClass(
 													group.speakerKey
 												)}`}
 												on:click={() => toggleRenameMenu(group)}
-												aria-expanded={activeRenameKey === group.speakerKey}
+												on:keydown={(event) =>
+													handleSpeakerBadgeKeydown(event, group)
+												}
+												aria-expanded={activeRenameGroupId === group.id}
 												aria-haspopup="dialog"
-												class:has-menu={activeRenameKey === group.speakerKey}
 											>
-												<span>{group.label}</span>
-												<svg
-													width="14"
-													height="14"
-													viewBox="0 0 24 24"
-													fill="none"
-													xmlns="http://www.w3.org/2000/svg"
-													aria-hidden="true"
-												>
-													<path
-														d="M4 21h4.586a2 2 0 0 0 1.414-.586L20.5 9.914a2 2 0 0 0 0-2.828l-3.586-3.586a2 2 0 0 0-2.828 0L3.586 14.586A2 2 0 0 0 3 16v4a1 1 0 0 0 1 1Z"
-														stroke="currentColor"
-														stroke-width="1.5"
-														stroke-linecap="round"
-														stroke-linejoin="round"
-													/>
-													<path
-														d="M13.5 6.5 17 10"
-														stroke="currentColor"
-														stroke-width="1.5"
-														stroke-linecap="round"
-														stroke-linejoin="round"
-													/>
-												</svg>
-											</button>
-											{#if activeRenameKey === group.speakerKey}
+												{group.label}
+											</div>
+											{#if activeRenameGroupId === group.id}
 												<div class="aan-speaker-rename-menu" role="dialog">
 													<p class="aan-speaker-rename-title">
 														Rename speaker
@@ -375,11 +405,33 @@ function handleRenameKeydown(
 														on:keydown={(event) =>
 															handleRenameKeydown(event, group)
 														}
-													/>
-													<div class="aan-speaker-rename-actions">
-														<button
-															type="button"
-															class="aan-transcript-btn primary"
+														/>
+														{#if availableSpeakerLabels.length > 1}
+															<div class="aan-speaker-rename-suggestions">
+																<p>Use an existing name</p>
+																<div>
+																	{#each availableSpeakerLabels
+																		.filter(
+																			(label) => label !== group.label
+																		)
+																		.slice(0, 6) as label}
+																		<button
+																			type="button"
+																			class="aan-speaker-suggestion"
+																			on:click={() =>
+																				applySuggestedLabel(label, group)
+																			}
+																		>
+																			{label}
+																		</button>
+																	{/each}
+																</div>
+															</div>
+														{/if}
+														<div class="aan-speaker-rename-actions">
+															<button
+																type="button"
+																class="aan-transcript-btn primary"
 															on:click={() => void handleRename(group)}
 															disabled={isRenameDisabled(group)}
 														>

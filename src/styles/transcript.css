@@ -578,37 +578,6 @@
 	gap: 8px;
 }
 
-.aan-speaker-chip {
-	position: relative;
-	display: inline-flex;
-}
-
-.aan-transcript-speaker-badge {
-	appearance: none;
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	font-size: 0.9em;
-	font-weight: 600;
-	padding: 2px 10px;
-	border-radius: 999px;
-	border: 1px solid transparent;
-	background: transparent;
-	cursor: pointer;
-	transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.aan-transcript-speaker-badge svg {
-	width: 14px;
-	height: 14px;
-	opacity: 0.7;
-}
-
-.aan-transcript-speaker-badge:hover svg,
-.aan-transcript-speaker-badge.has-menu svg {
-	opacity: 1;
-}
-
 .aan-speaker-rename-menu {
 	position: absolute;
 	z-index: 2;
@@ -657,6 +626,64 @@
 
 .aan-transcript-btn.primary:hover:not(:disabled) {
 	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.85);
+}
+
+.aan-speaker-rename-suggestions {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	font-size: 0.8rem;
+	color: var(--text-muted);
+}
+
+.aan-speaker-rename-suggestions > div {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.aan-speaker-suggestion {
+	border-radius: 999px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	font-size: 0.8rem;
+	padding: 2px 10px;
+	cursor: pointer;
+	transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.aan-speaker-suggestion:hover {
+	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.2);
+	border-color: var(--interactive-accent);
+}
+
+.aan-speaker-chip {
+	position: relative;
+	display: inline-flex;
+}
+
+.aan-transcript-speaker-badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: 600;
+	font-size: 0.9rem;
+	padding: 4px 14px;
+	border-radius: 999px;
+	border: 1px solid var(--background-modifier-border);
+	background: transparent;
+	min-height: 30px;
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.aan-speaker-chip .aan-transcript-speaker-badge {
+	cursor: pointer;
+}
+
+.aan-speaker-chip .aan-transcript-speaker-badge:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
 }
 
 .aan-transcript-speaker-icon {

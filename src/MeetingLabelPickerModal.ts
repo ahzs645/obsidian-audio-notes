@@ -85,7 +85,6 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 	private renderSelectedTags() {
 		const promptDiv = this.inputEl?.closest(".prompt");
 		if (!promptDiv) {
-			console.warn("Audio Notes: Could not locate prompt container for label picker.");
 			return;
 		}
 
