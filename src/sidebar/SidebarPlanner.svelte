@@ -1,14 +1,19 @@
 <script lang="ts">
 	import { localDateKey } from "../meeting-events";
 	import type { MeetingEvent } from "../meeting-events";
+	import type { NormalizedMeetingLabelCategory } from "../meeting-labels";
 
 	export let events: MeetingEvent[] = [];
 	export let selectedDate: string;
-export let onSelectDate: (date: string) => void;
-export let onOpenNote: (path: string, newLeaf: boolean) => void;
+	export let categories: NormalizedMeetingLabelCategory[] = [];
+	export let filterValue: string = "";
+	export let onSelectDate: (date: string) => void;
+	export let onOpenNote: (path: string, newLeaf: boolean) => void;
+	export let onFilterChange: (value: string) => void = () => {};
 
 	const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 	const todayKey = localDateKey(new Date());
+	$: selectedDayDate = parseISODate(selectedDate);
 
 	let monthCursor = firstDayOfMonth(selectedDate);
 	let lastSelected = selectedDate;
@@ -18,9 +23,10 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 		monthCursor = firstDayOfMonth(selectedDate);
 	}
 
-	$: eventsByDate = buildEventsByDate(events);
-	$: weeks = buildCalendar(monthCursor);
-	$: selectedDayEvents = (events || [])
+	$: filteredEvents = filterEvents(events, filterValue);
+	$: eventsByDate = buildEventsByDate(filteredEvents);
+	$: weeks = buildCalendar(monthCursor, eventsByDate);
+	$: selectedDayEvents = (filteredEvents || [])
 		.filter((event) => getDisplayDate(event) === selectedDate)
 		.sort((a, b) => a.start.getTime() - b.start.getTime());
 
@@ -58,7 +64,10 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 		return clone;
 	}
 
-	function buildCalendar(month: Date) {
+	function buildCalendar(
+		month: Date,
+		map: Map<string, MeetingEvent[]>
+	) {
 		const first = new Date(month);
 		const startOffset = first.getDay();
 		const gridStart = new Date(first);
@@ -88,12 +97,14 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 						current.getFullYear() === month.getFullYear(),
 					isToday: iso === todayKey,
 					isSelected: iso === selectedDate,
-					meetingCount: eventsByDate.get(iso)?.length || 0,
+					meetingCount: map.get(iso)?.length || 0,
 				});
 			}
 			weeks.push({ label: `week-${w}`, days });
 		}
-		return weeks;
+		return weeks.filter((week) =>
+			week.days.some((day) => day.isCurrentMonth)
+		);
 	}
 
 	function selectDay(iso: string) {
@@ -123,6 +134,74 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 	function openEvent(path: string, newLeaf: boolean) {
 		onOpenNote?.(path, newLeaf);
 	}
+
+	const formatTimeLabel = (date: Date) =>
+		date.toLocaleTimeString([], {
+			hour: "2-digit",
+			minute: "2-digit",
+		});
+
+	const formatTagForLabel = (tag?: string) => {
+		if (!tag) return "";
+		const slashIndex = tag.lastIndexOf("/");
+		if (slashIndex === -1) {
+			return tag;
+		}
+		return tag.slice(slashIndex + 1);
+	};
+	function filterEvents(
+		source: MeetingEvent[],
+		value: string
+	): MeetingEvent[] {
+		if (!value) {
+			return source || [];
+		}
+		if (value === "__unlabeled__") {
+			return (source || []).filter((event) => !event.label?.tag);
+		}
+		if (value.startsWith("category:")) {
+			const categoryId = value.slice("category:".length);
+			return (source || []).filter(
+				(event) => event.label?.categoryId === categoryId
+			);
+		}
+		if (value.startsWith("tag:")) {
+			const tag = value.slice("tag:".length);
+			return (source || []).filter(
+				(event) => event.label?.tag === tag
+			);
+		}
+		return source || [];
+	}
+
+	function buildLabelOptions(list: MeetingEvent[]) {
+		const map = new Map<
+			string,
+			{ tag: string; displayName: string; categoryName?: string }
+		>();
+		for (const event of list || []) {
+			const tag = event.label?.tag;
+			if (!tag) continue;
+			if (map.has(tag)) continue;
+			map.set(tag, {
+				tag,
+				displayName:
+					event.label?.displayName || formatTagForLabel(tag),
+				categoryName: event.label?.categoryName,
+			});
+		}
+		return Array.from(map.values()).sort((a, b) =>
+			a.displayName.localeCompare(b.displayName)
+		);
+	}
+
+	$: labelOptions = buildLabelOptions(events);
+
+	function handleFilterSelectChange(event: Event) {
+		const target = event.currentTarget as HTMLSelectElement | null;
+		if (!target) return;
+		onFilterChange?.(target.value);
+	}
 </script>
 
 <div class="aan-sidebar-calendar">
@@ -134,6 +213,42 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 		</div>
 		<div class="aan-sidebar-calendar__label">{monthLabel(monthCursor)}</div>
 	</header>
+	<div class="aan-sidebar-calendar__filter">
+		<label for="aan-calendar-filter">Filter</label>
+		<select
+			id="aan-calendar-filter"
+			on:change={handleFilterSelectChange}
+		>
+			<option value="" selected={!filterValue}>All meetings</option>
+			<option value="__unlabeled__" selected={filterValue === "__unlabeled__"}>
+				No label
+			</option>
+			{#if categories.length}
+				<optgroup label="Categories">
+					{#each categories as category}
+						<option
+							value={`category:${category.id}`}
+							selected={filterValue === `category:${category.id}`}
+						>
+							{category.name}
+						</option>
+					{/each}
+				</optgroup>
+			{/if}
+			{#if labelOptions.length}
+				<optgroup label="Labels">
+					{#each labelOptions as option}
+						<option
+							value={`tag:${option.tag}`}
+							selected={filterValue === `tag:${option.tag}`}
+						>
+							{option.displayName}
+						</option>
+					{/each}
+				</optgroup>
+			{/if}
+		</select>
+	</div>
 	<div class="aan-sidebar-calendar__weekdays">
 		{#each weekdays as day}
 			<div>{day}</div>
@@ -144,7 +259,8 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 			{#each week.days as day}
 				<button
 					class={`aan-sidebar-calendar__cell ${day.isCurrentMonth ? "" : "is-outside"} ${day.isToday ? "is-today" : ""} ${day.isSelected ? "is-selected" : ""}`}
-					on:click={() => selectDay(day.iso)}
+					on:click={() => day.isCurrentMonth && selectDay(day.iso)}
+					disabled={!day.isCurrentMonth}
 				>
 					<span>{day.label}</span>
 					{#if day.meetingCount > 0}
@@ -157,13 +273,15 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 
 	<section class="aan-sidebar-agenda">
 		<header>
-			<div class="aan-calendar-day-label">
-				{new Date(selectedDate).toLocaleDateString(undefined, {
-					weekday: "long",
-					month: "long",
-					day: "numeric",
-				})}
-			</div>
+			{#if selectedDayDate instanceof Date && !Number.isNaN(selectedDayDate.getTime())}
+				<div class="aan-calendar-day-label">
+					{selectedDayDate.toLocaleDateString(undefined, {
+						weekday: "long",
+						month: "long",
+						day: "numeric",
+					})}
+				</div>
+			{/if}
 			<div class="aan-calendar-day-count">
 				{selectedDayEvents.length
 					? `${selectedDayEvents.length} meeting${selectedDayEvents.length > 1 ? "s" : ""}`
@@ -174,46 +292,48 @@ export let onOpenNote: (path: string, newLeaf: boolean) => void;
 			<p class="aan-calendar-empty">No meetings scheduled.</p>
 		{:else}
 			<ul class="aan-calendar-day-list">
-				{#each selectedDayEvents as event}
-					<li class="aan-calendar-day-row">
-						<div class="aan-calendar-day-time">
-							<span>{event.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-							<span class="aan-calendar-day-time__end">
-								{event.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-							</span>
+			{#each selectedDayEvents as event}
+				<li class="aan-calendar-day-row">
+					<div class="aan-calendar-day-card">
+						<div class="aan-calendar-day-card-top">
+							<div class="aan-calendar-day-time">
+								<span>
+									{formatTimeLabel(event.start)} — {formatTimeLabel(event.end)}
+								</span>
+							</div>
+							{#if event.label}
+								<span class="aan-calendar-day-badge">
+									{event.label.name ?? formatTagForLabel(event.label.tag)}
+								</span>
+							{/if}
 						</div>
 						<div class="aan-calendar-day-content">
-							<div class="aan-calendar-day-title">
+							<div class="aan-calendar-day-title-row">
 								<span
 									class="aan-calendar-day-dot"
-									style={`background:${event.color || "var(--interactive-accent)"}`}
-								></span>
-								{event.title}
-							</div>
-							{#if event.tags?.length}
-								<div class="aan-calendar-day-meta">
-									<div class="aan-calendar-tag-row">
-										{#each event.tags as tag}
-											<span class="aan-calendar-chip--soft">{tag}</span>
-										{/each}
-									</div>
+										style={`background:${event.color || "var(--interactive-accent)"}`}
+									></span>
+									<span class="aan-calendar-day-title-text">{event.title}</span>
 								</div>
-							{/if}
+							<!-- Tags hidden per request -->
 							<div class="aan-calendar-day-actions">
-								<button
-									class="aan-calendar-icon-button"
-									title="Open note"
-									on:click={() => openEvent(event.path, false)}
-								>
-									<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide-icon lucide lucide-file-text "><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
-								</button>
-								<button
-									class="aan-calendar-icon-button"
-									title="Open in new pane"
-									on:click={() => openEvent(event.path, true)}
-								>
-									<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide-icon lucide lucide-external-link "><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-								</button>
+									<button
+										class="aan-calendar-action-btn"
+										title="Open note"
+										on:click={() => openEvent(event.path, false)}
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide-icon lucide lucide-file-text "><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
+										<span>Notes</span>
+									</button>
+									<button
+										class="aan-calendar-action-btn"
+										title="Open in new pane"
+										on:click={() => openEvent(event.path, true)}
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide-icon lucide lucide-external-link "><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+										<span>Open</span>
+									</button>
+								</div>
 							</div>
 						</div>
 					</li>

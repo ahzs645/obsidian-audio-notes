@@ -9,29 +9,31 @@ import type AutomaticAudioNotes from "./main";
 import {
 	importWhisperArchive,
 	notifyWhisperImportSuccess,
+	type WhisperImportResult,
 } from "./WhisperImporter";
+import {
+	MeetingLabelPickerModal,
+	type MeetingLabelSelection,
+} from "./MeetingLabelPickerModal";
+import { applyMeetingLabelToFile } from "./meeting-label-manager";
 
 export class ImportWhisperModal extends Modal {
 	private plugin: AutomaticAudioNotes;
-	private selectedFile: File | undefined;
-	private audioFolder: string;
-	private transcriptFolder: string;
+	private selectedFiles: File[] = [];
 	private useDateFolders: boolean;
 	private createNote: boolean;
-	private noteFolder: string;
 	private noteTitle: string;
 	private importButton: HTMLButtonElement | undefined;
-	private noteFolderInput?: TextComponent;
 	private noteTitleInput?: TextComponent;
+	private selectedFilesContainer?: HTMLElement;
+	private meetingLabelSelection?: MeetingLabelSelection;
+	private meetingLabelDisplay?: HTMLElement;
 
 	constructor(plugin: AutomaticAudioNotes) {
 		super(plugin.app);
 		this.plugin = plugin;
-		this.audioFolder = plugin.settings.whisperAudioFolder;
-		this.transcriptFolder = plugin.settings.whisperTranscriptFolder;
 		this.useDateFolders = plugin.settings.whisperUseDateFolders;
 		this.createNote = plugin.settings.whisperCreateNote;
-		this.noteFolder = plugin.settings.whisperNoteFolder;
 		this.noteTitle = "";
 	}
 
@@ -52,43 +54,44 @@ export class ImportWhisperModal extends Modal {
 			type: "file",
 		});
 		fileInput.accept = ".whisper";
+		fileInput.multiple = true;
 		fileInput.addEventListener("change", (evt: Event) => {
 			const target = evt.target as HTMLInputElement;
-			this.selectedFile = target.files?.[0];
-			if (this.selectedFile) {
+			this.selectedFiles = target.files ? Array.from(target.files) : [];
+			if (this.selectedFiles.length === 1) {
 				this.noteTitle =
-					this.selectedFile.name.replace(/\.whisper$/i, "") || "";
+					this.selectedFiles[0].name.replace(/\.whisper$/i, "") || "";
 				this.noteTitleInput?.setValue(this.noteTitle);
+			} else {
+				this.noteTitle = "";
+				this.noteTitleInput?.setValue("");
 			}
+			this.updateSelectedFilesList();
+			this.toggleNoteInputs();
 			this.toggleImportButton();
 		});
 
-		new Setting(contentEl)
-			.setName("Audio destination")
-			.setDesc("Files are stored relative to your vault root.")
-			.addText((text) =>
-				text
-					.setValue(this.audioFolder)
-					.onChange(async (value) => {
-						const cleaned = value.trim();
-						this.audioFolder = cleaned;
-						this.plugin.settings.whisperAudioFolder = cleaned;
-						await this.plugin.saveSettings();
-					})
-			);
-		new Setting(contentEl)
-			.setName("Transcript destination")
-			.setDesc("JSON transcripts are saved here.")
-			.addText((text) =>
-				text
-					.setValue(this.transcriptFolder)
-					.onChange(async (value) => {
-						const cleaned = value.trim();
-						this.transcriptFolder = cleaned;
-						this.plugin.settings.whisperTranscriptFolder = cleaned;
-						await this.plugin.saveSettings();
-					})
-			);
+		const selectionSetting = new Setting(contentEl)
+			.setName("Selected archives")
+			.setDesc("Choose one or more .whisper files to import in a batch.");
+		this.selectedFilesContainer = selectionSetting.controlEl.createDiv(
+			"aan-whisper-selected-files"
+		);
+		selectionSetting.addExtraButton((button) =>
+			button
+				.setIcon("x")
+				.setTooltip("Clear selection")
+				.onClick(() => {
+					this.selectedFiles = [];
+					this.noteTitle = "";
+					this.noteTitleInput?.setValue("");
+					fileInput.value = "";
+					this.updateSelectedFilesList();
+					this.toggleNoteInputs();
+					this.toggleImportButton();
+				})
+		);
+		this.updateSelectedFilesList();
 
 		new Setting(contentEl)
 			.setName("Use date subfolders")
@@ -118,24 +121,11 @@ export class ImportWhisperModal extends Modal {
 			);
 		noteToggleSetting.controlEl.addClass("whisper-note-toggle");
 
-		const noteFolderSetting = new Setting(contentEl)
-			.setName("Note destination")
-			.setDesc("Relative folder for the generated note.")
-			.addText((text) => {
-				this.noteFolderInput = text;
-				text.setPlaceholder("02-meetings")
-					.setValue(this.noteFolder)
-					.onChange(async (value) => {
-						const cleaned = value.trim();
-						this.noteFolder = cleaned;
-						this.plugin.settings.whisperNoteFolder = cleaned;
-						await this.plugin.saveSettings();
-					});
-			});
-
 		const noteTitleSetting = new Setting(contentEl)
 			.setName("Note title")
-			.setDesc("Defaults to the Whisper filename if left blank.")
+			.setDesc(
+				"Defaults to the archive filename when left blank. For batch imports, each note keeps its own filename."
+			)
 			.addText((text) => {
 				this.noteTitleInput = text;
 				text.setPlaceholder("Pipeline decisions with Will")
@@ -145,12 +135,34 @@ export class ImportWhisperModal extends Modal {
 					});
 			});
 
+		const labelSetting = new Setting(contentEl)
+			.setName("Meeting label")
+			.setDesc("Apply a meeting label to every generated note (optional).");
+		this.meetingLabelDisplay = labelSetting.controlEl.createDiv({
+			text: "No label selected",
+			cls: "aan-whisper-label-display",
+		});
+		labelSetting.addButton((button) =>
+			button
+				.setButtonText("Choose label")
+				.onClick(() => this.openMeetingLabelPicker())
+		);
+		labelSetting.addExtraButton((button) =>
+			button
+				.setIcon("x")
+				.setTooltip("Clear meeting label")
+				.onClick(() => {
+					this.meetingLabelSelection = undefined;
+					this.updateMeetingLabelDisplay();
+				})
+		);
+
 		this.importButton = contentEl.createEl("button", {
 			text: "Import",
 			cls: "mod-cta",
 		});
 		this.importButton.disabled = true;
-		this.importButton.addEventListener("click", () => this.importFile());
+		this.importButton.addEventListener("click", () => this.importFiles());
 
 		this.toggleNoteInputs();
 	}
@@ -161,64 +173,176 @@ export class ImportWhisperModal extends Modal {
 
 	private toggleImportButton() {
 		if (!this.importButton) return;
-		this.importButton.disabled = !this.selectedFile;
+		this.importButton.disabled = !this.selectedFiles.length;
 	}
 
 	private toggleNoteInputs() {
-		const disabled = !this.createNote;
-		this.noteFolderInput?.setDisabled(disabled);
+		const disabled = !this.createNote || this.selectedFiles.length !== 1;
 		this.noteTitleInput?.setDisabled(disabled);
+		if (this.noteTitleInput) {
+			const placeholder = disabled
+				? "Uses archive filename automatically"
+				: "Pipeline decisions with Will";
+			this.noteTitleInput.setPlaceholder(placeholder);
+		}
 	}
 
-	private async importFile() {
-		if (!this.selectedFile) {
-			new Notice("Select a .whisper file first.");
+	private updateSelectedFilesList() {
+		if (!this.selectedFilesContainer) {
 			return;
 		}
+		this.selectedFilesContainer.replaceChildren();
+		if (!this.selectedFiles.length) {
+			this.selectedFilesContainer.createSpan({
+				text: "No archives selected.",
+			});
+			return;
+		}
+		const summary =
+			this.selectedFiles.length === 1
+				? this.selectedFiles[0].name
+				: `${this.selectedFiles.length} archives selected`;
+		this.selectedFilesContainer.createDiv({
+			text: summary,
+			cls: "aan-whisper-selected-files-summary",
+		});
+		if (this.selectedFiles.length > 1) {
+			const list = this.selectedFilesContainer.createEl("ul", {
+				cls: "aan-whisper-selected-files-list",
+			});
+			for (const file of this.selectedFiles) {
+				list.createEl("li", { text: file.name });
+			}
+		}
+	}
+
+	private openMeetingLabelPicker() {
+		const picker = new MeetingLabelPickerModal(
+			this.app,
+			this.plugin,
+			(selection) => {
+				this.meetingLabelSelection = selection;
+				this.updateMeetingLabelDisplay();
+			}
+		);
+		picker.open();
+	}
+
+	private updateMeetingLabelDisplay() {
+		if (!this.meetingLabelDisplay) return;
+		this.meetingLabelDisplay.replaceChildren();
+		if (!this.meetingLabelSelection) {
+			this.meetingLabelDisplay.setText("No label selected");
+			return;
+		}
+		if (this.meetingLabelSelection.label.icon) {
+			this.meetingLabelDisplay.createSpan({
+				text: this.meetingLabelSelection.label.icon,
+				cls: "aan-whisper-label-icon",
+			});
+		}
+		this.meetingLabelDisplay.createSpan({
+			text: this.meetingLabelSelection.label.displayName,
+			cls: "aan-whisper-label-text",
+		});
+	}
+
+	private async importFiles() {
+		if (!this.selectedFiles.length) {
+			new Notice("Select at least one .whisper file first.");
+			return;
+		}
+		const total = this.selectedFiles.length;
+		let currentFileName = "";
+		const results = [];
 		try {
 			this.importButton?.setAttribute("disabled", "true");
 			if (this.importButton) {
-				this.importButton.textContent = "Importing…";
+				this.importButton.textContent =
+					total > 1 ? `Importing 1/${total}…` : "Importing…";
 			}
-			const buffer = await this.selectedFile.arrayBuffer();
-			const result = await importWhisperArchive(
-				this.plugin,
-				buffer,
-				this.selectedFile.name,
-				{
-					audioFolder: this.audioFolder || this.plugin.settings.whisperAudioFolder,
-					transcriptFolder:
-						this.transcriptFolder ||
-						this.plugin.settings.whisperTranscriptFolder,
-					useDateFolders: this.useDateFolders,
-					createNote: this.createNote,
-					noteFolder: this.noteFolder || this.plugin.settings.whisperNoteFolder,
-					noteTitle: this.noteTitle || undefined,
+			for (let index = 0; index < total; index++) {
+				const file = this.selectedFiles[index];
+				currentFileName = file.name;
+				if (this.importButton && total > 1) {
+					this.importButton.textContent = `Importing ${index + 1}/${total}…`;
 				}
-			);
-			notifyWhisperImportSuccess(result);
-			if (result.notePath) {
-				const file = this.plugin.app.vault.getAbstractFileByPath(
-					result.notePath
+				const buffer = await file.arrayBuffer();
+				const overrideTitle =
+					total === 1 ? (this.noteTitle?.trim() || undefined) : undefined;
+				const result = await importWhisperArchive(
+					this.plugin,
+					buffer,
+					file.name,
+					{
+						audioFolder: this.plugin.settings.whisperAudioFolder,
+						transcriptFolder: this.plugin.settings.whisperTranscriptFolder,
+						useDateFolders: this.useDateFolders,
+						createNote: this.createNote,
+						noteFolder: this.plugin.settings.whisperNoteFolder,
+						noteTitle: overrideTitle,
+					}
 				);
-				if (file instanceof TFile) {
-					await this.plugin.app.workspace
-						.getLeaf(true)
-						.openFile(file);
-				}
+				results.push(result);
+				await this.applyMeetingLabel(result.notePath);
 			}
+			this.notifyResults(results);
 			this.close();
 		} catch (error) {
 			console.error("Audio Notes: Whisper import failed", error);
 			new Notice(
-				`Failed to import Whisper archive: ${
-					(error as Error)?.message ?? error
-				}`
+				`Failed to import ${
+					currentFileName || "Whisper archive"
+				}: ${(error as Error)?.message ?? error}`
 			);
 			this.importButton?.removeAttribute("disabled");
 			if (this.importButton) {
 				this.importButton.textContent = "Import";
 			}
+			return;
+		}
+		this.importButton?.removeAttribute("disabled");
+		if (this.importButton) {
+			this.importButton.textContent = "Import";
+		}
+	}
+
+	private notifyResults(results: WhisperImportResult[]) {
+		if (!results.length) {
+			return;
+		}
+		if (results.length === 1) {
+			notifyWhisperImportSuccess(results[0]);
+			void this.openImportedNote(results[0]);
+			return;
+		}
+		const noteCount = results.filter((result) => Boolean(result.notePath)).length;
+		new Notice(
+			`${results.length} Whisper archives imported.\nNotes created: ${noteCount}`
+		);
+	}
+
+	private async applyMeetingLabel(notePath?: string) {
+		if (!notePath || !this.meetingLabelSelection?.tag) {
+			return;
+		}
+		const file = this.plugin.app.vault.getAbstractFileByPath(notePath);
+		if (file instanceof TFile) {
+			await applyMeetingLabelToFile(
+				this.plugin.app,
+				file,
+				this.meetingLabelSelection.tag
+			);
+		}
+	}
+
+	private async openImportedNote(result: WhisperImportResult) {
+		if (!result.notePath) {
+			return;
+		}
+		const file = this.plugin.app.vault.getAbstractFileByPath(result.notePath);
+		if (file instanceof TFile) {
+			await this.plugin.app.workspace.getLeaf(true).openFile(file);
 		}
 	}
 }

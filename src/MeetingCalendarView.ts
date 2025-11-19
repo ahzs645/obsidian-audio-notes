@@ -96,7 +96,8 @@ export class MeetingCalendarView extends ItemView {
 	private refreshEvents() {
 		this.events = collectMeetingEvents(
 			this.plugin.app,
-			this.plugin.settings.calendarTagColors
+			this.plugin.settings.calendarTagColors,
+			this.plugin.settings.meetingLabelCategories
 		);
 		if (
 			this.events.length &&

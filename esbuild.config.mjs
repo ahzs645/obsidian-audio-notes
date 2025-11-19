@@ -12,41 +12,51 @@ if you want to view the source, please visit the github repository of this plugi
 
 const prod = process.argv[2] === "production";
 
-esbuild
-	.build({
-		banner: {
-			js: banner,
-		},
-		entryPoints: ["src/main.ts"],
-		bundle: true,
-		external: [
-			"obsidian",
-			"electron",
-			"@codemirror/autocomplete",
-			"@codemirror/collab",
-			"@codemirror/commands",
-			"@codemirror/language",
-			"@codemirror/lint",
-			"@codemirror/search",
-			"@codemirror/state",
-			"@codemirror/view",
-			"@lezer/common",
-			"@lezer/highlight",
-			"@lezer/lr",
-			...builtins,
-		],
-		format: "cjs",
-		watch: !prod,
-		target: "es2018",
-		logLevel: "info",
-		sourcemap: prod ? false : "inline",
-		treeShaking: true,
-		outfile: "main.js",
-		plugins: [
-			esbuildSvelte({
-				compilerOptions: { css: true },
-				preprocess: sveltePreprocess(),
-			}),
-		],
-	})
-	.catch(() => process.exit(1));
+const jsBuild = esbuild.build({
+	banner: {
+		js: banner,
+	},
+	entryPoints: ["src/main.ts"],
+	bundle: true,
+	external: [
+		"obsidian",
+		"electron",
+		"@codemirror/autocomplete",
+		"@codemirror/collab",
+		"@codemirror/commands",
+		"@codemirror/language",
+		"@codemirror/lint",
+		"@codemirror/search",
+		"@codemirror/state",
+		"@codemirror/view",
+		"@lezer/common",
+		"@lezer/highlight",
+		"@lezer/lr",
+		...builtins,
+	],
+	format: "cjs",
+	watch: !prod,
+	target: "es2018",
+	logLevel: "info",
+	sourcemap: prod ? false : "inline",
+	treeShaking: true,
+	outfile: "main.js",
+	plugins: [
+		esbuildSvelte({
+			compilerOptions: { css: true },
+			preprocess: sveltePreprocess(),
+		}),
+	],
+});
+
+const cssBuild = esbuild.build({
+	entryPoints: ["src/styles/main.css"],
+	bundle: true,
+	outfile: "styles.css",
+	minify: false,
+	sourcemap: prod ? false : "inline",
+	watch: !prod,
+	logLevel: "info",
+});
+
+Promise.all([jsBuild, cssBuild]).catch(() => process.exit(1));

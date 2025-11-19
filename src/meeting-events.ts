@@ -1,4 +1,14 @@
 import type { App, CachedMetadata } from "obsidian";
+import type {
+	MeetingLabelCategory,
+	MeetingLabelInfo,
+	NormalizedMeetingLabelCategory,
+} from "./meeting-labels";
+import {
+	buildMeetingLabelInfo,
+	getEffectiveMeetingLabelCategories,
+	normalizeTagName,
+} from "./meeting-labels";
 
 export interface MeetingEvent {
 	path: string;
@@ -6,26 +16,36 @@ export interface MeetingEvent {
 	start: Date;
 	end: Date;
 	tags: string[];
-	jobTag?: string;
+	label?: MeetingLabelInfo;
 	color: string;
 	displayDate: string;
 	displayEndDate: string;
 }
 
 const DEFAULT_EVENT_COLOR = "var(--interactive-accent)";
-const MEETING_TAG = "meeting";
+export const MEETING_TAG = "meeting";
 
 export function collectMeetingEvents(
 	app: App,
-	colorMap: Record<string, string>
+	colorMap: Record<string, string>,
+	categories?: MeetingLabelCategory[]
 ): MeetingEvent[] {
 	const files = app.vault.getMarkdownFiles();
 	const normalizedColors = normalizeColorMap(colorMap);
+	const normalizedCategories = getEffectiveMeetingLabelCategories(
+		categories
+	);
 	const events: MeetingEvent[] = [];
 
 	for (const file of files) {
 		const cache = app.metadataCache.getFileCache(file);
-		const event = buildMeetingEvent(cache, file.path, file.basename, normalizedColors);
+		const event = buildMeetingEvent(
+			cache,
+			file.path,
+			file.basename,
+			normalizedColors,
+			normalizedCategories
+		);
 		if (event) {
 			events.push(event);
 		}
@@ -45,7 +65,8 @@ function buildMeetingEvent(
 	cache: CachedMetadata | null,
 	path: string,
 	basename: string,
-	colorMap: Map<string, string>
+	colorMap: Map<string, string>,
+	categories: NormalizedMeetingLabelCategory[]
 ): MeetingEvent | null {
 	if (!cache?.frontmatter) {
 		return null;
@@ -75,32 +96,44 @@ function buildMeetingEvent(
 
 	const endDate =
 		parseDateFromParts(frontmatter.end_date, frontmatter.end_time) ??
-		parseISO(frontmatter.end) ??
-		startDate;
+			parseISO(frontmatter.end) ??
+			startDate;
 
-	const explicitJob =
-		typeof frontmatter.job === "string" && frontmatter.job.trim().length
-			? `job/${frontmatter.job.trim().toLowerCase()}`
+	const explicitLabel =
+		typeof frontmatter.meeting_label === "string" &&
+		frontmatter.meeting_label.trim().length
+			? normalizeTagName(frontmatter.meeting_label)
 			: undefined;
-	const jobTag = explicitJob ?? tags.find((tag) => tag.startsWith("job/"));
+	const detectedLabel =
+		explicitLabel ?? findCategoryTag(tags, categories) ?? undefined;
 
-	if (jobTag && !tags.includes(jobTag)) {
-		tags.push(jobTag);
+	if (detectedLabel && !tags.includes(detectedLabel)) {
+		tags.push(detectedLabel);
 	}
 
+	const label = detectedLabel
+		? buildMeetingLabelInfo(detectedLabel, categories)
+		: undefined;
+	const orderedTags = prioritizeLabelTag(tags, label?.tag);
+
 	const color =
-		(jobTag && getColor(colorMap, jobTag)) ??
-		findColorForTags(colorMap, tags) ??
+		(label?.tag && getColor(colorMap, label.tag)) ??
+		findColorForTags(colorMap, orderedTags) ??
 		getColor(colorMap, MEETING_TAG) ??
 		DEFAULT_EVENT_COLOR;
 
-		return {
-			path,
-			title: frontmatter.title || basename,
-			start: startDate,
-			end: endDate,
-			tags,
-			jobTag,
+	const fileTitle = typeof basename === "string" ? basename.trim() : "";
+	const frontmatterTitle =
+		typeof frontmatter.title === "string" ? frontmatter.title.trim() : "";
+	const resolvedTitle = fileTitle || frontmatterTitle || path;
+
+	return {
+		path,
+		title: resolvedTitle,
+		start: startDate,
+		end: endDate,
+		tags: orderedTags,
+		label,
 			color,
 			displayDate: rawStartDate || localDateKey(startDate),
 			displayEndDate: rawEndDate || localDateKey(endDate),
@@ -135,7 +168,7 @@ function parseISO(value: unknown): Date | null {
 	return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function collectTags(cache: CachedMetadata | null): string[] {
+export function collectTags(cache: CachedMetadata | null): string[] {
 	const frontmatterTags = normalizeTagValue(cache?.frontmatter?.tags);
 	const inlineTags =
 		cache?.tags?.map((tag) => tag.tag.replace(/^#/, "").trim()).filter(Boolean) ?? [];
@@ -185,4 +218,49 @@ function findColorForTags(map: Map<string, string>, tags: string[]): string | un
 		}
 	}
 	return undefined;
+}
+
+function findCategoryTag(
+	tags: string[],
+	categories: NormalizedMeetingLabelCategory[]
+): string | undefined {
+	for (const tag of tags) {
+		const normalizedTag = normalizeTagName(tag);
+		const matchesCategory = categories.some((category) =>
+			normalizedTag.startsWith(category.tagPrefix)
+		);
+		if (matchesCategory) {
+			return normalizedTag;
+		}
+	}
+	return undefined;
+}
+
+function prioritizeLabelTag(
+	tags: string[],
+	labelTag?: string
+): string[] {
+	const unique = Array.from(new Set(tags));
+	const nonMeetingTags = unique.filter(
+		(tag) => tag !== MEETING_TAG && tag !== labelTag
+	);
+	const ordered: string[] = [];
+	if (labelTag) {
+		ordered.push(labelTag);
+	}
+	ordered.push(...nonMeetingTags);
+	if (unique.includes(MEETING_TAG)) {
+		ordered.push(MEETING_TAG);
+	}
+	return ordered;
+}
+
+export function isMeetingCache(cache: CachedMetadata | null): boolean {
+	if (!cache?.frontmatter) {
+		return false;
+	}
+	const tags = collectTags(cache);
+	return (
+		tags.includes(MEETING_TAG) || cache.frontmatter[MEETING_TAG] === true
+	);
 }

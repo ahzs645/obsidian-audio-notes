@@ -25,3 +25,24 @@ export interface TranscriptSearchMatch {
 	length?: number;
 	context?: string;
 }
+
+export interface SidebarAttachment {
+	path: string;
+	name: string;
+	extension: string;
+	size: string;
+}
+
+export interface GroupedTranscript {
+	id: string;
+	speakerKey: string;
+	label: string;
+	startTime: number;
+	endTime: number;
+	segments: { segment: TranscriptSegmentWithSpeaker; index: number }[];
+}
+
+export interface TranscriptHighlightPart {
+	text: string;
+	highlight: boolean;
+}

@@ -109,22 +109,47 @@ export class Transcript {
 
 
 export class TranscriptSegment {
-    constructor(
-        public id: number | string, // we don't use this. if we do, probably make it a number.
-        public start: number, // time in seconds
-        public end: number, // time in seconds
-        public text: string,
-    ) { }
+	constructor(
+		public id: number | string, // we don't use this. if we do, probably make it a number.
+		public start: number, // time in seconds
+		public end: number, // time in seconds
+		public text: string
+	) {}
+
+	public speakerId?: string;
+	public speaker?: string;
+	public speakerName?: string;
+	public speakerLabel?: string;
+	public confidence?: number;
 }
 
 
 export function parseTranscript(contents: string): Transcript {
-    // We don't always have a filename (e.g. if the transcript was pulled from online). Assume JSON, and fallback to SRT.
-    try {
-        return new Transcript(JSON.parse(contents).segments);
-    } catch {
-        return new SrtParser().fromSrt(contents);
-    }
+	// Normalize BOMs while preserving original spacing for downstream parsers.
+	const normalized = contents.replace(/^\uFEFF/, "");
+	const trimmed = normalized.trim();
+
+	// Try JSON first since that's our native serialization format.
+	try {
+		const parsed = JSON.parse(normalized);
+		if (parsed?.segments) {
+			return new Transcript(parsed.segments);
+		}
+	} catch {
+		// Ignore and try other formats.
+	}
+
+	// Detect WebVTT captions before falling back to SRT.
+	if (/^WEBVTT(?=$|\s)/i.test(trimmed.split("\n")[0] ?? "")) {
+		try {
+			return new WebVttParser().fromVtt(normalized);
+		} catch (error) {
+			console.warn("Audio Notes: Failed to parse WebVTT transcript.", error);
+		}
+	}
+
+	// Default to SRT parsing as a final fallback.
+	return new SrtParser().fromSrt(normalized);
 }
 
 
@@ -267,6 +292,146 @@ export async function getYouTubeTranscript(url: string): Promise<Transcript | un
     return undefined;
 }
 
+
+class WebVttParser {
+	fromVtt(data: string): Transcript {
+		const sanitized = data.replace(/^\uFEFF/, "").replace(/\r/g, "");
+		const lines = sanitized.split("\n");
+		let index = 0;
+
+		// Skip the header (WEBVTT + optional metadata)
+		if (lines[index]?.trim().toUpperCase().startsWith("WEBVTT")) {
+			index += 1;
+			while (index < lines.length && lines[index].trim() !== "") {
+				index += 1;
+			}
+		}
+		while (index < lines.length && lines[index].trim() === "") {
+			index += 1;
+		}
+
+		const segments: TranscriptSegment[] = [];
+		let cueId = 0;
+
+		while (index < lines.length) {
+			let line = lines[index].trim();
+			if (!line) {
+				index += 1;
+				continue;
+			}
+
+			let identifier: string | number = cueId;
+			if (!line.includes("-->")) {
+				identifier = line;
+				index += 1;
+				line = lines[index]?.trim() ?? "";
+			}
+
+			if (!line || !line.includes("-->")) {
+				index += 1;
+				continue;
+			}
+
+			const [startRaw, endRawWithSettings] = line.split("-->");
+			const endRaw = endRawWithSettings?.trim().split(/\s+/)[0];
+			if (!startRaw || !endRaw) {
+				index += 1;
+				continue;
+			}
+
+			index += 1;
+			const textLines: string[] = [];
+			while (index < lines.length && lines[index].trim() !== "") {
+				textLines.push(lines[index]);
+				index += 1;
+			}
+			while (index < lines.length && lines[index].trim() === "") {
+				index += 1;
+			}
+
+			const { text, speakerLabel, speakerId } =
+				this.parseCueText(textLines);
+			if (!text) {
+				continue;
+			}
+
+			const start = this.parseTimestamp(startRaw.trim());
+			const end = this.parseTimestamp(endRaw.trim());
+			const segment = new TranscriptSegment(identifier, start, end, text);
+			if (speakerLabel) {
+				segment.speakerLabel = speakerLabel;
+				segment.speakerName = speakerLabel;
+			}
+			if (speakerId) {
+				segment.speakerId = speakerId;
+			} else if (speakerLabel) {
+				segment.speakerId = this.normalizeSpeakerId(speakerLabel);
+			}
+			segments.push(segment);
+			cueId += 1;
+		}
+
+		if (!segments.length) {
+			throw new Error("No WebVTT cues found.");
+		}
+
+		return new Transcript(segments);
+	}
+
+	private parseTimestamp(value: string): number {
+		const sanitized = value.replace(",", ".").trim();
+		const parts = sanitized.split(":");
+		const secondsPart = parts.pop() ?? "0";
+		const minutesPart = parts.pop() ?? "0";
+		const hoursPart = parts.pop() ?? "0";
+
+		const [secondsString, millisString = "0"] = secondsPart.split(".");
+		const seconds = parseInt(secondsString, 10) || 0;
+		const milliseconds =
+			parseInt(millisString.padEnd(3, "0").slice(0, 3), 10) || 0;
+		const minutes = parseInt(minutesPart, 10) || 0;
+		const hours = parseInt(hoursPart, 10) || 0;
+
+		return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000;
+	}
+
+	private parseCueText(
+		lines: string[]
+	): { text: string; speakerLabel?: string; speakerId?: string } {
+		const raw = lines.join("\n").trim();
+		if (!raw) {
+			return { text: "" };
+		}
+		let text = raw;
+		let speakerLabel: string | undefined;
+
+		const voiceMatch = raw.match(/<v\s+([^>]+)>/i);
+		if (voiceMatch) {
+			speakerLabel = voiceMatch[1]?.trim();
+			text = raw.replace(voiceMatch[0], "");
+		}
+
+		text = text.replace(/<\/v>/gi, "");
+		text = text.replace(/<\/?c[\w\.\s-]*>/gi, "");
+		text = text.replace(/<\/?[^>]+>/g, " ");
+		text = text.replace(/\s+/g, " ").trim();
+
+		return {
+			text,
+			speakerLabel,
+			speakerId: speakerLabel ? this.normalizeSpeakerId(speakerLabel) : undefined,
+		};
+	}
+
+	private normalizeSpeakerId(label: string): string {
+		return label
+			.toLowerCase()
+			.normalize("NFKD")
+			.replace(/[^\w]+/g, "-")
+			.replace(/-+/g, "-")
+			.replace(/^-|-$/g, "") || "speaker";
+	}
+}
 
 class SrtParser {
     seperator = ",";
@@ -413,8 +578,9 @@ export class TranscriptsCache {
 
         let transcriptContents: string | undefined = undefined;
         let transcript: Transcript | undefined = undefined;
-        // Check if the transcript is a file.
-        if (transcriptFilename.endsWith(".json") || transcriptFilename.endsWith(".srt")) {
+        const isRemote = transcriptFilename.includes("://");
+        // Check if the transcript is a local file inside the vault.
+        if (!isRemote) {
             const translationFilesContents = await this.loadFiles([transcriptFilename]);
             transcriptContents = translationFilesContents.get(transcriptFilename);
             if (transcriptContents !== undefined) {

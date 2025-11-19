@@ -1,0 +1,10 @@
+/*
+ Order matters; keep imports matching legacy styles.css sequence.
+*/
+@import "./base.css";
+@import "./sidebar.css";
+@import "./labels.css";
+@import "./transcript.css";
+@import "./player.css";
+@import "./modals.css";
+@import "./calendar.css";
