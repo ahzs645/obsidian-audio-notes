@@ -1,0 +1,64 @@
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "npm"
+
+      - name: Build plugin
+        run: |
+          npm install
+          npm run build
+
+      - name: Get version from tag
+        id: tag_version
+        run: |
+          echo "TAG_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Verify manifest version matches tag
+        run: |
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          TAG_VERSION=${{ steps.tag_version.outputs.TAG_VERSION }}
+
+          if [ "$MANIFEST_VERSION" != "$TAG_VERSION" ]; then
+            echo "Error: Version mismatch!"
+            echo "  manifest.json version: $MANIFEST_VERSION"
+            echo "  Git tag version: $TAG_VERSION"
+            echo "These must match for BRAT compatibility."
+            exit 1
+          fi
+          echo "Version verified: $TAG_VERSION"
+
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ steps.tag_version.outputs.TAG_VERSION }}"
+
+          # Check if this is a pre-release (contains -, like 1.0.0-beta.1)
+          if [[ "$tag" == *-* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          else
+            PRERELEASE_FLAG=""
+          fi
+
+          gh release create "$tag" \
+            --title="$tag" \
+            $PRERELEASE_FLAG \
+            --generate-notes \
+            main.js manifest.json styles.css
