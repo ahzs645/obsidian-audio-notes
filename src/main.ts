@@ -957,7 +957,7 @@ export default class AutomaticAudioNotes extends Plugin {
 			);
 			const notePath = await this.getAvailableNotePath(
 				meetingFolder,
-				`${this.slugifyTitle(title)}.md`
+				`${this.buildMeetingFilename(title)}.md`
 			);
 			const content = generateMeetingNoteContent(this.settings, {
 				title,
@@ -1035,15 +1035,14 @@ export default class AutomaticAudioNotes extends Plugin {
 		return Number.isNaN(result.getTime()) ? new Date() : result;
 	}
 
-	private slugifyTitle(value: string): string {
-		return value
-			.toLowerCase()
-			.normalize("NFKD")
-			.replace(/[^\w\s-]/g, "")
-			.trim()
-			.replace(/\s+/g, "-")
-			.replace(/-+/g, "-")
-			.slice(0, 60) || "meeting";
+	private buildMeetingFilename(value: string): string {
+		const trimmed = value?.trim() || "";
+		const cleaned = trimmed
+			.replace(/[\\/:*?"<>|#]+/g, "")
+			.replace(/\s+/g, " ")
+			.trim();
+		const limited = cleaned.slice(0, 80);
+		return limited || "meeting";
 	}
 
 	public onunload() {
