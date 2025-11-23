@@ -282,11 +282,15 @@ export class MeetingFileService {
 		};
 	}
 
-	async saveUploadedTranscriptFile(file: File): Promise<string> {
-		const folder = normalizeFolderPath(
+	private buildTranscriptFolder(): string {
+		return normalizeFolderPath(
 			this.plugin.settings.DGTranscriptFolder,
 			"transcripts"
 		);
+	}
+
+	async saveUploadedTranscriptFile(file: File): Promise<string> {
+		const folder = this.buildTranscriptFolder();
 		await this.ensureFolder(folder);
 		const baseName = file.name?.trim() || "transcript.vtt";
 		const filename = this.sanitizeFilename(
@@ -295,6 +299,43 @@ export class MeetingFileService {
 		const targetPath = await this.getAvailableChildPath(folder, filename);
 		const contents = await file.text();
 		await this.plugin.app.vault.create(targetPath, contents);
+		return targetPath;
+	}
+
+	async saveMergedTextTranscripts(files: File[]): Promise<string> {
+		if (!files?.length) {
+			throw new Error("No transcript files provided.");
+		}
+		const folder = this.buildTranscriptFolder();
+		await this.ensureFolder(folder);
+		const combinedTextParts: string[] = [];
+		for (const file of files) {
+			const text = await file.text();
+			if (text?.trim()) {
+				combinedTextParts.push(text.trim());
+			}
+		}
+		const combinedText = combinedTextParts.join("\n\n");
+		const baseName =
+			files[0]?.name?.replace(/\.[^.]+$/, "") || "transcript";
+		const filename = this.sanitizeFilename(`${baseName}-merged.json`);
+		const targetPath = await this.getAvailableChildPath(folder, filename);
+		const payload = {
+			source: "uploaded-text",
+			mergedFrom: files.map((file) => file.name),
+			segments: [
+				{
+					id: 0,
+					start: 0,
+					end: 0,
+					text: combinedText || "",
+				},
+			],
+		};
+		await this.plugin.app.vault.create(
+			targetPath,
+			JSON.stringify(payload, null, 2)
+		);
 		return targetPath;
 	}
 

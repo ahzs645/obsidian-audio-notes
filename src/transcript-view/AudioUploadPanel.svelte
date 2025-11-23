@@ -30,7 +30,7 @@
 		>
 			{transcriptUploadInProgress
 				? "Uploading…"
-				: "Upload transcript (.vtt/.srt)"}
+				: "Upload transcript (.vtt/.srt/.txt)"}
 		</button>
 	</div>
 	<input
@@ -43,6 +43,7 @@
 	<input
 		type="file"
 		accept=".vtt,.srt,.json,.txt,text/vtt,text/plain"
+		multiple
 		class="aan-attachments-input"
 		bind:this={transcriptUploadInput}
 		on:change={handleTranscriptFileInput}

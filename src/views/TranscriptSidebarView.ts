@@ -808,6 +808,10 @@ export class TranscriptSidebarView extends ItemView {
 			new Notice("Open a meeting note before uploading a transcript.", 4000);
 			return;
 		}
+		const allText = files.every((file) =>
+			(file.type && file.type.includes("text")) ||
+			file.name.toLowerCase().endsWith(".txt")
+		);
 		const upload = files[0];
 		if (!upload) return;
 		this.isUploadingTranscript = true;
@@ -815,8 +819,9 @@ export class TranscriptSidebarView extends ItemView {
 			transcriptUploadInProgress: true,
 		});
 		try {
-			const transcriptPath =
-				await this.meetingFiles.saveUploadedTranscriptFile(upload);
+			const transcriptPath = allText
+				? await this.meetingFiles.saveMergedTextTranscripts(files)
+				: await this.meetingFiles.saveUploadedTranscriptFile(upload);
 			await this.plugin.app.fileManager.processFrontMatter(
 				meetingFile,
 				(fm) => {
