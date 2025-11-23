@@ -54,6 +54,11 @@ export class AttachmentManager {
 	async refresh(): Promise<SidebarAttachment[]> {
 		let attachments: SidebarAttachment[] = [];
 		if (this.attachmentFolderPath) {
+			const meetingParent =
+				this.meetingFilePath?.split("/").slice(0, -1).join("/") || null;
+			const skipMarkdownInFolder =
+				meetingParent &&
+				meetingParent === this.attachmentFolderPath;
 			const folder = this.plugin.app.vault.getAbstractFileByPath(
 				this.attachmentFolderPath
 			);
@@ -62,6 +67,9 @@ export class AttachmentManager {
 					.filter((child): child is TFile => child instanceof TFile)
 					.filter((file) => file.path !== this.currentAudioPath)
 					.filter((file) => file.path !== this.meetingFilePath)
+					.filter((file) =>
+						skipMarkdownInFolder ? file.extension !== "md" : true
+					)
 					.map((file) => ({
 						path: file.path,
 						name: file.name,

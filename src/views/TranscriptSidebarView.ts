@@ -557,7 +557,6 @@ export class TranscriptSidebarView extends ItemView {
 			}
 		};
 		try {
-			const attachmentFolder = this.attachments.getAttachmentFolder();
 			let attachmentEntries: SidebarAttachment[] = [];
 			try {
 				attachmentEntries = await this.attachments.refresh();
@@ -578,13 +577,6 @@ export class TranscriptSidebarView extends ItemView {
 				);
 			}
 			await this.plugin.app.vault.delete(meetingFile);
-			if (attachmentFolder) {
-				await this.deleteFolderIfEmpty(attachmentFolder);
-			}
-			const audioParent = this.getParentPath(this.currentAudioPath);
-			if (audioParent && audioParent !== attachmentFolder) {
-				await this.deleteFolderIfEmpty(audioParent);
-			}
 			await this.showDashboard();
 			this.dashboardController.scheduleRefresh();
 			if (failures.length) {
@@ -604,49 +596,6 @@ export class TranscriptSidebarView extends ItemView {
 			this.isDeletingMeeting = false;
 			this.updateDeleteButtonState();
 		}
-	}
-
-	private async deleteFolderIfEmpty(path: string | null | undefined) {
-		if (!path) {
-			return;
-		}
-		const folder = this.plugin.app.vault.getAbstractFileByPath(path);
-		if (!(folder instanceof TFolder)) {
-			return;
-		}
-		if (folder.children.length > 0 || !this.shouldDeleteFolder(folder)) {
-			return;
-		}
-		try {
-			await this.plugin.app.vault.delete(folder);
-		} catch (error) {
-			console.error("Audio Notes: Failed to delete folder", path, error);
-			return;
-		}
-		const parent = folder.parent;
-		if (parent instanceof TFolder) {
-			await this.deleteFolderIfEmpty(parent.path);
-		}
-	}
-
-	private shouldDeleteFolder(folder: TFolder): boolean {
-		const name = folder.name;
-		if (/^[a-z0-9]{4}-/i.test(name)) {
-			return true;
-		}
-		if (/^\d{4}$/.test(name) || /^\d{2}$/.test(name)) {
-			return true;
-		}
-		return false;
-	}
-
-	private getParentPath(path: string | null | undefined): string | null {
-		if (!path) return null;
-		const segments = path.split("/").filter(Boolean);
-		if (segments.length <= 1) {
-			return null;
-		}
-		return segments.slice(0, -1).join("/");
 	}
 
 	public async showDashboard(): Promise<void> {
@@ -808,12 +757,17 @@ export class TranscriptSidebarView extends ItemView {
 			new Notice("Open a meeting note before uploading a transcript.", 4000);
 			return;
 		}
-		const allText = files.every((file) =>
-			(file.type && file.type.includes("text")) ||
-			file.name.toLowerCase().endsWith(".txt")
-		);
+		const allText = files.every((file) => {
+			const name = file.name.toLowerCase();
+			const isTxt = name.endsWith(".txt");
+			const isPlainText =
+				typeof file.type === "string" &&
+				(file.type === "text/plain" || file.type === "text/markdown");
+			return isTxt || isPlainText;
+		});
 		const upload = files[0];
 		if (!upload) return;
+		const previousTranscript = this.currentTranscriptPath;
 		this.isUploadingTranscript = true;
 		this.transcriptComponent?.$set({
 			transcriptUploadInProgress: true,
@@ -829,6 +783,28 @@ export class TranscriptSidebarView extends ItemView {
 				}
 			);
 			this.currentTranscriptPath = transcriptPath;
+			if (
+				previousTranscript &&
+				previousTranscript !== transcriptPath
+			) {
+				const oldFile =
+					this.plugin.app.vault.getAbstractFileByPath(
+						previousTranscript
+					);
+				if (oldFile instanceof TFile) {
+					try {
+						await this.plugin.app.vault.delete(oldFile);
+					} catch (error) {
+						console.error(
+							"Audio Notes: Could not remove previous transcript file",
+							error
+						);
+					}
+				}
+				this.plugin.transcriptDatastore.cache.delete(
+					previousTranscript
+				);
+			}
 			this.transcriptComponent?.$set({
 				hasTranscript: true,
 				needsAudioUpload: !this.currentAudioPath,

@@ -296,64 +296,36 @@ export async function getYouTubeTranscript(url: string): Promise<Transcript | un
 class WebVttParser {
 	fromVtt(data: string): Transcript {
 		const sanitized = data.replace(/^\uFEFF/, "").replace(/\r/g, "");
-		const lines = sanitized.split("\n");
-		let index = 0;
-
-		// Skip the header (WEBVTT + optional metadata)
-		if (lines[index]?.trim().toUpperCase().startsWith("WEBVTT")) {
-			index += 1;
-			while (index < lines.length && lines[index].trim() !== "") {
-				index += 1;
-			}
-		}
-		while (index < lines.length && lines[index].trim() === "") {
-			index += 1;
-		}
-
+		const headerStripped = sanitized
+			.replace(/^WEBVTT[^\n]*\n+/i, "")
+			.trim();
+		const blocks = headerStripped.split(/\n{2,}/);
 		const segments: TranscriptSegment[] = [];
+
 		let cueId = 0;
+		for (const block of blocks) {
+			const lines = block.split(/\n/).map((line) => line.trim()).filter(Boolean);
+			if (!lines.length) continue;
 
-		while (index < lines.length) {
-			let line = lines[index].trim();
-			if (!line) {
-				index += 1;
-				continue;
-			}
-
+			let timingLine = lines[0];
 			let identifier: string | number = cueId;
-			if (!line.includes("-->")) {
-				identifier = line;
-				index += 1;
-				line = lines[index]?.trim() ?? "";
+			if (!timingLine.includes("-->") && lines.length > 1) {
+				identifier = timingLine;
+				timingLine = lines[1];
+				lines.shift();
 			}
-
-			if (!line || !line.includes("-->")) {
-				index += 1;
+			if (!timingLine.includes("-->")) {
 				continue;
 			}
-
-			const [startRaw, endRawWithSettings] = line.split("-->");
+			const [startRaw, endRawWithSettings] = timingLine.split("-->");
 			const endRaw = endRawWithSettings?.trim().split(/\s+/)[0];
 			if (!startRaw || !endRaw) {
-				index += 1;
 				continue;
 			}
 
-			index += 1;
-			const textLines: string[] = [];
-			while (index < lines.length && lines[index].trim() !== "") {
-				textLines.push(lines[index]);
-				index += 1;
-			}
-			while (index < lines.length && lines[index].trim() === "") {
-				index += 1;
-			}
-
-			const { text, speakerLabel, speakerId } =
-				this.parseCueText(textLines);
-			if (!text) {
-				continue;
-			}
+			const textLines = lines.slice(1);
+			const { text, speakerLabel, speakerId } = this.parseCueText(textLines);
+			if (!text) continue;
 
 			const start = this.parseTimestamp(startRaw.trim());
 			const end = this.parseTimestamp(endRaw.trim());
@@ -361,11 +333,7 @@ class WebVttParser {
 			if (speakerLabel) {
 				segment.speakerLabel = speakerLabel;
 				segment.speakerName = speakerLabel;
-			}
-			if (speakerId) {
-				segment.speakerId = speakerId;
-			} else if (speakerLabel) {
-				segment.speakerId = this.normalizeSpeakerId(speakerLabel);
+				segment.speakerId = speakerId || this.normalizeSpeakerId(speakerLabel);
 			}
 			segments.push(segment);
 			cueId += 1;
@@ -413,6 +381,7 @@ class WebVttParser {
 
 		text = text.replace(/<\/v>/gi, "");
 		text = text.replace(/<\/?c[\w\.\s-]*>/gi, "");
+		text = text.replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 		text = text.replace(/<\/?[^>]+>/g, " ");
 		text = text.replace(/\s+/g, " ").trim();
 
