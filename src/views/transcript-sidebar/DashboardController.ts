@@ -7,6 +7,7 @@ import {
 } from "../../meeting-events";
 import { getEffectiveMeetingLabelCategories } from "../../meeting-labels";
 import type AutomaticAudioNotes from "../../main";
+import { NewMeetingModal } from "../../modals/NewMeetingModal";
 
 export class DashboardController {
 	private component: SidebarPlanner | undefined;
@@ -42,6 +43,8 @@ export class DashboardController {
 					this.openFile(path, newLeaf),
 				onFilterChange: (value: string) =>
 					this.handleFilterChange(value),
+				onCreateMeeting: (date: string) =>
+					this.handleCreateMeeting(date),
 			},
 		});
 		this.registerListeners();
@@ -114,6 +117,17 @@ export class DashboardController {
 		this.component?.$set({
 			filterValue: this.filterValue,
 		});
+	}
+
+	private handleCreateMeeting(date: string) {
+		const initialDate = date || localDateKey(new Date());
+		new NewMeetingModal(this.plugin.app, {
+			plugin: this.plugin,
+			initialDate,
+			onSubmit: (details) => {
+				void this.plugin.createNewMeeting(details);
+			},
+		}).open();
 	}
 
 	private getCategories() {

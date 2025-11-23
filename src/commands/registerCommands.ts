@@ -100,6 +100,7 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 		name: "Create new meeting note",
 		callback: () => {
 			new NewMeetingModal(app, {
+				plugin,
 				onSubmit: (details) => {
 					void plugin.createNewMeeting(details);
 				},

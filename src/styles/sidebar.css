@@ -131,10 +131,46 @@
 	overflow: hidden;
 }
 
-.aan-sidebar-agenda header {
+.aan-sidebar-agenda__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.aan-sidebar-agenda__heading {
 	display: flex;
 	flex-direction: column;
 	gap: 4px;
+	min-width: 0;
+}
+
+.aan-calendar-add-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 36px;
+	border-radius: 10px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	cursor: pointer;
+	transition: background-color 120ms ease, border-color 120ms ease,
+		transform 60ms ease;
+}
+
+.aan-calendar-add-btn:hover {
+	background: var(--background-modifier-hover);
+}
+
+.aan-calendar-add-btn:active {
+	transform: translateY(1px);
+}
+
+.aan-calendar-add-btn svg {
+	width: 20px;
+	height: 20px;
 }
 
 .aan-sidebar-agenda .aan-calendar-day-label {
@@ -284,4 +320,3 @@
 	width: 16px;
 	height: 16px;
 }
-

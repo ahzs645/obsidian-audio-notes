@@ -9,6 +9,7 @@ import type AutomaticAudioNotes from "./main";
 import {
 	importWhisperArchive,
 	notifyWhisperImportSuccess,
+	WhisperDuplicateError,
 	type WhisperImportResult,
 } from "./WhisperImporter";
 import {
@@ -267,24 +268,37 @@ export class ImportWhisperModal extends Modal {
 				if (this.importButton && total > 1) {
 					this.importButton.textContent = `Importing ${index + 1}/${total}…`;
 				}
-				const buffer = await file.arrayBuffer();
-				const overrideTitle =
-					total === 1 ? (this.noteTitle?.trim() || undefined) : undefined;
-				const result = await importWhisperArchive(
-					this.plugin,
-					buffer,
-					file.name,
-					{
-						audioFolder: this.plugin.settings.whisperAudioFolder,
-						transcriptFolder: this.plugin.settings.whisperTranscriptFolder,
-						useDateFolders: this.useDateFolders,
-						createNote: this.createNote,
-						noteFolder: this.plugin.settings.whisperNoteFolder,
-						noteTitle: overrideTitle,
+				try {
+					const buffer = await file.arrayBuffer();
+					const overrideTitle =
+						total === 1
+							? this.noteTitle?.trim() || undefined
+							: undefined;
+					const result = await importWhisperArchive(
+						this.plugin,
+						buffer,
+						file.name,
+						{
+							audioFolder: this.plugin.settings.whisperAudioFolder,
+							transcriptFolder: this.plugin.settings.whisperTranscriptFolder,
+							useDateFolders: this.useDateFolders,
+							createNote: this.createNote,
+							noteFolder: this.plugin.settings.whisperNoteFolder,
+							noteTitle: overrideTitle,
+						}
+					);
+					results.push(result);
+					await this.applyMeetingLabel(result.notePath);
+				} catch (error) {
+					if (error instanceof WhisperDuplicateError) {
+						new Notice(
+							`Skipped ${file.name}: already imported (${error.existingTranscriptPath ?? "duplicate transcript"}).`,
+							6000
+						);
+						continue;
 					}
-				);
-				results.push(result);
-				await this.applyMeetingLabel(result.notePath);
+					throw error;
+				}
 			}
 			this.notifyResults(results);
 			this.close();

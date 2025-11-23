@@ -57,6 +57,7 @@ import {
 	TranscriptSidebarView,
 } from "./views/TranscriptSidebarView";
 import type { NewMeetingDetails } from "./modals/NewMeetingModal";
+import { applyMeetingLabelToFile } from "./meeting-label-manager";
 
 // Load Font-Awesome stuff
 import { library } from "@fortawesome/fontawesome-svg-core";
@@ -965,6 +966,21 @@ export default class AutomaticAudioNotes extends Plugin {
 				end: resolvedEnd,
 			});
 			const file = await this.app.vault.create(notePath, content);
+			if (details.meetingLabelTag) {
+				try {
+					await applyMeetingLabelToFile(
+						this.app,
+						file,
+						details.meetingLabelTag
+					);
+				} catch (error) {
+					console.error(
+						"Audio Notes: Could not apply meeting label.",
+						error
+					);
+					new Notice("Meeting created, but label was not applied.", 6000);
+				}
+			}
 			this.lastMeetingFilePath = file.path;
 			this.lastMeetingFolder = file.parent?.path ?? null;
 			const leaf = this.app.workspace.getLeaf(false);

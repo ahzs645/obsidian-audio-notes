@@ -10,6 +10,7 @@
 	export let onSelectDate: (date: string) => void;
 	export let onOpenNote: (path: string, newLeaf: boolean) => void;
 	export let onFilterChange: (value: string) => void = () => {};
+	export let onCreateMeeting: (date: string) => void = () => {};
 
 	const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 	const todayKey = localDateKey(new Date());
@@ -202,6 +203,15 @@
 		if (!target) return;
 		onFilterChange?.(target.value);
 	}
+
+	function handleAddMeeting() {
+		const targetDate =
+			selectedDayDate instanceof Date &&
+			!Number.isNaN(selectedDayDate.getTime())
+				? localDateKey(selectedDayDate)
+				: todayKey;
+		onCreateMeeting?.(targetDate);
+	}
 </script>
 
 <div class="aan-sidebar-calendar">
@@ -272,21 +282,46 @@
 	</div>
 
 	<section class="aan-sidebar-agenda">
-		<header>
-			{#if selectedDayDate instanceof Date && !Number.isNaN(selectedDayDate.getTime())}
-				<div class="aan-calendar-day-label">
-					{selectedDayDate.toLocaleDateString(undefined, {
-						weekday: "long",
-						month: "long",
-						day: "numeric",
-					})}
+		<header class="aan-sidebar-agenda__header">
+			<div class="aan-sidebar-agenda__heading">
+				{#if selectedDayDate instanceof Date && !Number.isNaN(selectedDayDate.getTime())}
+					<div class="aan-calendar-day-label">
+						{selectedDayDate.toLocaleDateString(undefined, {
+							weekday: "long",
+							month: "long",
+							day: "numeric",
+						})}
+					</div>
+				{/if}
+				<div class="aan-calendar-day-count">
+					{selectedDayEvents.length
+						? `${selectedDayEvents.length} meeting${selectedDayEvents.length > 1 ? "s" : ""}`
+						: "No meetings"}
 				</div>
-			{/if}
-			<div class="aan-calendar-day-count">
-				{selectedDayEvents.length
-					? `${selectedDayEvents.length} meeting${selectedDayEvents.length > 1 ? "s" : ""}`
-					: "No meetings"}
 			</div>
+			<button
+				type="button"
+				class="aan-calendar-add-btn"
+				title="Add meeting"
+				aria-label="Add meeting"
+				on:click={handleAddMeeting}
+			>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					width="16"
+					height="16"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					class="lucide-icon lucide lucide-plus"
+				>
+					<path d="M5 12h14"></path>
+					<path d="M12 5v14"></path>
+				</svg>
+			</button>
 		</header>
 		{#if selectedDayEvents.length === 0}
 			<p class="aan-calendar-empty">No meetings scheduled.</p>

@@ -1,4 +1,5 @@
 import AdmZip from "adm-zip";
+import { createHash } from "crypto";
 import { Notice, normalizePath, Vault } from "obsidian";
 import type AutomaticAudioNotes from "./main";
 import {
@@ -58,6 +59,21 @@ export interface WhisperImportResult {
 	segmentCount: number;
 	notePath?: string;
 	noteTitle?: string;
+}
+
+export class WhisperDuplicateError extends Error {
+	public existingTranscriptPath?: string;
+	constructor(message: string, existingTranscriptPath?: string) {
+		super(message);
+		this.name = "WhisperDuplicateError";
+		this.existingTranscriptPath = existingTranscriptPath;
+	}
+}
+
+interface ExistingImportMatch {
+	transcriptPath: string;
+	audioPath?: string;
+	hasAudio: boolean;
 }
 
 export interface WhisperImportOptions {
@@ -206,6 +222,233 @@ function detectAudioExtension(buffer: Buffer, fallback = "m4a") {
 	return fallback;
 }
 
+function normalizeName(value?: string): string {
+	return (value || "").trim().toLowerCase();
+}
+
+function buildWhisperFingerprint(
+	metadata: WhisperMetadata,
+	originalName: string,
+	meetingDurationMs: number,
+	hashes?: { audio?: string; segments?: string }
+): string {
+	const baseName =
+		normalizeName(metadata.originalMediaFilename) ||
+		normalizeName(originalName);
+	const created =
+		normalizeEpoch(metadata.dateCreated) ??
+		normalizeEpoch(metadata.dateUpdated) ??
+		null;
+	const duration = Number.isFinite(meetingDurationMs)
+		? Math.round(meetingDurationMs)
+		: null;
+	return [
+		"whisper",
+		"v3",
+		baseName || "unknown",
+		created ?? "na",
+		duration ?? "na",
+		hashes?.audio ?? "nohash",
+		hashes?.segments ?? "nohash",
+	].join("|");
+}
+
+function inferDurationMsFromSegments(
+	segments: { end?: number }[] | undefined
+): number | undefined {
+	if (!Array.isArray(segments) || !segments.length) return undefined;
+	const maxEnd = Math.max(
+		...segments
+			.map((segment) => Number(segment?.end) || 0)
+			.filter((value) => Number.isFinite(value))
+	);
+	return Number.isFinite(maxEnd) ? Math.round(maxEnd * 1000) : undefined;
+}
+
+function fingerprintFromStoredTranscript(
+	data: any,
+	defaultName: string
+): string | null {
+	const storedDuration =
+		typeof data?.durationMs === "number"
+			? data.durationMs
+			: inferDurationMsFromSegments(data?.segments);
+	const storedMetadata: WhisperMetadata = {
+		dateCreated:
+			data?.createdAt ??
+			data?.dateCreated ??
+			data?.updatedAt ??
+			data?.dateUpdated,
+		originalMediaFilename:
+			data?.originalMediaFilename ?? data?.originalWhisperFile,
+	};
+	return buildWhisperFingerprint(
+		storedMetadata,
+		data?.originalWhisperFile ?? defaultName,
+		storedDuration ?? 0,
+		{
+			audio: typeof data?.audioSha1 === "string" ? data.audioSha1 : undefined,
+			segments: typeof data?.segmentsSha1 === "string" ? data.segmentsSha1 : undefined,
+		}
+	);
+}
+
+async function findExistingWhisperImport(
+	plugin: AutomaticAudioNotes,
+	fingerprint: string,
+	metadata: WhisperMetadata,
+	originalName: string,
+	meetingDurationMs: number,
+	transcriptFolder: string | undefined,
+	audioSha1: string | undefined,
+	segmentsSha1: string | undefined
+): Promise<ExistingImportMatch | null> {
+	const normalizedRoot = transcriptFolder
+		? normalizePath(transcriptFolder).replace(/\/+$/, "")
+		: "";
+	const files = plugin.app.vault.getFiles();
+	const incomingName =
+		normalizeName(metadata.originalMediaFilename) ||
+		normalizeName(originalName);
+	const incomingDate =
+		normalizeEpoch(metadata.dateCreated) ??
+		normalizeEpoch(metadata.dateUpdated);
+	for (const file of files) {
+		if (file.extension !== "json") continue;
+		if (normalizedRoot) {
+			const normalizedPath = normalizePath(file.path);
+			if (
+				normalizedPath !== normalizedRoot &&
+				!normalizedPath.startsWith(`${normalizedRoot}/`)
+			) {
+				continue;
+			}
+		}
+		try {
+			const contents = await plugin.app.vault.read(file);
+			const parsed = JSON.parse(contents);
+			if (parsed?.source !== "whisper") {
+				continue;
+			}
+			const parsedAudioPath =
+				typeof parsed.audioPath === "string"
+					? normalizePath(parsed.audioPath)
+					: undefined;
+			const audioExists =
+				parsedAudioPath &&
+				(await plugin.app.vault.adapter.exists(parsedAudioPath));
+			const storedAudioSha1 =
+				typeof parsed.audioSha1 === "string" ? parsed.audioSha1 : undefined;
+			const storedSegmentsSha1 =
+				typeof parsed.segmentsSha1 === "string"
+					? parsed.segmentsSha1
+					: inferSegmentsSha1(parsed.segments);
+			if (audioSha1 && storedAudioSha1 && audioSha1 === storedAudioSha1) {
+				return {
+					transcriptPath: file.path,
+					audioPath: parsedAudioPath,
+					hasAudio: Boolean(audioExists),
+				};
+			}
+			if (
+				segmentsSha1 &&
+				storedSegmentsSha1 &&
+				segmentsSha1 === storedSegmentsSha1
+			) {
+				return {
+					transcriptPath: file.path,
+					audioPath: parsedAudioPath,
+					hasAudio: Boolean(audioExists),
+				};
+			}
+			const storedFingerprint =
+				typeof parsed.whisperFingerprint === "string"
+					? parsed.whisperFingerprint
+					: fingerprintFromStoredTranscript(parsed, originalName);
+			if (storedFingerprint && storedFingerprint === fingerprint) {
+				return {
+					transcriptPath: file.path,
+					audioPath: parsedAudioPath,
+					hasAudio: Boolean(audioExists),
+				};
+			}
+
+			const storedName =
+				normalizeName(parsed.originalMediaFilename) ||
+				normalizeName(parsed.originalWhisperFile);
+			const storedDate =
+				normalizeEpoch(parsed.createdAt) ??
+				normalizeEpoch(parsed.dateCreated) ??
+				normalizeEpoch(parsed.updatedAt) ??
+				normalizeEpoch(parsed.dateUpdated);
+			const storedDuration =
+				typeof parsed.durationMs === "number"
+					? parsed.durationMs
+					: inferDurationMsFromSegments(parsed.segments) ?? 0;
+			const incomingDuration = Math.round(meetingDurationMs || 0);
+			if (
+				storedName &&
+				incomingName &&
+				storedName === incomingName &&
+				(!incomingDate ||
+					!storedDate ||
+					incomingDate === storedDate) &&
+				(!incomingDuration ||
+					!storedDuration ||
+					Math.abs(incomingDuration - storedDuration) < 2000)
+			) {
+				return {
+					transcriptPath: file.path,
+					audioPath: parsedAudioPath,
+					hasAudio: Boolean(audioExists),
+				};
+			}
+		} catch {
+			continue;
+		}
+	}
+	return null;
+}
+
+function hashBuffer(buffer: Buffer): string {
+	const hash = createHash("sha1");
+	hash.update(buffer);
+	return hash.digest("hex");
+}
+
+function buildSegmentsSha1(segments: ProcessedSegment[]): string {
+	const normalized = segments
+		.map((segment) => {
+			const startMs = Math.round((segment.start ?? 0) * 1000);
+			const endMs = Math.round((segment.end ?? 0) * 1000);
+			return `${startMs}-${endMs}:${(segment.text ?? "").trim()}`;
+		})
+		.join("|");
+	return hashBuffer(Buffer.from(normalized, "utf8"));
+}
+
+function inferSegmentsSha1(rawSegments: any): string | undefined {
+	if (!Array.isArray(rawSegments) || !rawSegments.length) return undefined;
+	try {
+		const normalized = rawSegments
+			.map((segment) => {
+				const startMs = Math.round(
+					Number(segment?.start) * 1000 || 0
+				);
+				const endMs = Math.round(Number(segment?.end) * 1000 || 0);
+				const text =
+					typeof segment?.text === "string"
+						? segment.text.trim()
+						: "";
+				return `${startMs}-${endMs}:${text}`;
+			})
+			.join("|");
+		return hashBuffer(Buffer.from(normalized, "utf8"));
+	} catch {
+		return undefined;
+	}
+}
+
 export async function importWhisperArchive(
 	plugin: AutomaticAudioNotes,
 	data: ArrayBuffer,
@@ -278,6 +521,35 @@ export async function importWhisperArchive(
 		0
 	);
 	const meetingDurationMs = meetingDurationSeconds * 1000;
+	const audioBuffer = audioEntry.getData();
+	const audioSha1 = hashBuffer(audioBuffer);
+	const segmentsSha1 = buildSegmentsSha1(segments);
+	const whisperFingerprint = buildWhisperFingerprint(
+		metadata,
+		originalName,
+		meetingDurationMs,
+		{
+			audio: audioSha1,
+			segments: segmentsSha1,
+		}
+	);
+
+	const existingImport = await findExistingWhisperImport(
+		plugin,
+		whisperFingerprint,
+		metadata,
+		originalName,
+		meetingDurationMs,
+		options.transcriptFolder,
+		audioSha1,
+		segmentsSha1
+	);
+	if (existingImport) {
+		throw new WhisperDuplicateError(
+			`This Whisper archive appears to be already imported: ${existingImport.transcriptPath}`,
+			existingImport.transcriptPath
+		);
+	}
 
 	const baseName = slugify(
 		metadata.originalMediaFilename,
@@ -297,7 +569,6 @@ export async function importWhisperArchive(
 	await ensureFolderExists(plugin.app.vault, audioFolder);
 	await ensureFolderExists(plugin.app.vault, transcriptFolder);
 
-	const audioBuffer = audioEntry.getData();
 	const audioExt =
 		metadata.originalMediaExtension?.replace(".", "") ||
 		detectAudioExtension(audioBuffer);
@@ -316,12 +587,18 @@ export async function importWhisperArchive(
 		JSON.stringify(
 			{
 				source: "whisper",
+				whisperFingerprint,
+				audioPath,
+				audioSha1,
+				segmentsSha1,
+				originalMediaFilename: metadata.originalMediaFilename ?? null,
 				originalWhisperFile: originalName,
 				model: metadata.modelQualityID ?? metadata.modelEngine ?? "unknown",
 				createdAt: metadata.dateCreated ?? null,
 				updatedAt: metadata.dateUpdated ?? null,
 				speakers: metadata.speakers ?? [],
 				segments,
+				durationMs: meetingDurationMs,
 			},
 			null,
 			2
