@@ -11,6 +11,14 @@ export type ExportFormat = "markdown" | "json" | "text";
 export type ExportStructure = "single" | "multiple";
 export type ExportContent = "notes" | "transcripts" | "both";
 
+export interface MetadataOptions {
+	includeTitle: boolean;
+	includeDate: boolean;
+	includeCategory: boolean;
+	includeTags: boolean;
+	includeFilePath: boolean;
+}
+
 export interface ExportOptions {
 	format: ExportFormat;
 	structure: ExportStructure;
@@ -20,8 +28,16 @@ export interface ExportOptions {
 		start: Date | null;
 		end: Date | null;
 	};
-	includeMetadata: boolean;
+	metadata: MetadataOptions;
 }
+
+export const DEFAULT_METADATA_OPTIONS: MetadataOptions = {
+	includeTitle: true,
+	includeDate: true,
+	includeCategory: true,
+	includeTags: true,
+	includeFilePath: false,
+};
 
 export interface ExportedMeeting {
 	event: MeetingEvent;
@@ -207,20 +223,31 @@ export class ExportService {
 		options: ExportOptions
 	): string {
 		const parts: string[] = [];
+		const { metadata } = options;
 
 		// Header with title
-		parts.push(`# ${meeting.event.title}`);
+		if (metadata.includeTitle) {
+			parts.push(`# ${meeting.event.title}`);
+		}
 
 		// Metadata
-		if (options.includeMetadata) {
+		const metadataParts: string[] = [];
+		if (metadata.includeDate) {
+			metadataParts.push(`**Date:** ${meeting.event.displayDate}`);
+		}
+		if (metadata.includeCategory && meeting.event.label) {
+			metadataParts.push(`**Category:** ${meeting.event.label.displayName}`);
+		}
+		if (metadata.includeTags && meeting.event.tags.length > 0) {
+			metadataParts.push(`**Tags:** ${meeting.event.tags.map(t => `#${t}`).join(", ")}`);
+		}
+		if (metadata.includeFilePath) {
+			metadataParts.push(`**Source:** ${meeting.event.path}`);
+		}
+
+		if (metadataParts.length > 0) {
 			parts.push("");
-			parts.push(`**Date:** ${meeting.event.displayDate}`);
-			if (meeting.event.label) {
-				parts.push(`**Category:** ${meeting.event.label.displayName}`);
-			}
-			if (meeting.event.tags.length > 0) {
-				parts.push(`**Tags:** ${meeting.event.tags.map(t => `#${t}`).join(", ")}`);
-			}
+			parts.push(...metadataParts);
 		}
 
 		// Note content
@@ -248,16 +275,24 @@ export class ExportService {
 		meeting: ExportedMeeting,
 		options: ExportOptions
 	): Record<string, unknown> {
-		const result: Record<string, unknown> = {
-			title: meeting.event.title,
-			date: meeting.event.start.toISOString(),
-			displayDate: meeting.event.displayDate,
-			path: meeting.event.path,
-		};
+		const result: Record<string, unknown> = {};
+		const { metadata } = options;
 
-		if (options.includeMetadata) {
+		if (metadata.includeTitle) {
+			result.title = meeting.event.title;
+		}
+		if (metadata.includeDate) {
+			result.date = meeting.event.start.toISOString();
+			result.displayDate = meeting.event.displayDate;
+		}
+		if (metadata.includeFilePath) {
+			result.path = meeting.event.path;
+		}
+		if (metadata.includeCategory) {
 			result.category = meeting.event.label?.displayName || null;
 			result.categoryTag = meeting.event.label?.tag || null;
+		}
+		if (metadata.includeTags) {
 			result.tags = meeting.event.tags;
 		}
 
@@ -290,21 +325,32 @@ export class ExportService {
 		options: ExportOptions
 	): string {
 		const parts: string[] = [];
+		const { metadata } = options;
 
 		// Header
-		parts.push(meeting.event.title.toUpperCase());
-		parts.push("=".repeat(meeting.event.title.length));
+		if (metadata.includeTitle) {
+			parts.push(meeting.event.title.toUpperCase());
+			parts.push("=".repeat(meeting.event.title.length));
+		}
 
 		// Metadata
-		if (options.includeMetadata) {
+		const metadataParts: string[] = [];
+		if (metadata.includeDate) {
+			metadataParts.push(`Date: ${meeting.event.displayDate}`);
+		}
+		if (metadata.includeCategory && meeting.event.label) {
+			metadataParts.push(`Category: ${meeting.event.label.displayName}`);
+		}
+		if (metadata.includeTags && meeting.event.tags.length > 0) {
+			metadataParts.push(`Tags: ${meeting.event.tags.join(", ")}`);
+		}
+		if (metadata.includeFilePath) {
+			metadataParts.push(`Source: ${meeting.event.path}`);
+		}
+
+		if (metadataParts.length > 0) {
 			parts.push("");
-			parts.push(`Date: ${meeting.event.displayDate}`);
-			if (meeting.event.label) {
-				parts.push(`Category: ${meeting.event.label.displayName}`);
-			}
-			if (meeting.event.tags.length > 0) {
-				parts.push(`Tags: ${meeting.event.tags.join(", ")}`);
-			}
+			parts.push(...metadataParts);
 		}
 
 		// Note content
@@ -451,7 +497,7 @@ export class ExportService {
 			.substring(0, 50);
 	}
 
-	getAvailableCategories(): Array<{ id: string; name: string; tagPrefix: string }> {
+	getAvailableCategories(): Array<{ id: string; name: string; tagPrefix: string; isSubcategory?: boolean }> {
 		const categories = this.plugin.settings.meetingLabelCategories || [];
 		return [
 			{ id: "all", name: "All Categories", tagPrefix: "" },
@@ -462,5 +508,62 @@ export class ExportService {
 				tagPrefix: c.tagPrefix,
 			})),
 		];
+	}
+
+	/**
+	 * Get all unique subcategories (full tags) found in meetings
+	 * Returns both parent categories and their specific subcategories
+	 */
+	getAvailableSubcategories(): Array<{
+		tag: string;
+		displayName: string;
+		category: string | null;
+		count: number;
+	}> {
+		const events = collectMeetingEvents(
+			this.app,
+			this.plugin.settings.calendarTagColors || {},
+			this.plugin.settings.meetingLabelCategories
+		);
+
+		const subcategoryMap = new Map<string, {
+			displayName: string;
+			category: string | null;
+			count: number;
+		}>();
+
+		for (const event of events) {
+			if (event.label?.tag) {
+				const existing = subcategoryMap.get(event.label.tag);
+				if (existing) {
+					existing.count++;
+				} else {
+					subcategoryMap.set(event.label.tag, {
+						displayName: event.label.displayName,
+						category: event.label.categoryName || null,
+						count: 1,
+					});
+				}
+			}
+		}
+
+		// Sort by category then by display name
+		return Array.from(subcategoryMap.entries())
+			.map(([tag, data]) => ({
+				tag,
+				displayName: data.displayName,
+				category: data.category,
+				count: data.count,
+			}))
+			.sort((a, b) => {
+				// Sort by category first
+				const catA = a.category || "";
+				const catB = b.category || "";
+				if (catA !== catB) {
+					return catA.localeCompare(catB);
+				}
+				// Then by display name
+				return a.displayName.localeCompare(b.displayName);
+			});
 	}
 }

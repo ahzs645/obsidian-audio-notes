@@ -263,6 +263,11 @@ input.title-input {
 	font-style: italic;
 }
 
+.aan-export-preview-label {
+	color: var(--text-accent);
+	font-size: var(--font-ui-smaller);
+}
+
 .aan-export-buttons {
 	margin-top: var(--size-4-4);
 	padding-top: var(--size-4-3);
@@ -277,6 +282,17 @@ input.title-input {
 .aan-export-buttons .setting-item-control {
 	justify-content: flex-end;
 	gap: var(--size-4-2);
+}
+
+.aan-export-filter-dropdown:empty {
+	display: none;
+}
+
+.aan-export-no-subcategories {
+	color: var(--text-muted);
+	font-style: italic;
+	padding: var(--size-4-2);
+	margin: 0;
 }
 /* END Export Modal */
 

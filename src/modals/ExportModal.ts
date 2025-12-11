@@ -2,12 +2,16 @@ import { App, Modal, Notice, Setting } from "obsidian";
 import type AutomaticAudioNotes from "../main";
 import {
 	ExportService,
+	DEFAULT_METADATA_OPTIONS,
 	type ExportFormat,
 	type ExportStructure,
 	type ExportContent,
 	type ExportOptions,
 	type ExportResult,
+	type MetadataOptions,
 } from "../services/ExportService";
+
+type CategoryFilterMode = "all" | "category" | "subcategory";
 
 export class ExportModal extends Modal {
 	private exportService: ExportService;
@@ -17,15 +21,19 @@ export class ExportModal extends Modal {
 	private format: ExportFormat = "markdown";
 	private structure: ExportStructure = "single";
 	private content: ExportContent = "both";
-	private categoryFilter: string | null = null;
+	private categoryFilterMode: CategoryFilterMode = "all";
+	private selectedCategory: string = "";
+	private selectedSubcategory: string = "";
 	private startDate: string = "";
 	private endDate: string = "";
-	private includeMetadata: boolean = true;
+	private metadata: MetadataOptions = { ...DEFAULT_METADATA_OPTIONS };
 
 	// UI elements
 	private previewEl: HTMLElement | null = null;
 	private exportButton: HTMLButtonElement | null = null;
 	private meetingCount: number = 0;
+	private subcategoryDropdownContainer: HTMLElement | null = null;
+	private categoryDropdownContainer: HTMLElement | null = null;
 
 	constructor(app: App, plugin: AutomaticAudioNotes) {
 		super(app);
@@ -45,6 +53,7 @@ export class ExportModal extends Modal {
 		});
 
 		this.createContentSection(contentEl);
+		this.createMetadataSection(contentEl);
 		this.createFilterSection(contentEl);
 		this.createFormatSection(contentEl);
 		this.createPreviewSection(contentEl);
@@ -76,13 +85,54 @@ export class ExportModal extends Modal {
 						void this.updatePreview();
 					});
 			});
+	}
+
+	private createMetadataSection(containerEl: HTMLElement): void {
+		const section = containerEl.createDiv({ cls: "aan-export-section" });
+		section.createEl("h3", { text: "Metadata to Include" });
 
 		new Setting(section)
-			.setName("Include metadata")
-			.setDesc("Include date, category, and tags in the export")
+			.setName("Title")
+			.setDesc("Include meeting title as header")
 			.addToggle((toggle) => {
-				toggle.setValue(this.includeMetadata).onChange((value) => {
-					this.includeMetadata = value;
+				toggle.setValue(this.metadata.includeTitle).onChange((value) => {
+					this.metadata.includeTitle = value;
+				});
+			});
+
+		new Setting(section)
+			.setName("Date")
+			.setDesc("Include meeting date")
+			.addToggle((toggle) => {
+				toggle.setValue(this.metadata.includeDate).onChange((value) => {
+					this.metadata.includeDate = value;
+				});
+			});
+
+		new Setting(section)
+			.setName("Category")
+			.setDesc("Include category/label information")
+			.addToggle((toggle) => {
+				toggle.setValue(this.metadata.includeCategory).onChange((value) => {
+					this.metadata.includeCategory = value;
+				});
+			});
+
+		new Setting(section)
+			.setName("Tags")
+			.setDesc("Include all tags")
+			.addToggle((toggle) => {
+				toggle.setValue(this.metadata.includeTags).onChange((value) => {
+					this.metadata.includeTags = value;
+				});
+			});
+
+		new Setting(section)
+			.setName("File path")
+			.setDesc("Include source file path from vault")
+			.addToggle((toggle) => {
+				toggle.setValue(this.metadata.includeFilePath).onChange((value) => {
+					this.metadata.includeFilePath = value;
 				});
 			});
 	}
@@ -91,24 +141,31 @@ export class ExportModal extends Modal {
 		const section = containerEl.createDiv({ cls: "aan-export-section" });
 		section.createEl("h3", { text: "Filter Meetings" });
 
-		// Category filter
-		const categories = this.exportService.getAvailableCategories();
+		// Category filter mode
 		new Setting(section)
-			.setName("Category")
-			.setDesc("Filter by meeting category")
+			.setName("Filter by")
+			.setDesc("Choose how to filter meetings")
 			.addDropdown((dropdown) => {
-				dropdown.addOption("", "All Categories");
-				dropdown.addOption("uncategorized", "Uncategorized");
-				for (const category of categories) {
-					if (category.id !== "all" && category.id !== "uncategorized") {
-						dropdown.addOption(category.tagPrefix, category.name);
-					}
-				}
-				dropdown.setValue(this.categoryFilter || "").onChange((value) => {
-					this.categoryFilter = value || null;
-					void this.updatePreview();
-				});
+				dropdown
+					.addOption("all", "All meetings")
+					.addOption("category", "By category (e.g., Job, Education)")
+					.addOption("subcategory", "By specific label (e.g., job/client-meeting)")
+					.setValue(this.categoryFilterMode)
+					.onChange((value) => {
+						this.categoryFilterMode = value as CategoryFilterMode;
+						this.updateFilterDropdowns();
+						void this.updatePreview();
+					});
 			});
+
+		// Category dropdown container
+		this.categoryDropdownContainer = section.createDiv({ cls: "aan-export-filter-dropdown" });
+
+		// Subcategory dropdown container
+		this.subcategoryDropdownContainer = section.createDiv({ cls: "aan-export-filter-dropdown" });
+
+		// Initialize filter dropdowns
+		this.updateFilterDropdowns();
 
 		// Date range
 		new Setting(section)
@@ -132,6 +189,79 @@ export class ExportModal extends Modal {
 					void this.updatePreview();
 				});
 			});
+	}
+
+	private updateFilterDropdowns(): void {
+		// Clear containers
+		if (this.categoryDropdownContainer) {
+			this.categoryDropdownContainer.empty();
+		}
+		if (this.subcategoryDropdownContainer) {
+			this.subcategoryDropdownContainer.empty();
+		}
+
+		if (this.categoryFilterMode === "category" && this.categoryDropdownContainer) {
+			const categories = this.exportService.getAvailableCategories();
+			new Setting(this.categoryDropdownContainer)
+				.setName("Category")
+				.setDesc("Select a category to filter by")
+				.addDropdown((dropdown) => {
+					dropdown.addOption("", "Select category...");
+					dropdown.addOption("uncategorized", "Uncategorized");
+					for (const category of categories) {
+						if (category.id !== "all" && category.id !== "uncategorized") {
+							const icon = (this.plugin.settings.meetingLabelCategories || [])
+								.find(c => c.id === category.id)?.icon || "";
+							const displayName = icon ? `${icon} ${category.name}` : category.name;
+							dropdown.addOption(category.tagPrefix, displayName);
+						}
+					}
+					dropdown.setValue(this.selectedCategory).onChange((value) => {
+						this.selectedCategory = value;
+						void this.updatePreview();
+					});
+				});
+		}
+
+		if (this.categoryFilterMode === "subcategory" && this.subcategoryDropdownContainer) {
+			const subcategories = this.exportService.getAvailableSubcategories();
+
+			if (subcategories.length === 0) {
+				this.subcategoryDropdownContainer.createEl("p", {
+					text: "No subcategories found. Create meetings with labels to see them here.",
+					cls: "aan-export-no-subcategories",
+				});
+			} else {
+				new Setting(this.subcategoryDropdownContainer)
+					.setName("Specific label")
+					.setDesc("Select a specific label to filter by")
+					.addDropdown((dropdown) => {
+						dropdown.addOption("", "Select label...");
+
+						// Group by category
+						let currentCategory = "";
+						for (const sub of subcategories) {
+							const categoryLabel = sub.category || "Other";
+							if (categoryLabel !== currentCategory) {
+								currentCategory = categoryLabel;
+								// Add optgroup-like separator (using em-dash prefix)
+								dropdown.addOption(`__category_${categoryLabel}`, `── ${categoryLabel} ──`);
+							}
+							dropdown.addOption(sub.tag, `${sub.displayName} (${sub.count})`);
+						}
+
+						dropdown.setValue(this.selectedSubcategory).onChange((value) => {
+							// Ignore category separator selections
+							if (value.startsWith("__category_")) {
+								dropdown.setValue(this.selectedSubcategory);
+								return;
+							}
+							this.selectedSubcategory = value;
+							void this.updatePreview();
+						});
+					});
+			}
+		}
 	}
 
 	private createFormatSection(containerEl: HTMLElement): void {
@@ -236,6 +366,14 @@ export class ExportModal extends Modal {
 					cls: "aan-export-preview-date",
 				});
 
+				// Show label if present
+				if (meeting.event.label) {
+					li.createEl("span", {
+						text: ` [${meeting.event.label.displayName}]`,
+						cls: "aan-export-preview-label",
+					});
+				}
+
 				// Indicate if transcript is available
 				if (meeting.transcript) {
 					li.createEl("span", {
@@ -260,17 +398,30 @@ export class ExportModal extends Modal {
 		}
 	}
 
+	private getCategoryFilter(): string | null {
+		switch (this.categoryFilterMode) {
+			case "all":
+				return null;
+			case "category":
+				return this.selectedCategory || null;
+			case "subcategory":
+				return this.selectedSubcategory || null;
+			default:
+				return null;
+		}
+	}
+
 	private buildExportOptions(): ExportOptions {
 		return {
 			format: this.format,
 			structure: this.structure,
 			content: this.content,
-			categoryFilter: this.categoryFilter,
+			categoryFilter: this.getCategoryFilter(),
 			dateRange: {
 				start: this.startDate ? new Date(this.startDate) : null,
 				end: this.endDate ? new Date(this.endDate) : null,
 			},
-			includeMetadata: this.includeMetadata,
+			metadata: { ...this.metadata },
 		};
 	}
 
