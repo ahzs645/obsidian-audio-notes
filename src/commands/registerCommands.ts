@@ -10,6 +10,7 @@ import {
 } from "../AudioNotes";
 import { ensureDashboardNote } from "../dashboard";
 import { NewMeetingModal } from "../modals/NewMeetingModal";
+import { ExportModal } from "../modals/ExportModal";
 import {
 	MeetingLabelPickerModal,
 	type MeetingLabelSelection,
@@ -416,6 +417,14 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 			} else {
 				new DGQuickNoteModal(plugin).open();
 			}
+		},
+	});
+
+	plugin.addCommand({
+		id: "export-audio-notes",
+		name: "Export audio notes and transcripts",
+		callback: () => {
+			new ExportModal(app, plugin).open();
 		},
 	});
 }

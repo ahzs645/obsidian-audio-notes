@@ -188,3 +188,95 @@ input.title-input {
 }
 /* END DG Quick Audio Note */
 
+/* START Export Modal */
+.aan-export-modal {
+	--dialog-width: 550px;
+}
+
+.aan-export-description {
+	color: var(--text-muted);
+	margin-bottom: var(--size-4-4);
+}
+
+.aan-export-section {
+	margin-bottom: var(--size-4-4);
+}
+
+.aan-export-section h3 {
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	margin-bottom: var(--size-4-2);
+	padding-bottom: var(--size-4-1);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.aan-export-preview {
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+	padding: var(--size-4-3);
+	min-height: 100px;
+	max-height: 200px;
+	overflow-y: auto;
+}
+
+.aan-export-preview-empty {
+	color: var(--text-muted);
+	font-style: italic;
+	text-align: center;
+	margin: 0;
+}
+
+.aan-export-preview-summary {
+	margin: 0 0 var(--size-4-2) 0;
+	font-weight: var(--font-medium);
+}
+
+.aan-export-preview-list {
+	margin: 0;
+	padding-left: var(--size-4-4);
+}
+
+.aan-export-preview-list li {
+	margin-bottom: var(--size-4-1);
+}
+
+.aan-export-preview-title {
+	font-weight: var(--font-medium);
+}
+
+.aan-export-preview-date {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.aan-export-preview-badge {
+	color: var(--text-accent);
+	font-size: var(--font-ui-smaller);
+	margin-left: var(--size-4-1);
+}
+
+.aan-export-preview-more {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.aan-export-buttons {
+	margin-top: var(--size-4-4);
+	padding-top: var(--size-4-3);
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.aan-export-buttons .setting-item {
+	border: none;
+	padding: 0;
+}
+
+.aan-export-buttons .setting-item-control {
+	justify-content: flex-end;
+	gap: var(--size-4-2);
+}
+/* END Export Modal */
+
