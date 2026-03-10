@@ -24,8 +24,12 @@ export class ImportWhisperModal extends Modal {
 	private useDateFolders: boolean;
 	private createNote: boolean;
 	private noteTitle: string;
+	private dragCounter = 0;
 	private importButton: HTMLButtonElement | undefined;
 	private noteTitleInput?: TextComponent;
+	private fileInput?: HTMLInputElement;
+	private dropzoneEl?: HTMLElement;
+	private dropzoneTextEl?: HTMLElement;
 	private selectedFilesContainer?: HTMLElement;
 	private meetingLabelSelection?: MeetingLabelSelection;
 	private meetingLabelDisplay?: HTMLElement;
@@ -47,29 +51,41 @@ export class ImportWhisperModal extends Modal {
 		contentEl.createEl("p", {
 			text: "Select a .whisper archive exported from WhisperKit (or compatible apps) and Audio Notes will extract the audio + transcript directly into your vault.",
 		});
+		this.dropzoneEl = contentEl.createDiv({
+			cls: "aan-whisper-dropzone",
+		});
+		this.dropzoneTextEl = this.dropzoneEl.createEl("p");
+		this.dropzoneEl.createEl("p", {
+			text: "Multiple archives are supported.",
+			cls: "aan-whisper-dropzone-hint",
+		});
+		this.dropzoneEl.addEventListener("click", () => {
+			this.fileInput?.click();
+		});
+		this.dropzoneEl.addEventListener("dragenter", (event) =>
+			this.handleDragEnter(event)
+		);
+		this.dropzoneEl.addEventListener("dragover", (event) =>
+			this.handleDragOver(event)
+		);
+		this.dropzoneEl.addEventListener("dragleave", (event) =>
+			this.handleDragLeave(event)
+		);
+		this.dropzoneEl.addEventListener("drop", (event) =>
+			this.handleDrop(event)
+		);
 
 		const fileSetting = new Setting(contentEl)
 			.setName("Whisper archive")
 			.setDesc("The .whisper file you want to import.");
-		const fileInput = fileSetting.controlEl.createEl("input", {
+		this.fileInput = fileSetting.controlEl.createEl("input", {
 			type: "file",
 		});
-		fileInput.accept = ".whisper";
-		fileInput.multiple = true;
-		fileInput.addEventListener("change", (evt: Event) => {
+		this.fileInput.accept = ".whisper";
+		this.fileInput.multiple = true;
+		this.fileInput.addEventListener("change", (evt: Event) => {
 			const target = evt.target as HTMLInputElement;
-			this.selectedFiles = target.files ? Array.from(target.files) : [];
-			if (this.selectedFiles.length === 1) {
-				this.noteTitle =
-					this.selectedFiles[0].name.replace(/\.whisper$/i, "") || "";
-				this.noteTitleInput?.setValue(this.noteTitle);
-			} else {
-				this.noteTitle = "";
-				this.noteTitleInput?.setValue("");
-			}
-			this.updateSelectedFilesList();
-			this.toggleNoteInputs();
-			this.toggleImportButton();
+			this.setSelectedFiles(target.files ? Array.from(target.files) : []);
 		});
 
 		const selectionSetting = new Setting(contentEl)
@@ -82,17 +98,10 @@ export class ImportWhisperModal extends Modal {
 			button
 				.setIcon("x")
 				.setTooltip("Clear selection")
-				.onClick(() => {
-					this.selectedFiles = [];
-					this.noteTitle = "";
-					this.noteTitleInput?.setValue("");
-					fileInput.value = "";
-					this.updateSelectedFilesList();
-					this.toggleNoteInputs();
-					this.toggleImportButton();
-				})
+				.onClick(() => this.clearSelectedFiles())
 		);
 		this.updateSelectedFilesList();
+		this.updateDropzone();
 
 		new Setting(contentEl)
 			.setName("Use date subfolders")
@@ -177,6 +186,74 @@ export class ImportWhisperModal extends Modal {
 		this.importButton.disabled = !this.selectedFiles.length;
 	}
 
+	private clearSelectedFiles() {
+		this.selectedFiles = [];
+		this.noteTitle = "";
+		this.noteTitleInput?.setValue("");
+		if (this.fileInput) {
+			this.fileInput.value = "";
+		}
+		this.updateSelectionUi();
+	}
+
+	private setSelectedFiles(files: File[]) {
+		const { accepted, rejectedCount } = this.filterWhisperFiles(files);
+		this.selectedFiles = accepted;
+		this.syncNoteTitle();
+		this.updateSelectionUi();
+		if (rejectedCount) {
+			new Notice(
+				`${rejectedCount} file${rejectedCount === 1 ? "" : "s"} skipped. Only .whisper archives are supported.`,
+				5000
+			);
+		}
+	}
+
+	private addSelectedFiles(files: File[]) {
+		const { accepted, rejectedCount } = this.filterWhisperFiles(files);
+		if (!accepted.length && rejectedCount) {
+			new Notice("Only .whisper archives are supported.", 5000);
+			return;
+		}
+		const merged = new Map<string, File>();
+		for (const file of this.selectedFiles) {
+			merged.set(this.getFileKey(file), file);
+		}
+		for (const file of accepted) {
+			merged.set(this.getFileKey(file), file);
+		}
+		this.selectedFiles = Array.from(merged.values());
+		this.syncNoteTitle();
+		this.updateSelectionUi();
+		if (rejectedCount) {
+			new Notice(
+				`${rejectedCount} file${rejectedCount === 1 ? "" : "s"} skipped. Only .whisper archives are supported.`,
+				5000
+			);
+		}
+	}
+
+	private syncNoteTitle() {
+		if (this.selectedFiles.length === 1) {
+			this.noteTitle =
+				this.selectedFiles[0].name.replace(/\.whisper$/i, "") || "";
+			this.noteTitleInput?.setValue(this.noteTitle);
+			return;
+		}
+		this.noteTitle = "";
+		this.noteTitleInput?.setValue("");
+	}
+
+	private updateSelectionUi() {
+		this.updateSelectedFilesList();
+		this.toggleNoteInputs();
+		this.toggleImportButton();
+		this.updateDropzone();
+		if (this.fileInput) {
+			this.fileInput.value = "";
+		}
+	}
+
 	private toggleNoteInputs() {
 		const disabled = !this.createNote || this.selectedFiles.length !== 1;
 		this.noteTitleInput?.setDisabled(disabled);
@@ -185,6 +262,69 @@ export class ImportWhisperModal extends Modal {
 				? "Uses archive filename automatically"
 				: "Pipeline decisions with Will";
 			this.noteTitleInput.setPlaceholder(placeholder);
+		}
+	}
+
+	private updateDropzone() {
+		if (!this.dropzoneEl || !this.dropzoneTextEl) {
+			return;
+		}
+		this.dropzoneTextEl.setText(
+			this.selectedFiles.length
+				? "Drop more .whisper files here or click to browse"
+				: "Drop .whisper files here or click to browse"
+		);
+		this.dropzoneEl.classList.toggle(
+			"has-selection",
+			this.selectedFiles.length > 0
+		);
+	}
+
+	private filterWhisperFiles(files: File[]): {
+		accepted: File[];
+		rejectedCount: number;
+	} {
+		const accepted = files.filter((file) =>
+			file.name.toLowerCase().endsWith(".whisper")
+		);
+		return {
+			accepted,
+			rejectedCount: files.length - accepted.length,
+		};
+	}
+
+	private getFileKey(file: File): string {
+		return `${file.name}:${file.size}:${file.lastModified}`;
+	}
+
+	private handleDragEnter(event: DragEvent) {
+		event.preventDefault();
+		this.dragCounter += 1;
+		this.dropzoneEl?.classList.add("is-dragging");
+	}
+
+	private handleDragOver(event: DragEvent) {
+		event.preventDefault();
+		if (event.dataTransfer) {
+			event.dataTransfer.dropEffect = "copy";
+		}
+	}
+
+	private handleDragLeave(event: DragEvent) {
+		event.preventDefault();
+		this.dragCounter = Math.max(this.dragCounter - 1, 0);
+		if (this.dragCounter === 0) {
+			this.dropzoneEl?.classList.remove("is-dragging");
+		}
+	}
+
+	private handleDrop(event: DragEvent) {
+		event.preventDefault();
+		this.dragCounter = 0;
+		this.dropzoneEl?.classList.remove("is-dragging");
+		const files = event.dataTransfer?.files;
+		if (files?.length) {
+			this.addSelectedFiles(Array.from(files));
 		}
 	}
 

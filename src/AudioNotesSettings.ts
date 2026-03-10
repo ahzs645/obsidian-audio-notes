@@ -89,11 +89,11 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 			.addText((text) =>
 				text
 					.setPlaceholder("5")
-					.setValue(this.plugin.settings.forwardStep.toString())
+					.setValue(this.plugin.settings.backwardStep.toString())
 					.onChange(async (value) => {
 						try {
 							parseFloat(value);
-							this.plugin.settings.forwardStep = value;
+							this.plugin.settings.backwardStep = value;
 							await this.plugin.saveSettings();
 						} catch {
 							new Notice("Must be a number");
@@ -109,11 +109,11 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 			.addText((text) =>
 				text
 					.setPlaceholder("15")
-					.setValue(this.plugin.settings.backwardStep.toString())
+					.setValue(this.plugin.settings.forwardStep.toString())
 					.onChange(async (value) => {
 						try {
 							parseFloat(value);
-							this.plugin.settings.backwardStep = value;
+							this.plugin.settings.forwardStep = value;
 							await this.plugin.saveSettings();
 						} catch {
 							new Notice("Must be a number");
@@ -391,6 +391,33 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.whisperNoteFolder)
 					.onChange(async (value) => {
 						this.plugin.settings.whisperNoteFolder = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+		new Setting(containerEl)
+			.setName("Inbox folder")
+			.setDesc(
+				"Relative path inside your vault where new .whisper files can be dropped or synced for background import."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("Inbox/whisper")
+					.setValue(this.plugin.settings.whisperInboxFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.whisperInboxFolder = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+		new Setting(containerEl)
+			.setName("Auto-import new inbox archives")
+			.setDesc(
+				"Automatically import new .whisper files created or moved into the inbox folder."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.whisperAutoImportInbox)
+					.onChange(async (value) => {
+						this.plugin.settings.whisperAutoImportInbox = value;
 						await this.plugin.saveSettings();
 					})
 			);
@@ -786,6 +813,8 @@ export interface StringifiedAudioNotesSettings {
 	whisperUseDateFolders: boolean;
 	whisperCreateNote: boolean;
 	whisperNoteFolder: string;
+	whisperInboxFolder: string;
+	whisperAutoImportInbox: boolean;
 	calendarTagColors: Record<string, string>;
 	meetingTemplateEnabled: boolean;
 	periodicDailyNoteEnabled: boolean;
@@ -815,6 +844,8 @@ const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	whisperUseDateFolders: true,
 	whisperCreateNote: true,
 	whisperNoteFolder: "02-meetings",
+	whisperInboxFolder: "Inbox/whisper",
+	whisperAutoImportInbox: false,
 	calendarTagColors: {},
 	meetingTemplateEnabled: true,
 	periodicDailyNoteEnabled: true,
@@ -847,6 +878,8 @@ export class AudioNotesSettings {
 		private _whisperUseDateFolders: boolean,
 		private _whisperCreateNote: boolean,
 		private _whisperNoteFolder: string,
+		private _whisperInboxFolder: string,
+		private _whisperAutoImportInbox: boolean,
 		private _calendarTagColors: Record<string, string>,
 		private _meetingTemplateEnabled: boolean,
 		private _periodicDailyNoteEnabled: boolean,
@@ -877,6 +910,8 @@ export class AudioNotesSettings {
 			DEFAULT_SETTINGS.whisperUseDateFolders,
 			DEFAULT_SETTINGS.whisperCreateNote,
 			DEFAULT_SETTINGS.whisperNoteFolder,
+			DEFAULT_SETTINGS.whisperInboxFolder,
+			DEFAULT_SETTINGS.whisperAutoImportInbox,
 			DEFAULT_SETTINGS.calendarTagColors,
 			DEFAULT_SETTINGS.meetingTemplateEnabled,
 			DEFAULT_SETTINGS.periodicDailyNoteEnabled,
@@ -988,6 +1023,19 @@ export class AudioNotesSettings {
 			data.whisperNoteFolder !== undefined
 		) {
 			settings.whisperNoteFolder = data.whisperNoteFolder!;
+		}
+		if (
+			data.whisperInboxFolder !== null &&
+			data.whisperInboxFolder !== undefined
+		) {
+			settings.whisperInboxFolder = data.whisperInboxFolder!;
+		}
+		if (
+			data.whisperAutoImportInbox !== null &&
+			data.whisperAutoImportInbox !== undefined
+		) {
+			settings.whisperAutoImportInbox =
+				data.whisperAutoImportInbox!;
 		}
 		if (
 			data.calendarTagColors !== null &&
@@ -1196,6 +1244,22 @@ export class AudioNotesSettings {
 
 	set whisperNoteFolder(value: string) {
 		this._whisperNoteFolder = value;
+	}
+
+	get whisperInboxFolder(): string {
+		return this._whisperInboxFolder || DEFAULT_SETTINGS.whisperInboxFolder;
+	}
+
+	set whisperInboxFolder(value: string) {
+		this._whisperInboxFolder = value?.trim() || "";
+	}
+
+	get whisperAutoImportInbox(): boolean {
+		return Boolean(this._whisperAutoImportInbox);
+	}
+
+	set whisperAutoImportInbox(value: boolean) {
+		this._whisperAutoImportInbox = Boolean(value);
 	}
 
 	get calendarTagColors(): Record<string, string> {

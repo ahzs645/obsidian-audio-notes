@@ -76,6 +76,26 @@ interface ExistingImportMatch {
 	hasAudio: boolean;
 }
 
+interface WhisperImportIndexEntry {
+	transcriptPath: string;
+	audioPath?: string;
+	audioSha1?: string;
+	segmentsSha1?: string;
+	fingerprint?: string | null;
+	normalizedName: string;
+	normalizedDate?: number;
+	durationMs: number;
+}
+
+interface WhisperImportIndex {
+	root: string;
+	entriesByPath: Map<string, WhisperImportIndexEntry>;
+	byAudioSha1: Map<string, Set<string>>;
+	bySegmentsSha1: Map<string, Set<string>>;
+	byFingerprint: Map<string, Set<string>>;
+	byName: Map<string, Set<string>>;
+}
+
 export interface WhisperImportOptions {
 	audioFolder: string;
 	transcriptFolder: string;
@@ -92,6 +112,11 @@ const DEFAULT_OPTIONS = (plugin: AutomaticAudioNotes): WhisperImportOptions => (
 	createNote: plugin.settings.whisperCreateNote,
 	noteFolder: plugin.settings.whisperNoteFolder,
 });
+
+const whisperImportIndexCache = new WeakMap<
+	AutomaticAudioNotes,
+	Map<string, Promise<WhisperImportIndex>>
+>();
 
 function slugify(input: string | undefined, fallback: string): string {
 	if (!input || input.trim() === "") {
@@ -293,6 +318,268 @@ function fingerprintFromStoredTranscript(
 	);
 }
 
+function normalizeIndexRoot(transcriptFolder: string | undefined): string {
+	return transcriptFolder
+		? normalizePath(transcriptFolder).replace(/\/+$/, "")
+		: "";
+}
+
+function isPathInsideRoot(path: string, normalizedRoot: string): boolean {
+	const normalizedPath = normalizePath(path);
+	if (!normalizedRoot) {
+		return true;
+	}
+	return (
+		normalizedPath === normalizedRoot ||
+		normalizedPath.startsWith(`${normalizedRoot}/`)
+	);
+}
+
+function createEmptyWhisperImportIndex(root: string): WhisperImportIndex {
+	return {
+		root,
+		entriesByPath: new Map(),
+		byAudioSha1: new Map(),
+		bySegmentsSha1: new Map(),
+		byFingerprint: new Map(),
+		byName: new Map(),
+	};
+}
+
+function addIndexReference(
+	map: Map<string, Set<string>>,
+	key: string | undefined | null,
+	transcriptPath: string
+) {
+	if (!key) {
+		return;
+	}
+	const existing = map.get(key);
+	if (existing) {
+		existing.add(transcriptPath);
+		return;
+	}
+	map.set(key, new Set([transcriptPath]));
+}
+
+function removeIndexReference(
+	map: Map<string, Set<string>>,
+	key: string | undefined | null,
+	transcriptPath: string
+) {
+	if (!key) {
+		return;
+	}
+	const existing = map.get(key);
+	if (!existing) {
+		return;
+	}
+	existing.delete(transcriptPath);
+	if (!existing.size) {
+		map.delete(key);
+	}
+}
+
+function removeWhisperImportIndexEntry(
+	index: WhisperImportIndex,
+	transcriptPath: string
+) {
+	const normalizedPath = normalizePath(transcriptPath);
+	const existing = index.entriesByPath.get(normalizedPath);
+	if (!existing) {
+		return;
+	}
+	index.entriesByPath.delete(normalizedPath);
+	removeIndexReference(
+		index.byAudioSha1,
+		existing.audioSha1,
+		normalizedPath
+	);
+	removeIndexReference(
+		index.bySegmentsSha1,
+		existing.segmentsSha1,
+		normalizedPath
+	);
+	removeIndexReference(
+		index.byFingerprint,
+		existing.fingerprint ?? undefined,
+		normalizedPath
+	);
+	removeIndexReference(
+		index.byName,
+		existing.normalizedName,
+		normalizedPath
+	);
+}
+
+function addWhisperImportIndexEntry(
+	index: WhisperImportIndex,
+	entry: WhisperImportIndexEntry
+) {
+	removeWhisperImportIndexEntry(index, entry.transcriptPath);
+	index.entriesByPath.set(entry.transcriptPath, entry);
+	addIndexReference(index.byAudioSha1, entry.audioSha1, entry.transcriptPath);
+	addIndexReference(
+		index.bySegmentsSha1,
+		entry.segmentsSha1,
+		entry.transcriptPath
+	);
+	addIndexReference(
+		index.byFingerprint,
+		entry.fingerprint ?? undefined,
+		entry.transcriptPath
+	);
+	addIndexReference(index.byName, entry.normalizedName, entry.transcriptPath);
+}
+
+function buildWhisperImportIndexEntry(
+	transcriptPath: string,
+	data: any,
+	defaultName: string
+): WhisperImportIndexEntry | null {
+	if (data?.source !== "whisper") {
+		return null;
+	}
+	const normalizedPath = normalizePath(transcriptPath);
+	const audioPath =
+		typeof data?.audioPath === "string"
+			? normalizePath(data.audioPath)
+			: undefined;
+	return {
+		transcriptPath: normalizedPath,
+		audioPath,
+		audioSha1:
+			typeof data?.audioSha1 === "string" ? data.audioSha1 : undefined,
+		segmentsSha1:
+			typeof data?.segmentsSha1 === "string"
+				? data.segmentsSha1
+				: inferSegmentsSha1(data?.segments),
+		fingerprint:
+			typeof data?.whisperFingerprint === "string"
+				? data.whisperFingerprint
+				: fingerprintFromStoredTranscript(data, defaultName),
+		normalizedName:
+			normalizeName(data?.originalMediaFilename) ||
+			normalizeName(data?.originalWhisperFile),
+		normalizedDate:
+			normalizeEpoch(data?.createdAt) ??
+			normalizeEpoch(data?.dateCreated) ??
+			normalizeEpoch(data?.updatedAt) ??
+			normalizeEpoch(data?.dateUpdated),
+		durationMs:
+			typeof data?.durationMs === "number"
+				? data.durationMs
+				: inferDurationMsFromSegments(data?.segments) ?? 0,
+	};
+}
+
+async function buildWhisperImportIndex(
+	plugin: AutomaticAudioNotes,
+	normalizedRoot: string,
+	defaultName: string
+): Promise<WhisperImportIndex> {
+	const index = createEmptyWhisperImportIndex(normalizedRoot);
+	const files = plugin.app.vault.getFiles();
+	for (const file of files) {
+		if (file.extension !== "json") {
+			continue;
+		}
+		if (!isPathInsideRoot(file.path, normalizedRoot)) {
+			continue;
+		}
+		try {
+			const contents = await plugin.app.vault.read(file);
+			const parsed = JSON.parse(contents);
+			const entry = buildWhisperImportIndexEntry(
+				file.path,
+				parsed,
+				defaultName
+			);
+			if (!entry) {
+				continue;
+			}
+			addWhisperImportIndexEntry(index, entry);
+		} catch {
+			continue;
+		}
+	}
+	return index;
+}
+
+async function getWhisperImportIndex(
+	plugin: AutomaticAudioNotes,
+	transcriptFolder: string | undefined,
+	defaultName: string
+): Promise<WhisperImportIndex> {
+	const normalizedRoot = normalizeIndexRoot(transcriptFolder);
+	let pluginCache = whisperImportIndexCache.get(plugin);
+	if (!pluginCache) {
+		pluginCache = new Map();
+		whisperImportIndexCache.set(plugin, pluginCache);
+	}
+	const existing = pluginCache.get(normalizedRoot);
+	if (existing) {
+		return existing;
+	}
+	const next = buildWhisperImportIndex(
+		plugin,
+		normalizedRoot,
+		defaultName
+	).catch((error) => {
+		pluginCache?.delete(normalizedRoot);
+		throw error;
+	});
+	pluginCache.set(normalizedRoot, next);
+	return next;
+}
+
+async function resolveIndexedMatch(
+	plugin: AutomaticAudioNotes,
+	index: WhisperImportIndex,
+	transcriptPath: string
+): Promise<ExistingImportMatch | null> {
+	const normalizedPath = normalizePath(transcriptPath);
+	const entry = index.entriesByPath.get(normalizedPath);
+	if (!entry) {
+		return null;
+	}
+	const transcriptExists =
+		await plugin.app.vault.adapter.exists(normalizedPath);
+	if (!transcriptExists) {
+		removeWhisperImportIndexEntry(index, normalizedPath);
+		return null;
+	}
+	const audioExists = entry.audioPath
+		? await plugin.app.vault.adapter.exists(entry.audioPath)
+		: false;
+	return {
+		transcriptPath: normalizedPath,
+		audioPath: entry.audioPath,
+		hasAudio: Boolean(audioExists),
+	};
+}
+
+async function findIndexedMatchForKey(
+	plugin: AutomaticAudioNotes,
+	index: WhisperImportIndex,
+	candidates: Set<string> | undefined
+): Promise<ExistingImportMatch | null> {
+	if (!candidates?.size) {
+		return null;
+	}
+	for (const transcriptPath of candidates) {
+		const match = await resolveIndexedMatch(
+			plugin,
+			index,
+			transcriptPath
+		);
+		if (match) {
+			return match;
+		}
+	}
+	return null;
+}
+
 async function findExistingWhisperImport(
 	plugin: AutomaticAudioNotes,
 	fingerprint: string,
@@ -303,108 +590,72 @@ async function findExistingWhisperImport(
 	audioSha1: string | undefined,
 	segmentsSha1: string | undefined
 ): Promise<ExistingImportMatch | null> {
-	const normalizedRoot = transcriptFolder
-		? normalizePath(transcriptFolder).replace(/\/+$/, "")
-		: "";
-	const files = plugin.app.vault.getFiles();
+	const index = await getWhisperImportIndex(
+		plugin,
+		transcriptFolder,
+		originalName
+	);
 	const incomingName =
 		normalizeName(metadata.originalMediaFilename) ||
 		normalizeName(originalName);
 	const incomingDate =
 		normalizeEpoch(metadata.dateCreated) ??
 		normalizeEpoch(metadata.dateUpdated);
-	for (const file of files) {
-		if (file.extension !== "json") continue;
-		if (normalizedRoot) {
-			const normalizedPath = normalizePath(file.path);
-			if (
-				normalizedPath !== normalizedRoot &&
-				!normalizedPath.startsWith(`${normalizedRoot}/`)
-			) {
-				continue;
-			}
+	if (audioSha1) {
+		const directAudioMatch = await findIndexedMatchForKey(
+			plugin,
+			index,
+			index.byAudioSha1.get(audioSha1)
+		);
+		if (directAudioMatch) {
+			return directAudioMatch;
 		}
-		try {
-			const contents = await plugin.app.vault.read(file);
-			const parsed = JSON.parse(contents);
-			if (parsed?.source !== "whisper") {
-				continue;
-			}
-			const parsedAudioPath =
-				typeof parsed.audioPath === "string"
-					? normalizePath(parsed.audioPath)
-					: undefined;
-			const audioExists =
-				parsedAudioPath &&
-				(await plugin.app.vault.adapter.exists(parsedAudioPath));
-			const storedAudioSha1 =
-				typeof parsed.audioSha1 === "string" ? parsed.audioSha1 : undefined;
-			const storedSegmentsSha1 =
-				typeof parsed.segmentsSha1 === "string"
-					? parsed.segmentsSha1
-					: inferSegmentsSha1(parsed.segments);
-			if (audioSha1 && storedAudioSha1 && audioSha1 === storedAudioSha1) {
-				return {
-					transcriptPath: file.path,
-					audioPath: parsedAudioPath,
-					hasAudio: Boolean(audioExists),
-				};
-			}
-			if (
-				segmentsSha1 &&
-				storedSegmentsSha1 &&
-				segmentsSha1 === storedSegmentsSha1
-			) {
-				return {
-					transcriptPath: file.path,
-					audioPath: parsedAudioPath,
-					hasAudio: Boolean(audioExists),
-				};
-			}
-			const storedFingerprint =
-				typeof parsed.whisperFingerprint === "string"
-					? parsed.whisperFingerprint
-					: fingerprintFromStoredTranscript(parsed, originalName);
-			if (storedFingerprint && storedFingerprint === fingerprint) {
-				return {
-					transcriptPath: file.path,
-					audioPath: parsedAudioPath,
-					hasAudio: Boolean(audioExists),
-				};
-			}
+	}
+	if (segmentsSha1) {
+		const directSegmentsMatch = await findIndexedMatchForKey(
+			plugin,
+			index,
+			index.bySegmentsSha1.get(segmentsSha1)
+		);
+		if (directSegmentsMatch) {
+			return directSegmentsMatch;
+		}
+	}
+	const directFingerprintMatch = await findIndexedMatchForKey(
+		plugin,
+		index,
+		index.byFingerprint.get(fingerprint)
+	);
+	if (directFingerprintMatch) {
+		return directFingerprintMatch;
+	}
 
-			const storedName =
-				normalizeName(parsed.originalMediaFilename) ||
-				normalizeName(parsed.originalWhisperFile);
-			const storedDate =
-				normalizeEpoch(parsed.createdAt) ??
-				normalizeEpoch(parsed.dateCreated) ??
-				normalizeEpoch(parsed.updatedAt) ??
-				normalizeEpoch(parsed.dateUpdated);
-			const storedDuration =
-				typeof parsed.durationMs === "number"
-					? parsed.durationMs
-					: inferDurationMsFromSegments(parsed.segments) ?? 0;
-			const incomingDuration = Math.round(meetingDurationMs || 0);
-			if (
-				storedName &&
-				incomingName &&
-				storedName === incomingName &&
-				(!incomingDate ||
-					!storedDate ||
-					incomingDate === storedDate) &&
-				(!incomingDuration ||
-					!storedDuration ||
-					Math.abs(incomingDuration - storedDuration) < 2000)
-			) {
-				return {
-					transcriptPath: file.path,
-					audioPath: parsedAudioPath,
-					hasAudio: Boolean(audioExists),
-				};
-			}
-		} catch {
+	const incomingDuration = Math.round(meetingDurationMs || 0);
+	const namedMatches = index.byName.get(incomingName);
+	if (!namedMatches?.size) {
+		return null;
+	}
+	for (const transcriptPath of namedMatches) {
+		const entry = index.entriesByPath.get(transcriptPath);
+		if (!entry) {
 			continue;
+		}
+		if (
+			(!incomingDate ||
+				!entry.normalizedDate ||
+				incomingDate === entry.normalizedDate) &&
+			(!incomingDuration ||
+				!entry.durationMs ||
+				Math.abs(incomingDuration - entry.durationMs) < 2000)
+		) {
+			const match = await resolveIndexedMatch(
+				plugin,
+				index,
+				transcriptPath
+			);
+			if (match) {
+				return match;
+			}
 		}
 	}
 	return null;
@@ -447,6 +698,26 @@ function inferSegmentsSha1(rawSegments: any): string | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+async function recordWhisperImportIndexEntry(
+	plugin: AutomaticAudioNotes,
+	transcriptFolder: string | undefined,
+	entry: WhisperImportIndexEntry
+) {
+	const index = await getWhisperImportIndex(
+		plugin,
+		transcriptFolder,
+		entry.transcriptPath
+	);
+	addWhisperImportIndexEntry(index, entry);
+}
+
+function buildMeetingNoteFolder(baseFolder: string, meetingDate: Date): string {
+	const year = meetingDate.getFullYear().toString();
+	const month = String(meetingDate.getMonth() + 1).padStart(2, "0");
+	const day = String(meetingDate.getDate()).padStart(2, "0");
+	return normalizePath([baseFolder, year, month, day].join("/"));
 }
 
 export async function importWhisperArchive(
@@ -580,30 +851,39 @@ export async function importWhisperArchive(
 		plugin.app.vault,
 		`${transcriptFolder}/${baseName}.json`
 	);
+	const transcriptPayload = {
+		source: "whisper",
+		whisperFingerprint,
+		audioPath,
+		audioSha1,
+		segmentsSha1,
+		originalMediaFilename: metadata.originalMediaFilename ?? null,
+		originalWhisperFile: originalName,
+		model: metadata.modelQualityID ?? metadata.modelEngine ?? "unknown",
+		createdAt: metadata.dateCreated ?? null,
+		updatedAt: metadata.dateUpdated ?? null,
+		speakers: metadata.speakers ?? [],
+		segments,
+		durationMs: meetingDurationMs,
+	};
 
 	await plugin.app.vault.adapter.writeBinary(audioPath, audioBuffer);
 	await plugin.app.vault.adapter.write(
 		transcriptPath,
-		JSON.stringify(
-			{
-				source: "whisper",
-				whisperFingerprint,
-				audioPath,
-				audioSha1,
-				segmentsSha1,
-				originalMediaFilename: metadata.originalMediaFilename ?? null,
-				originalWhisperFile: originalName,
-				model: metadata.modelQualityID ?? metadata.modelEngine ?? "unknown",
-				createdAt: metadata.dateCreated ?? null,
-				updatedAt: metadata.dateUpdated ?? null,
-				speakers: metadata.speakers ?? [],
-				segments,
-				durationMs: meetingDurationMs,
-			},
-			null,
-			2
-		)
+		JSON.stringify(transcriptPayload, null, 2)
 	);
+	const indexEntry = buildWhisperImportIndexEntry(
+		transcriptPath,
+		transcriptPayload,
+		originalName
+	);
+	if (indexEntry) {
+		await recordWhisperImportIndexEntry(
+			plugin,
+			options.transcriptFolder,
+			indexEntry
+		);
+	}
 
 	return {
 		audioPath,
@@ -649,17 +929,10 @@ async function maybeCreateNote(
 	if (!folder) {
 		return undefined;
 	}
-
-	await ensureFolderExists(plugin.app.vault, folder);
 	const title =
 		options.noteTitle?.trim() ||
 		metadata.originalMediaFilename ||
 		baseName.replace(/-/g, " ");
-	const safeFileName = title.replace(/[\\/]/g, "-").trim() || baseName;
-	const notePath = await getAvailablePath(
-		plugin.app.vault,
-		`${folder}/${safeFileName}.md`
-	);
 
 	const createdAt = normalizeEpoch(metadata.dateCreated);
 	const updatedAt = normalizeEpoch(metadata.dateUpdated);
@@ -688,8 +961,17 @@ async function maybeCreateNote(
 	}
 	const startDateObj = new Date(startTimestamp);
 	const endDateObj = new Date(endTimestamp);
-	const startIso = startDateObj.toISOString();
-	const endIso = endDateObj.toISOString();
+	const noteFolder = buildMeetingNoteFolder(folder, startDateObj);
+	await ensureFolderExists(plugin.app.vault, noteFolder);
+	const safeFileName =
+		title
+			.replace(/[\\/:*?"<>|#]+/g, "-")
+			.replace(/\s+/g, " ")
+			.trim() || baseName;
+	const notePath = await getAvailablePath(
+		plugin.app.vault,
+		`${noteFolder}/${safeFileName}.md`
+	);
 	const content = generateMeetingNoteContent(plugin.settings, {
 		title,
 		audioPath,

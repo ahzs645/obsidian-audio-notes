@@ -204,6 +204,11 @@ Audio Notes also supports the [Scriberr](https://scriberr.app/api.html) API for 
 - The **Audio Notes: Open transcript sidebar** command now opens a permanent right-sidebar panel. It follows whatever meeting note you have active (and shows the calendar/day list when you’re on another note) so the player + transcript are always handy.
 - Enable “Store meeting attachments with the note” in Settings → Audio Notes → Calendar view to automatically move dragged attachments into the same folder as the meeting file, keeping related docs together without manual cleanup.
 
+### Import Whisper archives
+
+If you export `.whisper` bundles from WhisperKit or compatible apps, use **Audio Notes: Import Whisper transcription archive**. The modal now supports drag-and-drop as well as the file picker, and batch imports keep duplicate detection on.
+
+For a more hands-off workflow, set **Settings → Audio Notes → Whisper archive imports → Inbox folder** and enable **Auto-import new inbox archives**. Any new `.whisper` file created or moved into that folder inside your vault will be imported automatically in the background.
 
 ### Use an Existing .srt File
 

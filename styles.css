@@ -1703,6 +1703,10 @@ input.title-input {
   color: var(--text-muted);
   font-style: italic;
 }
+.aan-export-preview-label {
+  color: var(--text-accent);
+  font-size: var(--font-ui-smaller);
+}
 .aan-export-buttons {
   margin-top: var(--size-4-4);
   padding-top: var(--size-4-3);
@@ -1715,6 +1719,42 @@ input.title-input {
 .aan-export-buttons .setting-item-control {
   justify-content: flex-end;
   gap: var(--size-4-2);
+}
+.aan-export-filter-dropdown:empty {
+  display: none;
+}
+.aan-export-no-subcategories {
+  color: var(--text-muted);
+  font-style: italic;
+  padding: var(--size-4-2);
+  margin: 0;
+}
+.aan-whisper-dropzone {
+  border: 1.5px dashed var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: var(--size-4-4);
+  margin: 0 0 var(--size-4-4);
+  text-align: center;
+  background: color-mix(in srgb, var(--background-secondary) 84%, var(--interactive-accent) 16%);
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 120ms ease;
+}
+.aan-whisper-dropzone p {
+  margin: 0;
+}
+.aan-whisper-dropzone.is-dragging,
+.aan-whisper-dropzone.has-selection {
+  border-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--background-secondary) 72%, var(--interactive-accent) 28%);
+  transform: translateY(-1px);
+}
+.aan-whisper-dropzone-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-top: var(--size-4-2) !important;
 }
 
 /* src/styles/calendar.css */

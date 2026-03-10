@@ -20,6 +20,7 @@ import { monkeyPatchConsole } from "./monkeyPatchConsole";
 import { CreateNewAudioNoteInNewFileModal } from "./CreateNewAudioNoteInNewFileModal";
 import { EnqueueAudioModal } from "./EnqueueAudioModal";
 import { ImportWhisperModal } from "./ImportWhisperModal";
+import { WhisperInboxImporter } from "./WhisperInboxImporter";
 import { createAudioPlayer } from "./audio/AudioPlayerFactory";
 import type { AudioPlayerEnvironment } from "./audio/AudioPlayerFactory";
 import { registerAudioNoteCommands } from "./commands/registerCommands";
@@ -77,6 +78,7 @@ export default class AutomaticAudioNotes extends Plugin {
 	atLeastOneNoteRendered: boolean = false;
 	private lastMeetingFolder: string | null = null;
 	private lastMeetingFilePath: string | null = null;
+	private whisperInboxImporter: WhisperInboxImporter | null = null;
 
 	private get isDesktop(): boolean {
 		return Platform.isDesktop || Platform.isDesktopApp || Platform.isMacOS;
@@ -163,6 +165,8 @@ export default class AutomaticAudioNotes extends Plugin {
 			loadedData["_whisperUseDateFolders"],
 			loadedData["_whisperCreateNote"],
 			loadedData["_whisperNoteFolder"],
+			loadedData["_whisperInboxFolder"],
+			loadedData["_whisperAutoImportInbox"],
 			loadedData["_calendarTagColors"],
 			_meetingTemplateEnabled,
 			_periodicDailyNoteEnabled,
@@ -275,6 +279,9 @@ export default class AutomaticAudioNotes extends Plugin {
 			data["_whisperUseDateFolders"] = this.settings.whisperUseDateFolders;
 			data["_whisperCreateNote"] = this.settings.whisperCreateNote;
 			data["_whisperNoteFolder"] = this.settings.whisperNoteFolder;
+			data["_whisperInboxFolder"] = this.settings.whisperInboxFolder;
+			data["_whisperAutoImportInbox"] =
+				this.settings.whisperAutoImportInbox;
 			data["_calendarTagColors"] = this.settings.calendarTagColors;
 			data["_meetingTemplateEnabled"] =
 				this.settings.meetingTemplateEnabled;
@@ -360,6 +367,7 @@ export default class AutomaticAudioNotes extends Plugin {
 			this.loadFiles.bind(this)
 		);
 		this.audioNoteService = new AudioNoteService(this);
+		this.whisperInboxImporter = new WhisperInboxImporter(this);
 
 		// Log to log.txt file if on mobile and debugging mode is enabled.
 		if (!this.isDesktop && this.settings.debugMode) {
@@ -403,11 +411,13 @@ export default class AutomaticAudioNotes extends Plugin {
 			this.registerEvent(
 				this.app.vault.on("create", (file) => {
 					void this.handleAttachmentCreate(file);
+					this.whisperInboxImporter?.scheduleAbstractFile(file);
 				})
 			);
 			this.registerEvent(
 				this.app.vault.on("rename", (file, oldPath) => {
 					void this.handleMeetingRename(file, oldPath);
+					this.whisperInboxImporter?.scheduleAbstractFile(file);
 				})
 			);
 			void this.syncTranscriptSidebar(
@@ -723,6 +733,7 @@ export default class AutomaticAudioNotes extends Plugin {
 			!ext ||
 			ext === "md" ||
 			ext === "json" ||
+			ext === "whisper" ||
 			["m4a", "mp3", "wav", "flac", "webm", "ogg"].includes(ext)
 		) {
 			return;
@@ -1048,6 +1059,8 @@ export default class AutomaticAudioNotes extends Plugin {
 	public onunload() {
 		this.app.workspace.detachLeavesOfType(AUDIO_NOTES_CALENDAR_VIEW);
 		this.app.workspace.detachLeavesOfType(AUDIO_NOTES_TRANSCRIPT_VIEW);
+		this.whisperInboxImporter?.destroy();
+		this.whisperInboxImporter = null;
 		this.knownCurrentTimes.clear();
 		this.knownAudioPlayers.clear();
 		this.currentlyPlayingAudioFakeUuid = null;
