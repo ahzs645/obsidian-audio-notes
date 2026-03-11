@@ -479,28 +479,30 @@ async function buildWhisperImportIndex(
 	defaultName: string
 ): Promise<WhisperImportIndex> {
 	const index = createEmptyWhisperImportIndex(normalizedRoot);
-	const files = plugin.app.vault.getFiles();
-	for (const file of files) {
-		if (file.extension !== "json") {
-			continue;
-		}
-		if (!isPathInsideRoot(file.path, normalizedRoot)) {
-			continue;
-		}
-		try {
-			const contents = await plugin.app.vault.read(file);
-			const parsed = JSON.parse(contents);
-			const entry = buildWhisperImportIndexEntry(
-				file.path,
-				parsed,
-				defaultName
-			);
-			if (!entry) {
-				continue;
+	const jsonFiles = plugin.app.vault.getFiles().filter(
+		(file) =>
+			file.extension === "json" &&
+			isPathInsideRoot(file.path, normalizedRoot)
+	);
+
+	const BATCH_SIZE = 50;
+	for (let i = 0; i < jsonFiles.length; i += BATCH_SIZE) {
+		const batch = jsonFiles.slice(i, i + BATCH_SIZE);
+		const results = await Promise.allSettled(
+			batch.map(async (file) => {
+				const contents = await plugin.app.vault.read(file);
+				const parsed = JSON.parse(contents);
+				return buildWhisperImportIndexEntry(
+					file.path,
+					parsed,
+					defaultName
+				);
+			})
+		);
+		for (const result of results) {
+			if (result.status === "fulfilled" && result.value) {
+				addWhisperImportIndexEntry(index, result.value);
 			}
-			addWhisperImportIndexEntry(index, entry);
-		} catch {
-			continue;
 		}
 	}
 	return index;
