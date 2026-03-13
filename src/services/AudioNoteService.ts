@@ -4,6 +4,10 @@ import {
 	AudioNote,
 	AudioNoteWithPositionInfo,
 } from "../AudioNotes";
+import {
+	isAbsoluteFilesystemPath,
+	toAudioSrcUrl,
+} from "../googleDriveArchive";
 import { Transcript, parseTranscript } from "../Transcript";
 import { secondsToTimeString } from "../utils";
 
@@ -112,6 +116,8 @@ export class AudioNoteService {
 			audioNote.audioFilename.startsWith("http")
 		) {
 			audioSrcPath = audioNote.audioFilename;
+		} else if (isAbsoluteFilesystemPath(audioNote.audioFilename)) {
+			audioSrcPath = toAudioSrcUrl(audioNote.audioFilename);
 		} else {
 			const tfile = this.plugin.app.vault.getAbstractFileByPath(
 				audioNote.audioFilename

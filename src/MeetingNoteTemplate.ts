@@ -2,7 +2,7 @@ import type { AudioNotesSettings } from "./AudioNotesSettings";
 
 export interface MeetingTemplateData {
 	title: string;
-	audioPath: string;
+	audioPath?: string;
 	transcriptPath?: string;
 	start?: Date;
 	end?: Date;
@@ -11,7 +11,7 @@ export interface MeetingTemplateData {
 
 export interface ResolvedMeetingContext {
 	title: string;
-	audioPath: string;
+	audioPath?: string;
 	transcriptPath?: string;
 	start: Date;
 	end: Date;
@@ -45,7 +45,8 @@ export function generateMeetingNoteContent(
 	);
 
 	if (!settings.meetingTemplateEnabled) {
-		return `${frontmatter}\n\n${buildAudioBlock(context)}`;
+		const audioBlock = buildAudioBlock(context);
+		return audioBlock ? `${frontmatter}\n\n${audioBlock}` : frontmatter;
 	}
 
 	const body = buildTemplateBody(context);
@@ -120,8 +121,10 @@ function buildFrontmatter(
 		"---",
 		`title: ${yamlQuote(context.title)}`,
 		`date: ${context.startDate}`,
-		`media_uri: ${yamlQuote(context.audioPath)}`,
 	];
+	if (context.audioPath) {
+		lines.push(`media_uri: ${yamlQuote(context.audioPath)}`);
+	}
 	if (context.transcriptPath) {
 		lines.push(`transcript_uri: ${yamlQuote(context.transcriptPath)}`);
 	}
@@ -270,6 +273,9 @@ function formatDateTimeParts(
 }
 
 function buildAudioBlock(context: ResolvedMeetingContext): string {
+	if (!context.audioPath) {
+		return "";
+	}
 	const lines = [
 		"```audio-note",
 		`title: ${context.title}`,

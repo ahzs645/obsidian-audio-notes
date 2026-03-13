@@ -49,6 +49,12 @@ npm run dev
 
 The dev script now watches both the TypeScript bundle and the CSS pipeline. All source styles live under `src/styles/` (split into focused partials such as `base.css`, `transcript.css`, `calendar.css`, etc.). `src/styles/main.css` keeps their import order, and esbuild bundles them into the plugin-level `styles.css`. Change a partial, keep the dev watcher running, and the generated stylesheet in the repo stays in sync.
 
+## Google Drive audio archive
+
+If you want Obsidian Sync for notes/transcripts but do not want to sync the full audio archive, use the Google Drive archive workflow in [docs/google-drive-audio-archive.md](docs/google-drive-audio-archive.md).
+
+As of this build, desktop uploads from the meeting sidebar and Whisper imports can write audio directly into a configured Google Drive Desktop folder instead of the vault. Existing recordings can still be migrated with `scripts/migrate-google-drive-audio.js`.
+
 ## Calendar view and Bases
 
 You can see meetings in two places:

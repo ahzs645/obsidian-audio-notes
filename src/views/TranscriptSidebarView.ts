@@ -28,6 +28,7 @@ import {
 } from "../meeting-labels";
 import { getMeetingLabelFromFrontmatter } from "../meeting-label-manager";
 import { collectTags } from "../meeting-events";
+import { pathExists } from "../googleDriveArchive";
 import { MeetingHeader } from "./transcript-sidebar/MeetingHeader";
 import type { MeetingScheduleInfo } from "./transcript-sidebar/MeetingScheduleInfo";
 import { MeetingLabelManager } from "./transcript-sidebar/MeetingLabelManager";
@@ -57,6 +58,7 @@ export class TranscriptSidebarView extends ItemView {
 	private isTranscribingMeeting = false;
 	private isDeletingMeeting = false;
 	private currentAudioPath: string | null = null;
+	private currentHasAudioReference = false;
 	private readonly meetingFiles: MeetingFileService;
 	private readonly attachments: AttachmentManager;
 	private readonly dashboardController: DashboardController;
@@ -225,23 +227,38 @@ export class TranscriptSidebarView extends ItemView {
 		const audioFieldKeys = ["media_uri", "audio", "media"];
 		let audioPath: string | undefined;
 		let audioFieldKey: string | null = null;
-		for (const key of audioFieldKeys) {
-			const value = frontmatter[key];
-			if (typeof value === "string") {
-				audioPath = value;
-				audioFieldKey = key;
-				break;
+			for (const key of audioFieldKeys) {
+				const value = frontmatter[key];
+				if (typeof value === "string") {
+					audioPath = value;
+					audioFieldKey = key;
+					break;
+				}
 			}
-		}
-		const transcriptPath = (frontmatter["transcript_uri"] ??
-			frontmatter["transcript"]) as string | undefined;
+			const transcriptPath = (frontmatter["transcript_uri"] ??
+				frontmatter["transcript"]) as string | undefined;
+			const archivedRecording =
+				this.meetingFiles.resolveArchivedRecording(frontmatter);
+			if (
+				!audioPath &&
+				archivedRecording?.localAudioPath &&
+				(await pathExists(archivedRecording.localAudioPath))
+			) {
+				audioPath = archivedRecording.localAudioPath;
+			}
 
-		this.currentTranscriptPath =
-			typeof transcriptPath === "string"
-				? transcriptPath
-				: null;
+			this.currentTranscriptPath =
+				typeof transcriptPath === "string"
+					? transcriptPath
+					: null;
 
-		const hasAudio = Boolean(audioPath && audioPath.trim().length);
+			const hasAudio =
+				Boolean(audioPath && audioPath.trim().length) ||
+				Boolean(
+					archivedRecording?.recordingDrivePath ||
+						archivedRecording?.recordingUrl
+				);
+			this.currentHasAudioReference = hasAudio;
 		const categories = getEffectiveMeetingLabelCategories(
 			this.plugin.settings.meetingLabelCategories
 		);
@@ -267,12 +284,12 @@ export class TranscriptSidebarView extends ItemView {
 			this.meetingFiles.deriveDatePartsFromNotePath(activeFile) ??
 			this.currentMeetingDateParts;
 
-		let meetingFolderResult: MeetingFolderResult | null = null;
-		let attachmentFolder = noteFolderPath;
-		if (hasAudio) {
-			meetingFolderResult = await this.meetingFiles.ensureMeetingFolderForAudio(
-				activeFile,
-				audioPath!,
+			let meetingFolderResult: MeetingFolderResult | null = null;
+			let attachmentFolder = noteFolderPath;
+			if (audioPath) {
+				meetingFolderResult = await this.meetingFiles.ensureMeetingFolderForAudio(
+					activeFile,
+					audioPath!,
 				audioFieldKey,
 				noteTitle,
 				preferredDateParts ?? undefined
@@ -306,22 +323,32 @@ export class TranscriptSidebarView extends ItemView {
 					}
 				}
 			}
-			this.currentAudioPath = audioPath!;
-			this.attachments.setAudioPath(this.currentAudioPath);
-			await this.attachments.setAttachmentFolder(attachmentFolder);
-		} else {
-			this.currentAudioPath = null;
+				this.currentAudioPath = audioPath!;
+				this.attachments.setAudioPath(this.currentAudioPath);
+				await this.attachments.setAttachmentFolder(attachmentFolder);
+			} else {
+				this.currentAudioPath = null;
 			this.attachments.setAudioPath(null);
 			await this.attachments.setAttachmentFolder(noteFolderPath);
 		}
 
-		this.updateSpeakerLabelOverrides(
-			SpeakerLabelManager.extractOverrides(frontmatter)
-		);
+			this.updateSpeakerLabelOverrides(
+				SpeakerLabelManager.extractOverrides(frontmatter)
+			);
 
-		this.currentMeetingFile = activeFile;
-		this.currentMeetingDateParts =
-			meetingFolderResult?.dateParts ??
+			this.currentMeetingFile = activeFile;
+			if (archivedRecording && !archivedRecording.recordingUrl) {
+				const recordingUrl =
+					await this.meetingFiles.maybeBackfillArchivedRecordingUrl(
+						activeFile,
+						frontmatter
+					);
+				if (recordingUrl) {
+					archivedRecording.recordingUrl = recordingUrl;
+				}
+			}
+			this.currentMeetingDateParts =
+				meetingFolderResult?.dateParts ??
 			preferredDateParts ??
 			this.meetingFiles.extractDatePartsFromFrontmatter(
 				frontmatter
@@ -367,13 +394,17 @@ export class TranscriptSidebarView extends ItemView {
 
 		setTranscriptProps({
 			title: "Live Transcript",
-			playerContainer: playerEl ?? null,
-			isTranscribing: this.isTranscribingMeeting,
-			needsAudioUpload: !hasAudio,
-			audioUploadInProgress: this.isUploadingMeetingAudio,
-			transcriptUploadInProgress: this.isUploadingTranscript,
-			canTranscribeDeepgram: this.transcriptionService.canUseDeepgram(),
-			canTranscribeScriberr: this.transcriptionService.canUseScriberr(),
+				playerContainer: playerEl ?? null,
+				isTranscribing: this.isTranscribingMeeting,
+				needsAudioUpload: !hasAudio,
+				audioUploadInProgress: this.isUploadingMeetingAudio,
+				transcriptUploadInProgress: this.isUploadingTranscript,
+				canTranscribeDeepgram:
+					this.transcriptionService.canUseDeepgram() &&
+					Boolean(this.currentAudioPath),
+				canTranscribeScriberr:
+					this.transcriptionService.canUseScriberr() &&
+					Boolean(this.currentAudioPath),
 			hasTranscript: Boolean(this.currentTranscriptPath),
 			onUploadMeetingAudio: (files: File[]) =>
 				this.handleMeetingAudioUpload(files),
@@ -555,6 +586,7 @@ export class TranscriptSidebarView extends ItemView {
 	private resetAttachments() {
 		this.attachments.reset();
 		this.attachments.setMeetingFilePath(null);
+		this.currentHasAudioReference = false;
 		this.transcriptComponent?.$set({
 			attachments: [],
 			attachmentsEnabled: false,
@@ -660,24 +692,48 @@ export class TranscriptSidebarView extends ItemView {
 			const meetingTitle =
 				(cache?.frontmatter?.["title"] as string) ??
 				meetingFile.basename;
-			const audioInfo = await this.meetingFiles.saveUploadedAudioFile(
-				upload,
-				dateParts,
-				meetingTitle
-			);
-			await this.plugin.app.fileManager.processFrontMatter(
-				meetingFile,
-				(fm) => {
-					fm["media_uri"] = audioInfo.audioPath;
+				const audioInfo = await this.meetingFiles.saveUploadedAudioFile(
+					upload,
+					dateParts,
+					meetingTitle
+				);
+				await this.plugin.app.fileManager.processFrontMatter(
+					meetingFile,
+					(fm) => {
+						delete fm["media_uri"];
+						delete fm["audio"];
+						delete fm["media"];
+						if (audioInfo.audioPath) {
+							fm["media_uri"] = audioInfo.audioPath;
+							delete fm["recording_archive"];
+							delete fm["recording_drive_path"];
+							delete fm["recording_url"];
+							return;
+						}
+						if (audioInfo.recordingDrivePath) {
+							fm["recording_archive"] =
+								audioInfo.recordingArchive || "google-drive";
+							fm["recording_drive_path"] =
+								audioInfo.recordingDrivePath;
+							if (audioInfo.recordingUrl) {
+								fm["recording_url"] = audioInfo.recordingUrl;
+							} else {
+								delete fm["recording_url"];
+							}
+						}
+					}
+				);
+				new Notice("Meeting audio uploaded.", 4000);
+				this.currentAudioPath =
+					audioInfo.localAudioPath ?? audioInfo.audioPath ?? null;
+				this.currentHasAudioReference = true;
+				if (audioInfo.meetingFolder) {
+					await this.attachments.setAttachmentFolder(
+						audioInfo.meetingFolder
+					);
 				}
-			);
-			new Notice("Meeting audio uploaded.", 4000);
-			this.currentAudioPath = audioInfo.audioPath;
-			await this.attachments.setAttachmentFolder(
-				audioInfo.meetingFolder
-			);
-			this.attachments.setAudioPath(audioInfo.audioPath);
-			await this.showMeetingFile(meetingFile);
+				this.attachments.setAudioPath(this.currentAudioPath);
+				await this.showMeetingFile(meetingFile);
 		} catch (error) {
 			console.error("Audio Notes: Meeting audio upload failed.", error);
 			new Notice("Could not upload meeting audio.", 6000);
@@ -743,10 +799,10 @@ export class TranscriptSidebarView extends ItemView {
 					previousTranscript
 				);
 			}
-			this.transcriptComponent?.$set({
-				hasTranscript: true,
-				needsAudioUpload: !this.currentAudioPath,
-			});
+				this.transcriptComponent?.$set({
+					hasTranscript: true,
+					needsAudioUpload: !this.currentHasAudioReference,
+				});
 			await this.loadTranscript(transcriptPath);
 			new Notice("Transcript uploaded.", 4000);
 		} catch (error) {
@@ -764,7 +820,12 @@ export class TranscriptSidebarView extends ItemView {
 		provider: "deepgram" | "scriberr"
 	): Promise<void> {
 		if (!this.currentMeetingFile || !this.currentAudioPath) {
-			new Notice("Upload meeting audio before transcribing.", 4000);
+			new Notice(
+				this.currentHasAudioReference
+					? "This recording is archived outside the vault and is not locally available for transcription on this device."
+					: "Upload meeting audio before transcribing.",
+				5000
+			);
 			return;
 		}
 		if (

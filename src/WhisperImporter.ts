@@ -1,10 +1,21 @@
 import AdmZip from "adm-zip";
 import { createHash } from "crypto";
+import path from "path";
 import { Notice, normalizePath, Vault } from "obsidian";
 import type AutomaticAudioNotes from "./main";
 import {
 	generateMeetingNoteContent,
 } from "./MeetingNoteTemplate";
+import {
+	deriveGoogleDriveUrlWithRetries,
+	getAvailableFilesystemPath,
+	getGoogleDriveArchiveRoot,
+	isGoogleDriveArchiveEnabled,
+	normalizeArchiveRelativePath,
+	pathExists,
+	resolveGoogleDriveRecordingLocalPath,
+	writeFilesystemBinary,
+} from "./googleDriveArchive";
 
 interface WhisperMetadata {
 	dateCreated?: number | string;
@@ -59,6 +70,10 @@ export interface WhisperImportResult {
 	segmentCount: number;
 	notePath?: string;
 	noteTitle?: string;
+	recordingArchive?: string;
+	recordingDrivePath?: string;
+	recordingUrl?: string;
+	localAudioPath?: string;
 }
 
 export class WhisperDuplicateError extends Error {
@@ -79,6 +94,9 @@ interface ExistingImportMatch {
 interface WhisperImportIndexEntry {
 	transcriptPath: string;
 	audioPath?: string;
+	recordingArchive?: string;
+	recordingDrivePath?: string;
+	recordingUrl?: string;
 	audioSha1?: string;
 	segmentsSha1?: string;
 	fingerprint?: string | null;
@@ -103,6 +121,13 @@ export interface WhisperImportOptions {
 	createNote?: boolean;
 	noteFolder?: string;
 	noteTitle?: string;
+}
+
+interface MeetingAudioReferenceInput {
+	audioPath?: string;
+	recordingArchive?: string;
+	recordingDrivePath?: string;
+	recordingUrl?: string;
 }
 
 const DEFAULT_OPTIONS = (plugin: AutomaticAudioNotes): WhisperImportOptions => ({
@@ -445,9 +470,22 @@ function buildWhisperImportIndexEntry(
 		typeof data?.audioPath === "string"
 			? normalizePath(data.audioPath)
 			: undefined;
+	const recordingArchive =
+		typeof data?.recordingArchive === "string"
+			? data.recordingArchive
+			: undefined;
+	const recordingDrivePath =
+		typeof data?.recordingDrivePath === "string"
+			? normalizeArchiveRelativePath(data.recordingDrivePath)
+			: undefined;
+	const recordingUrl =
+		typeof data?.recordingUrl === "string" ? data.recordingUrl : undefined;
 	return {
 		transcriptPath: normalizedPath,
 		audioPath,
+		recordingArchive,
+		recordingDrivePath,
+		recordingUrl,
 		audioSha1:
 			typeof data?.audioSha1 === "string" ? data.audioSha1 : undefined,
 		segmentsSha1:
@@ -554,10 +592,22 @@ async function resolveIndexedMatch(
 	const audioExists = entry.audioPath
 		? await plugin.app.vault.adapter.exists(entry.audioPath)
 		: false;
+	const archivedLocalPath =
+		entry.recordingArchive === "google-drive" && entry.recordingDrivePath
+			? resolveGoogleDriveRecordingLocalPath(
+					plugin.settings,
+					entry.recordingDrivePath
+				)
+			: null;
+	const archivedAudioExists = archivedLocalPath
+		? await pathExists(archivedLocalPath)
+		: false;
 	return {
 		transcriptPath: normalizedPath,
-		audioPath: entry.audioPath,
-		hasAudio: Boolean(audioExists),
+		audioPath:
+			entry.audioPath ||
+			(archivedAudioExists ? archivedLocalPath || undefined : undefined),
+		hasAudio: Boolean(audioExists || archivedAudioExists),
 	};
 }
 
@@ -839,16 +889,42 @@ export async function importWhisperArchive(
 		? `${options.transcriptFolder}/${subfolder}`
 		: options.transcriptFolder;
 
-	await ensureFolderExists(plugin.app.vault, audioFolder);
 	await ensureFolderExists(plugin.app.vault, transcriptFolder);
 
 	const audioExt =
 		metadata.originalMediaExtension?.replace(".", "") ||
 		detectAudioExtension(audioBuffer);
-	const audioPath = await getAvailablePath(
-		plugin.app.vault,
-		`${audioFolder}/${baseName}.${audioExt}`
-	);
+	let audioPath: string | undefined;
+	let localAudioPath: string | undefined;
+	let recordingArchive: string | undefined;
+	let recordingDrivePath: string | undefined;
+	let recordingUrl: string | undefined;
+	if (isGoogleDriveArchiveEnabled(plugin.settings)) {
+		const archiveFolderAbsolute = resolveGoogleDriveRecordingLocalPath(
+			plugin.settings,
+			audioFolder
+		);
+		if (!archiveFolderAbsolute) {
+			throw new Error("Google Drive archive root is not configured.");
+		}
+		localAudioPath = await getAvailableFilesystemPath(
+			archiveFolderAbsolute,
+			`${baseName}.${audioExt}`
+		);
+		await writeFilesystemBinary(localAudioPath, audioBuffer);
+		const archiveRoot = getGoogleDriveArchiveRoot(plugin.settings);
+		recordingArchive = "google-drive";
+		recordingDrivePath = normalizeArchiveRelativePath(
+			path.relative(archiveRoot, localAudioPath)
+		);
+		recordingUrl = await deriveGoogleDriveUrlWithRetries(localAudioPath);
+	} else {
+		await ensureFolderExists(plugin.app.vault, audioFolder);
+		audioPath = await getAvailablePath(
+			plugin.app.vault,
+			`${audioFolder}/${baseName}.${audioExt}`
+		);
+	}
 	const transcriptPath = await getAvailablePath(
 		plugin.app.vault,
 		`${transcriptFolder}/${baseName}.json`
@@ -856,7 +932,10 @@ export async function importWhisperArchive(
 	const transcriptPayload = {
 		source: "whisper",
 		whisperFingerprint,
-		audioPath,
+		audioPath: audioPath ?? null,
+		recordingArchive: recordingArchive ?? null,
+		recordingDrivePath: recordingDrivePath ?? null,
+		recordingUrl: recordingUrl ?? null,
 		audioSha1,
 		segmentsSha1,
 		originalMediaFilename: metadata.originalMediaFilename ?? null,
@@ -869,7 +948,9 @@ export async function importWhisperArchive(
 		durationMs: meetingDurationMs,
 	};
 
-	await plugin.app.vault.adapter.writeBinary(audioPath, audioBuffer);
+	if (audioPath) {
+		await plugin.app.vault.adapter.writeBinary(audioPath, audioBuffer);
+	}
 	await plugin.app.vault.adapter.write(
 		transcriptPath,
 		JSON.stringify(transcriptPayload, null, 2)
@@ -888,15 +969,24 @@ export async function importWhisperArchive(
 	}
 
 	return {
-		audioPath,
+		audioPath: audioPath ?? recordingDrivePath ?? localAudioPath ?? "",
 		transcriptPath,
 		segmentCount: segments.length,
+		recordingArchive,
+		recordingDrivePath,
+		recordingUrl,
+		localAudioPath,
 		notePath: await maybeCreateNote(
 			plugin,
 			options,
 			baseName,
 			metadata,
-			audioPath,
+			{
+				audioPath,
+				recordingArchive,
+				recordingDrivePath,
+				recordingUrl,
+			},
 			transcriptPath,
 			meetingDurationMs
 		),
@@ -920,7 +1010,7 @@ async function maybeCreateNote(
 	options: WhisperImportOptions,
 	baseName: string,
 	metadata: WhisperMetadata,
-	audioPath: string,
+	audioReference: MeetingAudioReferenceInput,
 	transcriptPath: string,
 	meetingDurationMs: number
 ): Promise<string | undefined> {
@@ -976,13 +1066,28 @@ async function maybeCreateNote(
 	);
 	const content = generateMeetingNoteContent(plugin.settings, {
 		title,
-		audioPath,
+		audioPath: audioReference.audioPath,
 		transcriptPath,
 		start: startDateObj,
 		end: endDateObj,
 		extraFrontmatter: {
 			whisper_schedule_normalized: true,
 			whisper_import_version: 2,
+			...(audioReference.recordingArchive
+				? {
+						recording_archive: audioReference.recordingArchive,
+					}
+				: {}),
+			...(audioReference.recordingDrivePath
+				? {
+						recording_drive_path: audioReference.recordingDrivePath,
+					}
+				: {}),
+			...(audioReference.recordingUrl
+				? {
+						recording_url: audioReference.recordingUrl,
+					}
+				: {}),
 		},
 	});
 	await plugin.app.vault.adapter.write(notePath, content);

@@ -1,7 +1,21 @@
+import path from "path";
 import { TFile, TFolder } from "obsidian";
 import type AutomaticAudioNotes from "../../main";
 import { normalizeFolderPath } from "../../AudioNotesUtils";
 import { generateRandomString } from "../../utils";
+import {
+	deriveGoogleDriveUrlWithRetries,
+	getArchivedRecordingReference,
+	getAvailableFilesystemPath,
+	getGoogleDriveArchiveRoot,
+	isAbsoluteFilesystemPath,
+	isGoogleDriveArchiveEnabled,
+	normalizeArchiveRelativePath,
+	pathExists,
+	resolveGoogleDriveRecordingLocalPath,
+	writeFilesystemBinary,
+	type GoogleDriveArchiveReference,
+} from "../../googleDriveArchive";
 
 export type MeetingDateParts = {
 	year?: string;
@@ -15,6 +29,15 @@ export interface MeetingFolderResult {
 	dateParts: MeetingDateParts;
 }
 
+export interface SavedMeetingAudioResult {
+	audioPath: string | null;
+	meetingFolder: string | null;
+	localAudioPath?: string;
+	recordingArchive?: string;
+	recordingDrivePath?: string;
+	recordingUrl?: string;
+}
+
 export class MeetingFileService {
 	constructor(private readonly plugin: AutomaticAudioNotes) {}
 
@@ -25,7 +48,11 @@ export class MeetingFileService {
 		meetingTitle: string,
 		preferredDateParts?: MeetingDateParts
 	): Promise<MeetingFolderResult | null> {
-		if (!audioPath || audioPath.includes("://")) {
+		if (
+			!audioPath ||
+			audioPath.includes("://") ||
+			isAbsoluteFilesystemPath(audioPath)
+		) {
 			return { audioPath, meetingFolder: null, dateParts: {} };
 		}
 		let audioFile =
@@ -258,7 +285,14 @@ export class MeetingFileService {
 		file: File,
 		dateParts: MeetingDateParts,
 		meetingTitle: string
-	): Promise<{ audioPath: string; meetingFolder: string }> {
+	): Promise<SavedMeetingAudioResult> {
+		if (isGoogleDriveArchiveEnabled(this.plugin.settings)) {
+			return this.saveUploadedAudioToGoogleDrive(
+				file,
+				dateParts,
+				meetingTitle
+			);
+		}
 		const normalizedDateParts = this.resolveDateParts(dateParts);
 		const root = this.getAudioLibraryRoot();
 		const basePath = this.buildDatedBasePath(root, normalizedDateParts);
@@ -280,6 +314,38 @@ export class MeetingFileService {
 			audioPath: targetName,
 			meetingFolder,
 		};
+	}
+
+	resolveArchivedRecording(
+		frontmatter: Record<string, unknown>
+	): GoogleDriveArchiveReference | null {
+		return getArchivedRecordingReference(this.plugin.settings, frontmatter);
+	}
+
+	async maybeBackfillArchivedRecordingUrl(
+		meetingFile: TFile,
+		frontmatter: Record<string, unknown>
+	): Promise<string | null> {
+		const archive = this.resolveArchivedRecording(frontmatter);
+		if (
+			!archive?.localAudioPath ||
+			archive.recordingUrl ||
+			!(await pathExists(archive.localAudioPath))
+		) {
+			return archive?.recordingUrl ?? null;
+		}
+		const recordingUrl = await deriveGoogleDriveUrlWithRetries(
+			archive.localAudioPath
+		);
+		if (!recordingUrl) {
+			return null;
+		}
+		await this.plugin.app.fileManager.processFrontMatter(meetingFile, (fm) => {
+			fm["recording_archive"] = archive.recordingArchive;
+			fm["recording_drive_path"] = archive.recordingDrivePath;
+			fm["recording_url"] = recordingUrl;
+		});
+		return recordingUrl;
 	}
 
 	private buildTranscriptFolder(): string {
@@ -416,6 +482,81 @@ export class MeetingFileService {
 			.replace(/[^\w.\-]+/g, "-")
 			.replace(/-+/g, "-");
 		return sanitized || "audio.m4a";
+	}
+
+	private async saveUploadedAudioToGoogleDrive(
+		file: File,
+		dateParts: MeetingDateParts,
+		meetingTitle: string
+	): Promise<SavedMeetingAudioResult> {
+		const normalizedDateParts = this.resolveDateParts(dateParts);
+		const baseRelativePath = this.buildDatedBasePath(
+			this.getAudioLibraryRoot(),
+			normalizedDateParts
+		);
+		const fallbackSlug = file.name.replace(/\.[^.]+$/, "");
+		const meetingFolderRelative =
+			await this.getAvailableExternalMeetingFolderPath(
+				baseRelativePath,
+				meetingTitle,
+				fallbackSlug
+			);
+		const meetingFolderAbsolute = resolveGoogleDriveRecordingLocalPath(
+			this.plugin.settings,
+			meetingFolderRelative
+		);
+		if (!meetingFolderAbsolute) {
+			throw new Error("Google Drive archive root is not configured.");
+		}
+		const targetAbsolute = await getAvailableFilesystemPath(
+			meetingFolderAbsolute,
+			this.sanitizeFilename(file.name)
+		);
+		await writeFilesystemBinary(targetAbsolute, await file.arrayBuffer());
+		const archiveRoot = getGoogleDriveArchiveRoot(this.plugin.settings);
+		const recordingDrivePath = normalizeArchiveRelativePath(
+			path.relative(archiveRoot, targetAbsolute)
+		);
+		const recordingUrl = await deriveGoogleDriveUrlWithRetries(targetAbsolute);
+		return {
+			audioPath: null,
+			meetingFolder: null,
+			localAudioPath: targetAbsolute,
+			recordingArchive: "google-drive",
+			recordingDrivePath,
+			recordingUrl,
+		};
+	}
+
+	private async getAvailableExternalMeetingFolderPath(
+		baseParentPath: string,
+		meetingTitle: string,
+		fallback: string
+	): Promise<string> {
+		const slugBase = meetingTitle?.trim() || fallback || "meeting";
+		const slug =
+			slugBase
+				.toLowerCase()
+				.replace(/[^a-z0-9]+/g, "-")
+				.replace(/^-+|-+$/g, "")
+				.slice(0, 20) || "meeting";
+		const archiveRoot = getGoogleDriveArchiveRoot(this.plugin.settings);
+		if (!archiveRoot) {
+			throw new Error("Google Drive archive root is not configured.");
+		}
+		while (true) {
+			const hash = generateRandomString(4).toLowerCase();
+			const folderRelative = baseParentPath
+				? `${baseParentPath}/${hash}-${slug}`
+				: `${hash}-${slug}`;
+			const folderAbsolute = path.join(
+				archiveRoot,
+				...folderRelative.split("/").filter(Boolean)
+			);
+			if (!(await pathExists(folderAbsolute))) {
+				return folderRelative;
+			}
+		}
 	}
 
 	private getMeetingBasePath(audioFile: TFile): string {

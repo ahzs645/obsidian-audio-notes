@@ -325,11 +325,11 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 		containerEl.createEl("h2", {
 			text: "Whisper archive imports",
 		});
-		new Setting(containerEl)
-			.setName("Audio destination folder")
-			.setDesc(
-				"Relative path inside your vault where imported Whisper audio files will be stored."
-			)
+			new Setting(containerEl)
+				.setName("Audio destination folder")
+				.setDesc(
+					"Relative path used for imported audio. In normal mode it lives inside the vault; with external storage enabled it becomes a subfolder under the Google Drive archive root."
+				)
 			.addText((text) =>
 				text
 					.setPlaceholder("MediaArchive/audio")
@@ -339,11 +339,11 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
-		new Setting(containerEl)
-			.setName("Transcript destination folder")
-			.setDesc(
-				"Relative path inside your vault where imported Whisper transcript JSON files will be stored."
-			)
+			new Setting(containerEl)
+				.setName("Transcript destination folder")
+				.setDesc(
+					"Relative path inside your vault where imported Whisper transcript JSON files will be stored."
+				)
 			.addText((text) =>
 				text
 					.setPlaceholder("transcripts")
@@ -352,11 +352,40 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 						this.plugin.settings.whisperTranscriptFolder =
 							value.trim();
 						await this.plugin.saveSettings();
-					})
-			);
-		new Setting(containerEl)
-			.setName("Use year/month subfolders")
-			.setDesc(
+						})
+				);
+			new Setting(containerEl)
+				.setName("Store audio outside the vault")
+				.setDesc(
+					"Desktop only. Save uploaded meeting audio and imported Whisper audio into a Google Drive local sync folder instead of the vault."
+				)
+				.addToggle((toggle) =>
+					toggle
+						.setValue(this.plugin.settings.googleDriveAudioArchiveEnabled)
+						.onChange(async (value) => {
+							this.plugin.settings.googleDriveAudioArchiveEnabled = value;
+							await this.plugin.saveSettings();
+						})
+				);
+			new Setting(containerEl)
+				.setName("Google Drive archive root")
+				.setDesc(
+					"Absolute local path to your Google Drive folder root for this archive, for example .../My Drive/Ahmad/Obsidian/Meetings. The plugin stores recording_drive_path relative to this root."
+				)
+				.addText((text) =>
+					text
+						.setPlaceholder(
+							"/Users/you/Library/CloudStorage/GoogleDrive-you@gmail.com/My Drive/Ahmad/Obsidian/Meetings"
+						)
+						.setValue(this.plugin.settings.googleDriveAudioArchiveRoot)
+						.onChange(async (value) => {
+							this.plugin.settings.googleDriveAudioArchiveRoot = value;
+							await this.plugin.saveSettings();
+						})
+				);
+			new Setting(containerEl)
+				.setName("Use year/month subfolders")
+				.setDesc(
 				"Organize imported files into YYYY/MM folders based on the recording date."
 			)
 			.addToggle((toggle) =>
@@ -810,6 +839,8 @@ export interface StringifiedAudioNotesSettings {
 	storeAttachmentsWithMeeting: boolean;
 	whisperAudioFolder: string;
 	whisperTranscriptFolder: string;
+	googleDriveAudioArchiveEnabled: boolean;
+	googleDriveAudioArchiveRoot: string;
 	whisperUseDateFolders: boolean;
 	whisperCreateNote: boolean;
 	whisperNoteFolder: string;
@@ -841,6 +872,8 @@ const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	storeAttachmentsWithMeeting: false,
 	whisperAudioFolder: "MediaArchive/audio",
 	whisperTranscriptFolder: "transcripts",
+	googleDriveAudioArchiveEnabled: false,
+	googleDriveAudioArchiveRoot: "",
 	whisperUseDateFolders: true,
 	whisperCreateNote: true,
 	whisperNoteFolder: "02-meetings",
@@ -872,11 +905,13 @@ export class AudioNotesSettings {
 		private _scriberrBaseUrl: string,
 		private _scriberrApiKey: string,
 		private _scriberrProfileName: string,
-		private _storeAttachmentsWithMeeting: boolean,
-		private _whisperAudioFolder: string,
-		private _whisperTranscriptFolder: string,
-		private _whisperUseDateFolders: boolean,
-		private _whisperCreateNote: boolean,
+			private _storeAttachmentsWithMeeting: boolean,
+			private _whisperAudioFolder: string,
+			private _whisperTranscriptFolder: string,
+			private _googleDriveAudioArchiveEnabled: boolean,
+			private _googleDriveAudioArchiveRoot: string,
+			private _whisperUseDateFolders: boolean,
+			private _whisperCreateNote: boolean,
 		private _whisperNoteFolder: string,
 		private _whisperInboxFolder: string,
 		private _whisperAutoImportInbox: boolean,
@@ -904,11 +939,13 @@ export class AudioNotesSettings {
 			DEFAULT_SETTINGS.scriberrBaseUrl,
 			DEFAULT_SETTINGS.scriberrApiKey,
 			DEFAULT_SETTINGS.scriberrProfileName,
-			DEFAULT_SETTINGS.storeAttachmentsWithMeeting,
-			DEFAULT_SETTINGS.whisperAudioFolder,
-			DEFAULT_SETTINGS.whisperTranscriptFolder,
-			DEFAULT_SETTINGS.whisperUseDateFolders,
-			DEFAULT_SETTINGS.whisperCreateNote,
+				DEFAULT_SETTINGS.storeAttachmentsWithMeeting,
+				DEFAULT_SETTINGS.whisperAudioFolder,
+				DEFAULT_SETTINGS.whisperTranscriptFolder,
+				DEFAULT_SETTINGS.googleDriveAudioArchiveEnabled,
+				DEFAULT_SETTINGS.googleDriveAudioArchiveRoot,
+				DEFAULT_SETTINGS.whisperUseDateFolders,
+				DEFAULT_SETTINGS.whisperCreateNote,
 			DEFAULT_SETTINGS.whisperNoteFolder,
 			DEFAULT_SETTINGS.whisperInboxFolder,
 			DEFAULT_SETTINGS.whisperAutoImportInbox,
@@ -1000,15 +1037,29 @@ export class AudioNotesSettings {
 		) {
 			settings.whisperAudioFolder = data.whisperAudioFolder!;
 		}
-		if (
-			data.whisperTranscriptFolder !== null &&
-			data.whisperTranscriptFolder !== undefined
-		) {
-			settings.whisperTranscriptFolder = data.whisperTranscriptFolder!;
-		}
-		if (
-			data.whisperUseDateFolders !== null &&
-			data.whisperUseDateFolders !== undefined
+			if (
+				data.whisperTranscriptFolder !== null &&
+				data.whisperTranscriptFolder !== undefined
+			) {
+				settings.whisperTranscriptFolder = data.whisperTranscriptFolder!;
+			}
+			if (
+				data.googleDriveAudioArchiveEnabled !== null &&
+				data.googleDriveAudioArchiveEnabled !== undefined
+			) {
+				settings.googleDriveAudioArchiveEnabled =
+					data.googleDriveAudioArchiveEnabled!;
+			}
+			if (
+				data.googleDriveAudioArchiveRoot !== null &&
+				data.googleDriveAudioArchiveRoot !== undefined
+			) {
+				settings.googleDriveAudioArchiveRoot =
+					data.googleDriveAudioArchiveRoot!;
+			}
+			if (
+				data.whisperUseDateFolders !== null &&
+				data.whisperUseDateFolders !== undefined
 		) {
 			settings.whisperUseDateFolders = data.whisperUseDateFolders!;
 		}
@@ -1220,6 +1271,22 @@ export class AudioNotesSettings {
 
 	set whisperTranscriptFolder(value: string) {
 		this._whisperTranscriptFolder = value;
+	}
+
+	get googleDriveAudioArchiveEnabled(): boolean {
+		return Boolean(this._googleDriveAudioArchiveEnabled);
+	}
+
+	set googleDriveAudioArchiveEnabled(value: boolean) {
+		this._googleDriveAudioArchiveEnabled = Boolean(value);
+	}
+
+	get googleDriveAudioArchiveRoot(): string {
+		return this._googleDriveAudioArchiveRoot || "";
+	}
+
+	set googleDriveAudioArchiveRoot(value: string) {
+		this._googleDriveAudioArchiveRoot = value?.trim() || "";
 	}
 
 	get whisperUseDateFolders(): boolean {

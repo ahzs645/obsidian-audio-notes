@@ -631,10 +631,12 @@ let transcriptUploadInput: HTMLInputElement | null = null;
 			{audioUploadInProgress}
 			{triggerAudioPicker}
 			{handleAudioFileInput}
+			{onUploadMeetingAudio}
 			bind:audioUploadInput={audioUploadInput}
 			{transcriptUploadInProgress}
 			{triggerTranscriptPicker}
 			{handleTranscriptFileInput}
+			{onUploadTranscript}
 			bind:transcriptUploadInput={transcriptUploadInput}
 		/>
 	{/if}

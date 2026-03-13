@@ -159,11 +159,13 @@ export default class AutomaticAudioNotes extends Plugin {
 			loadedData["_scriberrBaseUrl"],
 			loadedData["_scriberrApiKey"],
 			loadedData["_scriberrProfileName"],
-			loadedData["_storeAttachmentsWithMeeting"],
-			loadedData["_whisperAudioFolder"],
-			loadedData["_whisperTranscriptFolder"],
-			loadedData["_whisperUseDateFolders"],
-			loadedData["_whisperCreateNote"],
+				loadedData["_storeAttachmentsWithMeeting"],
+				loadedData["_whisperAudioFolder"],
+				loadedData["_whisperTranscriptFolder"],
+				loadedData["_googleDriveAudioArchiveEnabled"],
+				loadedData["_googleDriveAudioArchiveRoot"],
+				loadedData["_whisperUseDateFolders"],
+				loadedData["_whisperCreateNote"],
 			loadedData["_whisperNoteFolder"],
 			loadedData["_whisperInboxFolder"],
 			loadedData["_whisperAutoImportInbox"],
@@ -274,9 +276,13 @@ export default class AutomaticAudioNotes extends Plugin {
 			if (!data.positions) {
 				data.positions = new Object();
 			}
-			data["_whisperAudioFolder"] = this.settings.whisperAudioFolder;
-			data["_whisperTranscriptFolder"] = this.settings.whisperTranscriptFolder;
-			data["_whisperUseDateFolders"] = this.settings.whisperUseDateFolders;
+				data["_whisperAudioFolder"] = this.settings.whisperAudioFolder;
+				data["_whisperTranscriptFolder"] = this.settings.whisperTranscriptFolder;
+				data["_googleDriveAudioArchiveEnabled"] =
+					this.settings.googleDriveAudioArchiveEnabled;
+				data["_googleDriveAudioArchiveRoot"] =
+					this.settings.googleDriveAudioArchiveRoot;
+				data["_whisperUseDateFolders"] = this.settings.whisperUseDateFolders;
 			data["_whisperCreateNote"] = this.settings.whisperCreateNote;
 			data["_whisperNoteFolder"] = this.settings.whisperNoteFolder;
 			data["_whisperInboxFolder"] = this.settings.whisperInboxFolder;
@@ -610,6 +616,8 @@ export default class AutomaticAudioNotes extends Plugin {
 			frontmatter.media_uri ||
 				frontmatter.audio ||
 				frontmatter.media ||
+				frontmatter.recording_drive_path ||
+				frontmatter.recording_url ||
 				frontmatter.transcript_uri ||
 				frontmatter.transcript
 		);

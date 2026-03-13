@@ -12,6 +12,11 @@ import {
 	getTranscriptFromDGResponse,
 	getTranscriptFromScriberrResponse,
 } from "../../Transcript";
+import {
+	isAbsoluteFilesystemPath,
+	readFilesystemBinary,
+	toAbsoluteFilesystemPath,
+} from "../../googleDriveArchive";
 import type { MeetingFileService } from "./MeetingFileService";
 
 export class TranscriptionService {
@@ -42,8 +47,7 @@ export class TranscriptionService {
 	}
 
 	private async transcribeWithDeepgram(audioPath: string): Promise<string> {
-		const adapter = this.plugin.app.vault.adapter;
-		const arrayBuffer = await adapter.readBinary(audioPath);
+		const arrayBuffer = await this.readAudioBinary(audioPath);
 		const buffer = Buffer.from(new Uint8Array(arrayBuffer));
 		const params = createDeepgramQueryParams("en-US");
 		const mimeType = this.guessMimeTypeFromName(audioPath);
@@ -58,8 +62,7 @@ export class TranscriptionService {
 	}
 
 	private async transcribeWithScriberr(audioPath: string): Promise<string> {
-		const adapter = this.plugin.app.vault.adapter;
-		const arrayBuffer = await adapter.readBinary(audioPath);
+		const arrayBuffer = await this.readAudioBinary(audioPath);
 		const client = new ScriberrClient({
 			baseUrl: this.plugin.settings.scriberrBaseUrl,
 			apiKey: this.plugin.settings.scriberrApiKey,
@@ -117,6 +120,13 @@ export class TranscriptionService {
 			case "m4a":
 			default:
 				return "audio/m4a";
+			}
+	}
+
+	private async readAudioBinary(audioPath: string): Promise<ArrayBuffer> {
+		if (isAbsoluteFilesystemPath(audioPath)) {
+			return readFilesystemBinary(toAbsoluteFilesystemPath(audioPath));
 		}
+		return this.plugin.app.vault.adapter.readBinary(audioPath);
 	}
 }
