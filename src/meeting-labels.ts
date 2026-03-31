@@ -89,7 +89,7 @@ export function buildMeetingLabelInfo(
 	const category = findLabelCategoryForTag(normalizedTag, categories);
 	return {
 		tag: normalizedTag,
-		displayName: buildLabelDisplay(normalizedTag),
+		displayName: buildLabelDisplay(normalizedTag, categories),
 		categoryId: category?.id,
 		categoryName: category?.name,
 		icon: category?.icon,
@@ -106,9 +106,31 @@ export function findLabelCategoryForTag(
 		.sort((a, b) => b.tagPrefix.length - a.tagPrefix.length)[0];
 }
 
-export function buildLabelDisplay(tag: string): string {
+export function buildLabelDisplay(
+	tag: string,
+	categories?: NormalizedMeetingLabelCategory[]
+): string {
 	const normalizedTag = normalizeTagName(tag);
+	if (categories && categories.length) {
+		const category = findLabelCategoryForTag(normalizedTag, categories);
+		if (category) {
+			const withoutPrefix = normalizedTag
+				.slice(category.tagPrefix.length)
+				.replace(/^\/+/, "");
+			if (withoutPrefix) {
+				return withoutPrefix
+					.split("/")
+					.filter(Boolean)
+					.map((seg) => titleCaseSegment(seg))
+					.join(" > ");
+			}
+		}
+	}
 	const segment = normalizedTag.split("/").pop() || normalizedTag;
+	return titleCaseSegment(segment);
+}
+
+function titleCaseSegment(segment: string): string {
 	return segment
 		.split(/[-_]/)
 		.filter(Boolean)
@@ -136,6 +158,13 @@ export function buildTagFromCategory(
 ): string {
 	const segment = slugifyTagSegment(value);
 	return normalizeTagName(`${category.tagPrefix}${segment}`);
+}
+
+export function getParentTag(tag: string): string | null {
+	const normalized = normalizeTagName(tag);
+	const lastSlash = normalized.lastIndexOf("/");
+	if (lastSlash <= 0) return null;
+	return normalized.slice(0, lastSlash);
 }
 
 function slugifyId(value: string): string {

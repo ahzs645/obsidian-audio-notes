@@ -267,6 +267,16 @@ let currentView: "dayGridMonth" | "timeGridWeek" | "timeGridDay" = "dayGridMonth
 										{/each}
 									</div>
 								{/if}
+								{#if event.attendees?.length}
+									<div class="aan-calendar-attendee-row">
+										<span class="aan-calendar-attendee-caption">Attendees</span>
+										<div class="aan-calendar-attendee-list">
+											{#each event.attendees as attendee}
+												<span class="aan-calendar-chip--soft">{attendee}</span>
+											{/each}
+										</div>
+									</div>
+								{/if}
 							</div>
 							<div class="aan-calendar-day-actions">
 								<button

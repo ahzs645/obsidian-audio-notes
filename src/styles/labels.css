@@ -257,3 +257,60 @@
 .aan-selected-tag-remove:hover {
 	background: rgba(0, 0, 0, 0.35);
 }
+
+/* Attendee field in sidebar header */
+.aan-transcript-attendee-field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 190px;
+	flex: 1;
+}
+
+.aan-transcript-attendee-input {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 6px 10px;
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	cursor: pointer;
+	outline: none;
+	height: var(--input-height, 36px);
+	box-sizing: border-box;
+	width: 100%;
+}
+
+.aan-transcript-attendee-input.is-placeholder {
+	color: var(--text-muted);
+}
+
+.aan-transcript-attendee-input:focus {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.aan-transcript-attendee-input:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+/* Attendee row in calendar day view */
+.aan-calendar-attendee-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px;
+	margin-top: 4px;
+}
+
+.aan-calendar-attendee-caption {
+	font-size: 0.8em;
+	color: var(--text-muted);
+	margin-right: 4px;
+}
+
+.aan-calendar-attendee-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}

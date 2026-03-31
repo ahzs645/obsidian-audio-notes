@@ -5,6 +5,7 @@ import RegionsPlugin, {
 	type Region,
 } from "wavesurfer.js/dist/plugins/regions.esm.js";
 import { trimAudioToWav, type TrimRange } from "./AudioTrimmer";
+import type { ProcessedSegment } from "./WhisperImporter";
 
 export interface TrimResult {
 	trimRange: TrimRange;
@@ -16,6 +17,7 @@ interface TrimWhisperModalOptions {
 	audioExtension: string;
 	durationSec: number;
 	fileName: string;
+	segments: ProcessedSegment[];
 	onConfirm: (result: TrimResult) => void;
 }
 
@@ -28,6 +30,8 @@ export class TrimWhisperModal extends Modal {
 	private startInput: HTMLInputElement | null = null;
 	private endInput: HTMLInputElement | null = null;
 	private confirmButton: HTMLButtonElement | null = null;
+	private transcriptContainer: HTMLElement | null = null;
+	private segmentEls: HTMLElement[] = [];
 	private isProcessing = false;
 
 	constructor(plugin: AutomaticAudioNotes, options: TrimWhisperModalOptions) {
@@ -43,7 +47,7 @@ export class TrimWhisperModal extends Modal {
 
 		contentEl.createEl("h2", { text: "Trim audio before import" });
 		contentEl.createEl("p", {
-			text: `Drag the highlighted region to select the portion of "${this.options.fileName}" you want to keep.`,
+			text: `Drag the waveform region or click transcript segments to set trim boundaries for "${this.options.fileName}".`,
 			cls: "aan-trim-description",
 		});
 
@@ -79,6 +83,11 @@ export class TrimWhisperModal extends Modal {
 			text: this.formatTime(this.options.durationSec),
 			cls: "aan-trim-duration-display",
 		});
+
+		// Transcript panel
+		if (this.options.segments.length > 0) {
+			this.buildTranscriptPanel(contentEl);
+		}
 
 		// Playback controls
 		const controlsSetting = new Setting(contentEl).setName("Preview");
@@ -129,6 +138,111 @@ export class TrimWhisperModal extends Modal {
 		this.contentEl.empty();
 	}
 
+	// ── Transcript panel ──────────────────────────────────────────
+
+	private buildTranscriptPanel(parent: HTMLElement) {
+		const wrapper = parent.createDiv({ cls: "aan-trim-transcript" });
+		wrapper.createEl("div", {
+			cls: "aan-trim-transcript-header",
+			text: "Transcript — click a segment to set trim point",
+		});
+		this.transcriptContainer = wrapper.createDiv({
+			cls: "aan-trim-transcript-list",
+		});
+
+		this.segmentEls = [];
+		for (const seg of this.options.segments) {
+			const row = this.transcriptContainer.createDiv({
+				cls: "aan-trim-seg",
+			});
+
+			const timeCol = row.createDiv({ cls: "aan-trim-seg-time" });
+			timeCol.textContent = this.formatTime(seg.start);
+
+			const textCol = row.createDiv({ cls: "aan-trim-seg-text" });
+			if (seg.speakerName) {
+				textCol.createEl("strong", {
+					text: seg.speakerName + ": ",
+					cls: "aan-trim-seg-speaker",
+				});
+			}
+			textCol.createSpan({ text: seg.text });
+
+			const actions = row.createDiv({ cls: "aan-trim-seg-actions" });
+			const startBtn = actions.createEl("button", {
+				text: "Set start",
+				cls: "aan-trim-seg-btn",
+			});
+			const endBtn = actions.createEl("button", {
+				text: "Set end",
+				cls: "aan-trim-seg-btn",
+			});
+
+			startBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this.setRegionStart(seg.start);
+			});
+			endBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this.setRegionEnd(seg.end);
+			});
+
+			// Click the row itself to seek playback
+			row.addEventListener("click", () => {
+				if (!this.wavesurfer) return;
+				const duration =
+					this.wavesurfer.getDuration() || this.options.durationSec;
+				if (duration > 0) {
+					this.wavesurfer.seekTo(seg.start / duration);
+				}
+			});
+
+			this.segmentEls.push(row);
+		}
+	}
+
+	private setRegionStart(timeSec: number) {
+		if (!this.region) return;
+		const end = this.region.end;
+		if (timeSec >= end) {
+			new Notice("Start must be before the current end point.");
+			return;
+		}
+		this.region.setOptions({ start: timeSec });
+		this.syncInputsFromRegion();
+		this.updateTranscriptHighlights();
+	}
+
+	private setRegionEnd(timeSec: number) {
+		if (!this.region) return;
+		const start = this.region.start;
+		if (timeSec <= start) {
+			new Notice("End must be after the current start point.");
+			return;
+		}
+		this.region.setOptions({ end: timeSec });
+		this.syncInputsFromRegion();
+		this.updateTranscriptHighlights();
+	}
+
+	private updateTranscriptHighlights() {
+		if (!this.region) return;
+		const regionStart = this.region.start;
+		const regionEnd = this.region.end;
+
+		for (let i = 0; i < this.options.segments.length; i++) {
+			const seg = this.options.segments[i];
+			const el = this.segmentEls[i];
+			if (!el) continue;
+
+			const inside = seg.end > regionStart && seg.start < regionEnd;
+			el.classList.toggle("is-included", inside);
+			el.classList.toggle("is-excluded", !inside);
+		}
+	}
+
+	// ── WaveSurfer ────────────────────────────────────────────────
+
 	private async initWaveSurfer(container: HTMLElement) {
 		const mime = this.getMimeType(this.options.audioExtension);
 		const blob = new Blob([this.options.audioBuffer], { type: mime });
@@ -178,11 +292,15 @@ export class TrimWhisperModal extends Modal {
 		this.regionsPlugin.on("region-updated", (region: Region) => {
 			if (region === this.region) {
 				this.syncInputsFromRegion();
+				this.updateTranscriptHighlights();
 			}
 		});
 
 		this.syncInputsFromRegion();
+		this.updateTranscriptHighlights();
 	}
+
+	// ── Time inputs ───────────────────────────────────────────────
 
 	private syncInputsFromRegion() {
 		if (!this.region) return;
@@ -204,11 +322,13 @@ export class TrimWhisperModal extends Modal {
 			this.syncInputsFromRegion();
 			return;
 		}
-		const duration = this.wavesurfer?.getDuration() ?? this.options.durationSec;
+		const duration =
+			this.wavesurfer?.getDuration() ?? this.options.durationSec;
 		const clampedStart = Math.max(0, Math.min(start, duration));
 		const clampedEnd = Math.max(clampedStart, Math.min(end, duration));
 		this.region.setOptions({ start: clampedStart, end: clampedEnd });
 		this.syncInputsFromRegion();
+		this.updateTranscriptHighlights();
 	}
 
 	private updateDurationDisplay() {
@@ -219,6 +339,8 @@ export class TrimWhisperModal extends Modal {
 		const dur = this.region.end - this.region.start;
 		display.textContent = this.formatTime(dur);
 	}
+
+	// ── Playback ──────────────────────────────────────────────────
 
 	private playSelection() {
 		if (!this.region || !this.wavesurfer) return;
@@ -236,6 +358,8 @@ export class TrimWhisperModal extends Modal {
 		this.wavesurfer.pause();
 	}
 
+	// ── Confirm / trim ────────────────────────────────────────────
+
 	private async handleConfirm() {
 		if (this.isProcessing || !this.region) return;
 		const trimRange: TrimRange = {
@@ -248,7 +372,6 @@ export class TrimWhisperModal extends Modal {
 			Math.abs(trimRange.startSec) < 0.05 &&
 			Math.abs(trimRange.endSec - duration) < 0.05;
 		if (isFullRange) {
-			// No actual trimming needed — pass through original audio
 			this.options.onConfirm({
 				trimRange,
 				trimmedAudioBuffer: this.options.audioBuffer,
@@ -259,7 +382,7 @@ export class TrimWhisperModal extends Modal {
 		this.isProcessing = true;
 		if (this.confirmButton) {
 			this.confirmButton.disabled = true;
-			this.confirmButton.textContent = "Trimming…";
+			this.confirmButton.textContent = "Trimming\u2026";
 		}
 		try {
 			const trimmedWav = await trimAudioToWav(
@@ -288,7 +411,8 @@ export class TrimWhisperModal extends Modal {
 		}
 	}
 
-	/** Format seconds as H:MM:SS.s or MM:SS.s */
+	// ── Helpers ───────────────────────────────────────────────────
+
 	private formatTime(totalSeconds: number): string {
 		const hours = Math.floor(totalSeconds / 3600);
 		const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -300,7 +424,6 @@ export class TrimWhisperModal extends Modal {
 		return `${minutes}:${secStr}`;
 	}
 
-	/** Parse H:MM:SS.s or MM:SS.s or SS.s to seconds */
 	private parseTime(value: string): number | null {
 		const parts = value.trim().split(":").map(Number);
 		if (parts.some((p) => Number.isNaN(p))) return null;

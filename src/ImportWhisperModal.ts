@@ -422,6 +422,7 @@ export class ImportWhisperModal extends Modal {
 				audioExtension: extracted.audioExtension,
 				durationSec: extracted.durationSec,
 				fileName: file.name,
+				segments: extracted.segments,
 				onConfirm: (trimResult: TrimResult) => {
 					this.importWithTrim(buffer, file.name, trimResult);
 				},

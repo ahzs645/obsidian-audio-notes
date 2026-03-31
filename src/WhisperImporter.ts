@@ -50,7 +50,7 @@ interface WhisperSegment {
 	}[];
 }
 
-interface ProcessedSegment {
+export interface ProcessedSegment {
 	id: string | number;
 	start: number;
 	end: number;

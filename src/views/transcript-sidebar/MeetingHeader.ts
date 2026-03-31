@@ -3,6 +3,7 @@ import type { MeetingScheduleInfo } from "./MeetingScheduleInfo";
 
 interface MeetingHeaderCallbacks {
 	onLabelClick: () => void;
+	onAttendeeClick: () => void;
 	onScheduleEdit: () => void;
 	onDelete: () => void;
 }
@@ -22,6 +23,7 @@ export class MeetingHeader {
 	private scheduleTimeEl: HTMLDivElement;
 	private scheduleEditButtonEl: HTMLButtonElement;
 	private labelInputEl: HTMLInputElement;
+	private attendeeInputEl: HTMLInputElement;
 	private deleteButtonEl: HTMLButtonElement;
 
 	constructor(
@@ -67,6 +69,26 @@ export class MeetingHeader {
 			if (event.key === "Enter" || event.key === " ") {
 				event.preventDefault();
 				this.callbacks.onLabelClick();
+			}
+		});
+		const attendeeField = actionsEl.createDiv({
+			cls: "aan-transcript-attendee-field",
+		});
+		this.attendeeInputEl = attendeeField.createEl("input", {
+			type: "text",
+			attr: { readonly: "readonly" },
+		}) as HTMLInputElement;
+		this.attendeeInputEl.classList.add("aan-transcript-attendee-input");
+		this.attendeeInputEl.placeholder = "Add attendees";
+		this.attendeeInputEl.title = "Click to manage meeting attendees";
+		this.attendeeInputEl.addEventListener("click", (event) => {
+			event.preventDefault();
+			this.callbacks.onAttendeeClick();
+		});
+		this.attendeeInputEl.addEventListener("keydown", (event) => {
+			if (event.key === "Enter" || event.key === " ") {
+				event.preventDefault();
+				this.callbacks.onAttendeeClick();
 			}
 		});
 		this.scheduleEditButtonEl = actionsEl.createEl("button", {
@@ -128,6 +150,30 @@ export class MeetingHeader {
 		this.scheduleSummaryEl.classList.remove("is-placeholder");
 		this.scheduleDateEl.setText(info.dateLabel);
 		this.scheduleTimeEl.setText(info.timeLabel);
+	}
+
+	public setAttendees(attendees: string[], canEdit: boolean): void {
+		this.attendeeInputEl.toggleAttribute("disabled", !canEdit);
+		if (!canEdit) {
+			this.attendeeInputEl.placeholder =
+				"Open a meeting note to add attendees";
+			this.attendeeInputEl.value = "";
+			this.attendeeInputEl.classList.add("is-placeholder");
+			return;
+		}
+		if (!attendees.length) {
+			this.attendeeInputEl.placeholder = "Add attendees";
+			this.attendeeInputEl.value = "";
+			this.attendeeInputEl.classList.add("is-placeholder");
+			return;
+		}
+		this.attendeeInputEl.classList.remove("is-placeholder");
+		this.attendeeInputEl.placeholder = "";
+		if (attendees.length <= 3) {
+			this.attendeeInputEl.value = attendees.join(", ");
+		} else {
+			this.attendeeInputEl.value = `${attendees.slice(0, 2).join(", ")} +${attendees.length - 2} more`;
+		}
 	}
 
 	public setDeleteEnabled(enabled: boolean): void {

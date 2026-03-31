@@ -10,6 +10,7 @@ import {
 	buildTagFromCategory,
 	findLabelCategoryForTag,
 	getEffectiveMeetingLabelCategories,
+	getParentTag,
 	normalizeTagName,
 } from "./meeting-labels";
 import { collectTags } from "./meeting-events";
@@ -25,6 +26,7 @@ type MeetingLabelSuggestion =
 			tag: string;
 			label: MeetingLabelInfo;
 			category?: NormalizedMeetingLabelCategory;
+			childCount?: number;
 	  }
 	| {
 			kind: "create";
@@ -32,6 +34,12 @@ type MeetingLabelSuggestion =
 			label: MeetingLabelInfo;
 			category?: NormalizedMeetingLabelCategory;
 			rawInput: string;
+	  }
+	| {
+			kind: "create-subtag";
+			parentTag: string;
+			parentLabel: MeetingLabelInfo;
+			category: NormalizedMeetingLabelCategory;
 	  }
 	| {
 			kind: "create-category";
@@ -47,6 +55,7 @@ interface MeetingLabelPickerOptions {
 export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion> {
 	private categories: NormalizedMeetingLabelCategory[];
 	private availableLabels: MeetingLabelInfo[] = [];
+	private childrenMap: Map<string, string[]> = new Map();
 	private options: MeetingLabelPickerOptions;
 	private lastQuery = "";
 	private initialQuery = "";
@@ -162,6 +171,8 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 		this.lastQuery = rawQuery;
 		const normalizedQuery = rawQuery.toLowerCase();
 		const suggestions: MeetingLabelSuggestion[] = [];
+		const matchedParentTags = new Set<string>();
+
 		for (const label of this.availableLabels) {
 			if (
 				!normalizedQuery ||
@@ -172,16 +183,40 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 					label.tag,
 					this.categories
 				);
+				const children = this.childrenMap.get(label.tag);
 				suggestions.push({
 					kind: "existing",
 					tag: label.tag,
 					label,
 					category,
+					childCount: children?.length ?? 0,
 				});
+				if (children?.length) {
+					matchedParentTags.add(label.tag);
+				}
 			}
 		}
 
 		if (normalizedQuery) {
+			for (const parentTag of matchedParentTags) {
+				const category = findLabelCategoryForTag(
+					parentTag,
+					this.categories
+				);
+				if (category) {
+					const parentLabel = buildMeetingLabelInfo(
+						parentTag,
+						this.categories
+					);
+					suggestions.push({
+						kind: "create-subtag",
+						parentTag,
+						parentLabel,
+						category,
+					});
+				}
+			}
+
 			for (const category of this.categories) {
 				const tag = buildTagFromCategory(
 					category,
@@ -250,11 +285,27 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 				.createSpan()
 				.setText(
 					suggestion.query
-						? `Add category “${suggestion.query}”`
+						? `Add category "${suggestion.query}"`
 						: "Add meeting label category"
 				);
 			el.createDiv("aan-label-picker-meta").setText(
 				"Create a new label prefix"
+			);
+			return;
+		}
+
+		if (suggestion.kind === "create-subtag") {
+			const title = el.createDiv("aan-label-picker-title");
+			title
+				.createSpan("aan-label-picker-icon")
+				.setText("＋");
+			title
+				.createSpan()
+				.setText(
+					`Create sub-label under ${suggestion.parentLabel.displayName}`
+				);
+			el.createDiv("aan-label-picker-meta").setText(
+				`Add a nested tag under #${suggestion.parentTag}`
 			);
 			return;
 		}
@@ -281,7 +332,11 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 			suggestion.label.categoryName ||
 			"Label";
 		if (suggestion.kind === "existing") {
-			meta.setText(`${categoryLabel} • #${suggestion.tag}`);
+			const childCount =
+				suggestion.childCount && suggestion.childCount > 0
+					? ` • ${suggestion.childCount} sub-label${suggestion.childCount > 1 ? "s" : ""}`
+					: "";
+			meta.setText(`${categoryLabel} • #${suggestion.tag}${childCount}`);
 		} else {
 			meta.setText(`Create under ${categoryLabel}`);
 		}
@@ -293,6 +348,20 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 			const query =
 				this.lastQuery.trim() || suggestion.query || "";
 			this.options.onCreateCategory?.(query);
+			return;
+		}
+		if (suggestion.kind === "create-subtag") {
+			this.close();
+			const reopened = new MeetingLabelPickerModal(
+				this.app,
+				this.plugin,
+				this.onPick,
+				this.options
+			);
+			reopened.setInitialQuery(
+				suggestion.parentTag.replace(/\/$/, "") + "/"
+			);
+			reopened.open();
 			return;
 		}
 		this.onPick({
@@ -327,6 +396,17 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 				);
 			}
 		}
+
+		this.childrenMap = new Map();
+		for (const tag of results.keys()) {
+			const parent = getParentTag(tag);
+			if (parent) {
+				const children = this.childrenMap.get(parent) ?? [];
+				children.push(tag);
+				this.childrenMap.set(parent, children);
+			}
+		}
+
 		return Array.from(results.values());
 	}
 }

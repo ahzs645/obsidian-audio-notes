@@ -26,7 +26,10 @@ import {
 	getEffectiveMeetingLabelCategories,
 	type MeetingLabelInfo,
 } from "../meeting-labels";
-import { getMeetingLabelFromFrontmatter } from "../meeting-label-manager";
+import {
+	getAttendeesFromFrontmatter,
+	getMeetingLabelFromFrontmatter,
+} from "../meeting-label-manager";
 import { collectTags } from "../meeting-events";
 import { pathExists } from "../googleDriveArchive";
 import { MeetingHeader } from "./transcript-sidebar/MeetingHeader";
@@ -35,6 +38,7 @@ import { MeetingLabelManager } from "./transcript-sidebar/MeetingLabelManager";
 import { MeetingScheduleManager } from "./transcript-sidebar/MeetingScheduleManager";
 import { SpeakerLabelManager } from "./transcript-sidebar/SpeakerLabelManager";
 import { MeetingDeletionManager } from "./transcript-sidebar/MeetingDeletionManager";
+import { MeetingAttendeeManager } from "./transcript-sidebar/MeetingAttendeeManager";
 
 export const AUDIO_NOTES_TRANSCRIPT_VIEW = "audio-notes-transcript-view";
 interface TranscriptSidebarState {
@@ -67,7 +71,9 @@ export class TranscriptSidebarView extends ItemView {
 	private readonly scheduleManager: MeetingScheduleManager;
 	private readonly speakerLabelManager: SpeakerLabelManager;
 	private readonly deletionManager: MeetingDeletionManager;
+	private readonly attendeeManager: MeetingAttendeeManager;
 	private currentMeetingLabel: MeetingLabelInfo | undefined;
+	private currentAttendees: string[] = [];
 	private speakerLabelOverrides: Record<string, string> = {};
 	private currentScheduleInfo: MeetingScheduleInfo | null = null;
 
@@ -98,6 +104,15 @@ export class TranscriptSidebarView extends ItemView {
 				this.currentMeetingLabel = label;
 			},
 			refreshLabelHeader: () => this.updateLabelHeader(),
+		});
+		this.attendeeManager = new MeetingAttendeeManager(this.app, this.plugin, {
+			getMode: () => this.mode,
+			getCurrentMeetingFile: () => this.currentMeetingFile,
+			getCurrentAttendees: () => this.currentAttendees,
+			setCurrentAttendees: (attendees) => {
+				this.currentAttendees = attendees;
+			},
+			refreshAttendeeDisplay: () => this.updateAttendeeDisplay(),
 		});
 		this.scheduleManager = new MeetingScheduleManager(this.app, this.plugin, {
 			getMode: () => this.mode,
@@ -277,6 +292,8 @@ export class TranscriptSidebarView extends ItemView {
 			? buildMeetingLabelInfo(detectedLabel, categories)
 			: undefined;
 		this.updateLabelHeader();
+		this.currentAttendees = getAttendeesFromFrontmatter(frontmatter);
+		this.updateAttendeeDisplay();
 		const preferredDateParts =
 			this.meetingFiles.extractDatePartsFromFrontmatter(
 				frontmatter
@@ -470,6 +487,7 @@ export class TranscriptSidebarView extends ItemView {
 		});
 		this.header = new MeetingHeader(this.meetingContainer, {
 			onLabelClick: () => this.labelManager.openLabelPicker(),
+			onAttendeeClick: () => this.attendeeManager.openAttendeePicker(),
 			onScheduleEdit: () => this.scheduleManager.openScheduleEditor(),
 			onDelete: () => {
 				void this.confirmDeleteCurrentMeeting();
@@ -553,6 +571,13 @@ export class TranscriptSidebarView extends ItemView {
 			canEdit,
 			hasValue: Boolean(text),
 		});
+	}
+
+	private updateAttendeeDisplay() {
+		if (!this.header) return;
+		const canEdit =
+			this.mode === "meeting" && Boolean(this.currentMeetingFile);
+		this.header.setAttendees(this.currentAttendees, canEdit);
 	}
 
 	private updateDeleteButtonState() {

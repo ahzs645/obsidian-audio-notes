@@ -54,3 +54,78 @@ export function getMeetingLabelFromFrontmatter(
 	}
 	return undefined;
 }
+
+export function getAttendeesFromFrontmatter(
+	frontmatter: Record<string, unknown> | undefined
+): string[] {
+	if (!frontmatter) return [];
+	return coerceAttendees(frontmatter.attendees);
+}
+
+export async function applyAttendeesToFile(
+	app: App,
+	file: TFile,
+	attendees: string[]
+): Promise<string[]> {
+	const normalized = deduplicateAttendees(attendees);
+	await app.fileManager.processFrontMatter(file, (frontmatter) => {
+		if (normalized.length) {
+			frontmatter.attendees = normalized;
+		} else {
+			delete frontmatter.attendees;
+		}
+	});
+	return normalized;
+}
+
+export async function removeAttendeeFromFile(
+	app: App,
+	file: TFile,
+	name: string
+): Promise<string[]> {
+	const trimmed = name.trim().toLowerCase();
+	let remaining: string[] = [];
+	await app.fileManager.processFrontMatter(file, (frontmatter) => {
+		const current = coerceAttendees(frontmatter.attendees);
+		remaining = current.filter((a) => a.toLowerCase() !== trimmed);
+		if (remaining.length) {
+			frontmatter.attendees = remaining;
+		} else {
+			delete frontmatter.attendees;
+		}
+	});
+	return remaining;
+}
+
+function coerceAttendees(value: unknown): string[] {
+	if (!value) return [];
+	if (Array.isArray(value)) {
+		return value
+			.flatMap((entry) =>
+				typeof entry === "string" ? [entry.trim()] : []
+			)
+			.filter(Boolean);
+	}
+	if (typeof value === "string") {
+		return value
+			.split(",")
+			.map((s) => s.trim())
+			.filter(Boolean);
+	}
+	return [];
+}
+
+function deduplicateAttendees(attendees: string[]): string[] {
+	const seen = new Set<string>();
+	const result: string[] = [];
+	for (const name of attendees) {
+		const trimmed = name.trim();
+		if (!trimmed) continue;
+		const key = trimmed.toLowerCase();
+		if (!seen.has(key)) {
+			seen.add(key);
+			result.push(trimmed);
+		}
+	}
+	return result;
+}

@@ -17,6 +17,7 @@ export interface MeetingEvent {
 	end: Date;
 	tags: string[];
 	label?: MeetingLabelInfo;
+	attendees?: string[];
 	color: string;
 	displayDate: string;
 	displayEndDate: string;
@@ -127,6 +128,8 @@ function buildMeetingEvent(
 		typeof frontmatter.title === "string" ? frontmatter.title.trim() : "";
 	const resolvedTitle = fileTitle || frontmatterTitle || path;
 
+	const attendees = coerceAttendees(frontmatter.attendees);
+
 	return {
 		path,
 		title: resolvedTitle,
@@ -134,11 +137,12 @@ function buildMeetingEvent(
 		end: endDate,
 		tags: orderedTags,
 		label,
-			color,
-			displayDate: rawStartDate || localDateKey(startDate),
-			displayEndDate: rawEndDate || localDateKey(endDate),
-		};
-	}
+		attendees: attendees.length ? attendees : undefined,
+		color,
+		displayDate: rawStartDate || localDateKey(startDate),
+		displayEndDate: rawEndDate || localDateKey(endDate),
+	};
+}
 
 function parseDateFromParts(date: unknown, time: unknown): Date | null {
 	if (typeof date !== "string" || !date.trim()) {
@@ -187,6 +191,24 @@ function normalizeTagValue(value: unknown): string[] {
 		return value
 			.split(/[, ]+/)
 			.map((tag) => tag.replace(/^#/, "").trim())
+			.filter(Boolean);
+	}
+	return [];
+}
+
+function coerceAttendees(value: unknown): string[] {
+	if (!value) return [];
+	if (Array.isArray(value)) {
+		return value
+			.flatMap((entry) =>
+				typeof entry === "string" ? [entry.trim()] : []
+			)
+			.filter(Boolean);
+	}
+	if (typeof value === "string") {
+		return value
+			.split(",")
+			.map((s) => s.trim())
 			.filter(Boolean);
 	}
 	return [];
