@@ -4,9 +4,7 @@ import {
 	ensureFolderExists,
 	normalizeFolderPath,
 } from "../../AudioNotesUtils";
-import { deepgramPrerecorded } from "../../DeepgramPrerecorded";
 import type AutomaticAudioNotes from "../../main";
-import { ScriberrClient } from "../../ScriberrClient";
 import {
 	Transcript,
 	getTranscriptFromDGResponse,
@@ -30,11 +28,10 @@ export class TranscriptionService {
 	}
 
 	canUseScriberr(): boolean {
-		return ScriberrClient.isConfigured({
-			baseUrl: this.plugin.settings.scriberrBaseUrl,
-			apiKey: this.plugin.settings.scriberrApiKey,
-			profileName: this.plugin.settings.scriberrProfileName,
-		});
+		return Boolean(
+			this.plugin.settings.scriberrBaseUrl &&
+				this.plugin.settings.scriberrApiKey
+		);
 	}
 
 	async requestTranscription(
@@ -47,6 +44,9 @@ export class TranscriptionService {
 	}
 
 	private async transcribeWithDeepgram(audioPath: string): Promise<string> {
+		const { deepgramPrerecorded } = await import(
+			"../../DeepgramPrerecorded"
+		);
 		const arrayBuffer = await this.readAudioBinary(audioPath);
 		const buffer = Buffer.from(new Uint8Array(arrayBuffer));
 		const params = createDeepgramQueryParams("en-US");
@@ -62,6 +62,7 @@ export class TranscriptionService {
 	}
 
 	private async transcribeWithScriberr(audioPath: string): Promise<string> {
+		const { ScriberrClient } = await import("../../ScriberrClient");
 		const arrayBuffer = await this.readAudioBinary(audioPath);
 		const client = new ScriberrClient({
 			baseUrl: this.plugin.settings.scriberrBaseUrl,

@@ -274,47 +274,6 @@ export class AudioNote extends AudioBlock {
 	}
 }
 
-export class AudioNoteWithPositionInfo extends AudioNote {
-	constructor(
-		public title: string | undefined,
-		public author: string | undefined,
-		public audioFilename: string,
-		_start: number,
-		_end: number,
-		_speed: number,
-		public transcriptFilename: string | undefined,
-		public quoteCreatedForStart: number | undefined,
-		public quoteCreatedForEnd: number | undefined,
-		public quote: string | undefined,
-		public extendAudio: boolean,
-		public liveUpdate: boolean,
-		public startLineNumber: number,
-		public endLineNumber: number,
-		public endChNumber: number,
-	) { super(title, author, audioFilename, _start, _end, _speed, transcriptFilename, quoteCreatedForStart, quoteCreatedForEnd, quote, extendAudio, liveUpdate); }
-
-	static fromAudioNote(audioNote: AudioNote, startLineNumber: number, endLineNumber: number, endChNumber: number): AudioNoteWithPositionInfo {
-		return new AudioNoteWithPositionInfo(
-			audioNote.title,
-			audioNote.author,
-			audioNote.audioFilename,
-			audioNote.start,
-			audioNote.end,
-			audioNote.speed,
-			audioNote.transcriptFilename,
-			audioNote.quoteCreatedForStart,
-			audioNote.quoteCreatedForEnd,
-			audioNote.quote,
-			audioNote.extendAudio,
-			audioNote.liveUpdate,
-			startLineNumber,
-			endLineNumber,
-			endChNumber,
-		)
-	}
-}
-
-
 /**
  * Cache for `audio` HTML elements. The cache has a max size to prevent a significant memory leak.
  * The cache is necessary because in the Live Preview mode, there can be multiple renders of the same

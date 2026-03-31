@@ -38,6 +38,7 @@
     "@fullcalendar/timegrid": "^6.1.19",
     "fast-xml-parser": "^4.1.1",
     "lucide-svelte": "^0.115.0",
-    "query-string": "^8.1.0"
+    "query-string": "^8.1.0",
+    "wavesurfer.js": "^7.12.5"
   }
 }

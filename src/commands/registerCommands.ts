@@ -1,13 +1,14 @@
-import { App, MarkdownView, Notice, WorkspaceLeaf, request } from "obsidian";
+import { App, MarkdownView, Notice, TFile } from "obsidian";
 import type AutomaticAudioNotes from "../main";
 import { ImportWhisperModal } from "../ImportWhisperModal";
-import { CreateNewAudioNoteInNewFileModal } from "../CreateNewAudioNoteInNewFileModal";
-import { EnqueueAudioModal } from "../EnqueueAudioModal";
-import { DGQuickNoteModal } from "../DGQuickNoteModal";
+import { getStartAndEndFromBracketString } from "../AudioNotes";
 import {
-	AudioNote,
-	getStartAndEndFromBracketString,
-} from "../AudioNotes";
+	isGoogleDriveArchiveEnabled,
+	getGoogleDriveArchiveRoot,
+	deriveGoogleDriveUrlWithRetries,
+	normalizeArchiveRelativePath,
+} from "../googleDriveArchive";
+import path from "path";
 import { ensureDashboardNote } from "../dashboard";
 import { NewMeetingModal } from "../modals/NewMeetingModal";
 import { ExportModal } from "../modals/ExportModal";
@@ -110,196 +111,6 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 	});
 
 	plugin.addCommand({
-		id: "create-new-audio-note",
-		name: `Create new Audio Note at current time (-/+ ${settings.minusDuration}/${settings.plusDuration} seconds)`,
-		checkCallback: (checking: boolean) => {
-			const markdownView = app.workspace.getActiveViewOfType(MarkdownView);
-			if (!markdownView) {
-				return false;
-			}
-			if (checking) {
-				return true;
-			}
-			plugin.audioNoteService
-				.getFirstAudioNoteInFile(markdownView.file)
-				.then((audioNote) => {
-					const audioSrcPath = plugin.audioNoteService.getFullAudioSrcPath(
-						audioNote
-					);
-					if (!audioSrcPath) {
-						return;
-					}
-					let currentTime = plugin.knownCurrentTimes.get(audioSrcPath);
-					if (!currentTime) {
-						currentTime = audioNote.start;
-					}
-					audioNote.start = currentTime - settings.minusDuration;
-					audioNote.end = currentTime + settings.plusDuration;
-					plugin.audioNoteService
-						.createNewAudioNoteAtEndOfFile(markdownView, audioNote)
-						.catch((error) => {
-							console.error(`Audio Notes: ${error}`);
-							new Notice(
-								"Coud not create audio note at end of file.",
-								10000
-							);
-						});
-					void plugin.incrementUsageCount();
-				})
-				.catch((error: Error) => {
-					console.error(`Audio Notes: ${error}`);
-					new Notice("Could not find audio note.", 10000);
-				});
-			return true;
-		},
-	});
-
-	plugin.addCommand({
-		id: "create-audio-note-from-media-extended-plugin",
-		name: `(Media Extended YouTube Video) Create new Audio Note at current time (-/+ ${settings.minusDuration}/${settings.plusDuration} seconds)`,
-		checkCallback: (checking: boolean) => {
-			// https://github.com/aidenlx/media-extended/blob/1e8f37756403423cd100e51f58d27ed961acf56b/src/mx-main.ts#L120
-			type MediaView = any;
-			const getMediaView = (group: string) =>
-				app.workspace
-					.getGroupLeaves(group)
-					.find(
-						(leaf) =>
-							(leaf.view as MediaView).getTimeStamp !== undefined
-					)?.view as MediaView | undefined;
-
-			const markdownView = app.workspace.getActiveViewOfType(MarkdownView);
-			let group: WorkspaceLeaf | undefined = undefined;
-			if (markdownView) {
-				group = (markdownView.leaf as any).group;
-			}
-			if (checking) {
-				return Boolean(group);
-			}
-			if (!group) {
-				new Notice(
-					"Use the command `Media Extended: Open Media from Link` to open a YouTube video."
-				);
-				return false;
-			}
-			const mediaView = getMediaView(group.toString());
-			if (!mediaView || !mediaView.getTimeStamp) {
-				new Notice(
-					"Use the command `Media Extended: Open Media from Link` to open a YouTube video."
-				);
-				return false;
-			}
-			const markdownViewInstance =
-				app.workspace.getActiveViewOfType(MarkdownView);
-			if (!markdownViewInstance) {
-				new Notice("Please focus your cursor on a markdown window.");
-				return false;
-			}
-			const notTimestamp = mediaView.getTimeStamp();
-			let url: string = mediaView.info.src.href;
-			if (!url.includes("youtube.com")) {
-				new Notice("Currently, only YouTube videos are supported.");
-				return false;
-			}
-			const urlParts = url.split("?");
-			const urlParams: Map<string, string> = new Map();
-			for (const param of urlParts[1].split("&")) {
-				const [key, value] = param.split("=");
-				urlParams.set(key, value);
-			}
-			url = `${urlParts[0]}?v=${urlParams.get("v")}`;
-			request({
-				url: `https://www.youtube.com/oembed?format=json&url=${url}`,
-				method: "GET",
-				contentType: "application/json",
-			}).then((result: string) => {
-				const videoInfo = JSON.parse(result);
-				const title = videoInfo.title;
-				const currentTime = parseFloat(
-					notTimestamp.split("#t=")[1].slice(0, -1)
-				);
-				const audioNote = new AudioNote(
-					title,
-					notTimestamp,
-					url,
-					currentTime - settings.minusDuration,
-					currentTime + settings.plusDuration,
-					1.0,
-					url,
-					undefined,
-					undefined,
-					undefined,
-					false,
-					false
-				);
-				plugin.audioNoteService
-					.createNewAudioNoteAtEndOfFile(markdownViewInstance, audioNote)
-					.catch((error) => {
-						console.error(`Audio Notes: ${error}`);
-						new Notice(
-							"Coud not create audio note at end of file.",
-							10000
-						);
-					});
-				void plugin.incrementUsageCount();
-			});
-			return true;
-		},
-	});
-
-	plugin.addCommand({
-		id: "regenerate-current-audio-note",
-		name: "Regenerate Current Audio Note",
-		checkCallback: (checking: boolean) => {
-			const markdownView = app.workspace.getActiveViewOfType(MarkdownView);
-			if (!markdownView) return false;
-			if (!checking) {
-				plugin.audioNoteService
-					.regenerateCurrentAudioNote(markdownView)
-					.catch(() =>
-						new Notice("Could not generate audio notes.", 10000)
-					);
-				void plugin.incrementUsageCount();
-			}
-			return true;
-		},
-	});
-
-	plugin.addCommand({
-		id: "regenerate-audio-notes",
-		name: "Regenerate All Audio Notes",
-		checkCallback: (checking: boolean) => {
-			const markdownView = app.workspace.getActiveViewOfType(MarkdownView);
-			if (!markdownView) return false;
-			if (!checking) {
-				plugin.audioNoteService
-					.regenerateAllAudioNotes(markdownView)
-					.catch(() =>
-						new Notice("Could not generate audio notes.", 10000)
-					);
-				void plugin.incrementUsageCount();
-			}
-			return true;
-		},
-	});
-
-	plugin.addCommand({
-		id: "create-new-audio-note-with-new-file",
-		name: "Create new Audio Note in new file",
-		callback: async () => {
-			const allFiles = app.vault.getFiles();
-			const mp3Files = allFiles.filter(
-				(file) =>
-					file.extension === "mp3" ||
-					file.extension === "m4b" ||
-					file.extension === "m4a"
-			);
-			new CreateNewAudioNoteInNewFileModal(plugin, mp3Files).open();
-			void plugin.incrementUsageCount();
-		},
-	});
-
-	plugin.addCommand({
 		id: "toggle-play",
 		name: "Toggle Play/Pause",
 		callback: async () => {
@@ -388,14 +199,6 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 	});
 
 	plugin.addCommand({
-		id: "add-audio-file-to-queue",
-		name: "Transcribe mp3 file online",
-		callback: async () => {
-			new EnqueueAudioModal(plugin).open();
-		},
-	});
-
-	plugin.addCommand({
 		id: "open-transcript-sidebar",
 		name: "Open transcript sidebar",
 		callback: async () => {
@@ -404,27 +207,133 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 	});
 
 	plugin.addCommand({
-		id: "quick-audio-note",
-		name: "Generate quick audio recording with transcription",
-		callback: async () => {
-			if (
-				!settings.DGApiKey &&
-				!settings.hasScriberrCredentials
-			) {
-				new Notice(
-					"Please set a Deepgram API key or Scriberr credentials in the settings tab."
-				);
-			} else {
-				new DGQuickNoteModal(plugin).open();
-			}
-		},
-	});
-
-	plugin.addCommand({
 		id: "export-audio-notes",
 		name: "Export audio notes and transcripts",
 		callback: () => {
 			new ExportModal(app, plugin).open();
+		},
+	});
+
+	plugin.addCommand({
+		id: "migrate-notes-to-google-drive-archive",
+		name: "Migrate meeting notes to Google Drive archive",
+		callback: async () => {
+			if (!isGoogleDriveArchiveEnabled(settings)) {
+				new Notice(
+					"Enable 'Store audio outside the vault' and set the Google Drive archive root in settings first.",
+					8000
+				);
+				return;
+			}
+			const archiveRoot = getGoogleDriveArchiveRoot(settings);
+			const files = app.vault.getMarkdownFiles();
+			let migrated = 0;
+			let skipped = 0;
+			let failed = 0;
+
+			for (const file of files) {
+				const cache = app.metadataCache.getFileCache(file);
+				const fm = cache?.frontmatter;
+				if (!fm) continue;
+
+				const mediaUri =
+					typeof fm.media_uri === "string"
+						? fm.media_uri.trim()
+						: "";
+				if (!mediaUri) continue;
+				if (fm.recording_archive === "google-drive") {
+					skipped++;
+					continue;
+				}
+
+				try {
+					const absolutePath = path.join(archiveRoot, mediaUri);
+					const driveUrl =
+						await deriveGoogleDriveUrlWithRetries(absolutePath);
+					const drivePath =
+						normalizeArchiveRelativePath(mediaUri);
+
+					await app.fileManager.processFrontMatter(
+						file,
+						(frontmatter) => {
+							frontmatter.recording_archive = "google-drive";
+							frontmatter.recording_drive_path = drivePath;
+							if (driveUrl) {
+								frontmatter.recording_url = driveUrl;
+							}
+						}
+					);
+					migrated++;
+				} catch (error) {
+					console.error(
+						`Audio Notes: Could not migrate ${file.path}`,
+						error
+					);
+					failed++;
+				}
+			}
+
+			new Notice(
+				`Google Drive migration complete.\n${migrated} migrated, ${skipped} already done, ${failed} failed.`,
+				8000
+			);
+		},
+	});
+
+	plugin.addCommand({
+		id: "toggle-inline-player-visibility",
+		name: "Remove inline player hiding from meeting notes",
+		callback: async () => {
+			const files = app.vault.getMarkdownFiles();
+			let updated = 0;
+
+			for (const file of files) {
+				const cache = app.metadataCache.getFileCache(file);
+				const fm = cache?.frontmatter;
+				if (!fm) continue;
+
+				const cssclasses: unknown =
+					fm.cssclasses ?? fm.cssclass;
+				if (!Array.isArray(cssclasses)) continue;
+				if (
+					!cssclasses.includes("aan-hide-inline-player")
+				) {
+					continue;
+				}
+
+				try {
+					await app.fileManager.processFrontMatter(
+						file,
+						(frontmatter) => {
+							const classes: string[] =
+								frontmatter.cssclasses ??
+								frontmatter.cssclass ??
+								[];
+							if (!Array.isArray(classes)) return;
+							const filtered = classes.filter(
+								(c: string) =>
+									c !== "aan-hide-inline-player"
+							);
+							if (frontmatter.cssclasses !== undefined) {
+								frontmatter.cssclasses = filtered;
+							} else {
+								frontmatter.cssclass = filtered;
+							}
+						}
+					);
+					updated++;
+				} catch (error) {
+					console.error(
+						`Audio Notes: Could not update ${file.path}`,
+						error
+					);
+				}
+			}
+
+			new Notice(
+				`Removed inline player hiding from ${updated} notes.`,
+				6000
+			);
 		},
 	});
 }

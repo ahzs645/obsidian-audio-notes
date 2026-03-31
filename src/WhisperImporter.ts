@@ -114,6 +114,12 @@ interface WhisperImportIndex {
 	byName: Map<string, Set<string>>;
 }
 
+export interface WhisperTrimOptions {
+	startSec: number;
+	endSec: number;
+	trimmedAudioBuffer: Buffer;
+}
+
 export interface WhisperImportOptions {
 	audioFolder: string;
 	transcriptFolder: string;
@@ -121,6 +127,7 @@ export interface WhisperImportOptions {
 	createNote?: boolean;
 	noteFolder?: string;
 	noteTitle?: string;
+	trimOptions?: WhisperTrimOptions;
 }
 
 interface MeetingAudioReferenceInput {
@@ -772,16 +779,17 @@ function buildMeetingNoteFolder(baseFolder: string, meetingDate: Date): string {
 	return normalizePath([baseFolder, year, month, day].join("/"));
 }
 
-export async function importWhisperArchive(
-	plugin: AutomaticAudioNotes,
-	data: ArrayBuffer,
-	originalName: string,
-	overrideOptions?: Partial<WhisperImportOptions>
-): Promise<WhisperImportResult> {
-	const options = {
-		...DEFAULT_OPTIONS(plugin),
-		...overrideOptions,
-	};
+export interface ExtractedWhisperArchive {
+	metadata: WhisperMetadata;
+	audioBuffer: Buffer;
+	audioExtension: string;
+	segments: ProcessedSegment[];
+	durationSec: number;
+}
+
+export function extractWhisperArchive(
+	data: ArrayBuffer
+): ExtractedWhisperArchive {
 	const zip = new AdmZip(Buffer.from(data));
 	const metadataEntry = zip.getEntry("metadata.json");
 	const audioEntry = zip.getEntry("originalAudio");
@@ -835,8 +843,83 @@ export async function importWhisperArchive(
 		})
 		.filter((segment): segment is ProcessedSegment => Boolean(segment));
 
+	const audioBuffer = audioEntry.getData();
+	const audioExt =
+		metadata.originalMediaExtension?.replace(".", "") ||
+		detectAudioExtension(audioBuffer);
+	const durationSec = segments.reduce(
+		(max, seg) => Math.max(max, seg.end),
+		0
+	);
+
+	return { metadata, audioBuffer, audioExtension: audioExt, segments, durationSec };
+}
+
+function trimSegments(
+	segments: ProcessedSegment[],
+	startSec: number,
+	endSec: number
+): ProcessedSegment[] {
+	return segments
+		.filter((seg) => seg.end > startSec && seg.start < endSec)
+		.map((seg) => {
+			const clippedStart = Math.max(seg.start, startSec) - startSec;
+			const clippedEnd = Math.min(seg.end, endSec) - startSec;
+			const words = (seg.words ?? [])
+				.filter(
+					(w) =>
+						typeof w.start === "number" &&
+						typeof w.end === "number" &&
+						w.end > startSec &&
+						w.start < endSec
+				)
+				.map((w) => ({
+					text: w.text,
+					start: Math.max(w.start!, startSec) - startSec,
+					end: Math.min(w.end!, endSec) - startSec,
+				}));
+			return {
+				...seg,
+				start: clippedStart,
+				end: clippedEnd,
+				words,
+			};
+		});
+}
+
+export async function importWhisperArchive(
+	plugin: AutomaticAudioNotes,
+	data: ArrayBuffer,
+	originalName: string,
+	overrideOptions?: Partial<WhisperImportOptions>
+): Promise<WhisperImportResult> {
+	const options = {
+		...DEFAULT_OPTIONS(plugin),
+		...overrideOptions,
+	};
+	const extracted = extractWhisperArchive(data);
+	const { metadata } = extracted;
+
+	let segments = extracted.segments;
+	let audioBuffer = extracted.audioBuffer;
+	let audioExt = extracted.audioExtension;
+
 	if (!segments.length) {
 		throw new Error("No transcript segments found in archive.");
+	}
+
+	// Apply trim if requested
+	if (options.trimOptions) {
+		segments = trimSegments(
+			segments,
+			options.trimOptions.startSec,
+			options.trimOptions.endSec
+		);
+		if (!segments.length) {
+			throw new Error("No transcript segments remain after trimming.");
+		}
+		audioBuffer = options.trimOptions.trimmedAudioBuffer;
+		audioExt = "wav"; // trimmed audio is always WAV
 	}
 
 	const meetingDurationSeconds = segments.reduce(
@@ -844,7 +927,6 @@ export async function importWhisperArchive(
 		0
 	);
 	const meetingDurationMs = meetingDurationSeconds * 1000;
-	const audioBuffer = audioEntry.getData();
 	const audioSha1 = hashBuffer(audioBuffer);
 	const segmentsSha1 = buildSegmentsSha1(segments);
 	const whisperFingerprint = buildWhisperFingerprint(
@@ -891,9 +973,6 @@ export async function importWhisperArchive(
 
 	await ensureFolderExists(plugin.app.vault, transcriptFolder);
 
-	const audioExt =
-		metadata.originalMediaExtension?.replace(".", "") ||
-		detectAudioExtension(audioBuffer);
 	let audioPath: string | undefined;
 	let localAudioPath: string | undefined;
 	let recordingArchive: string | undefined;

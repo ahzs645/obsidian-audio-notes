@@ -5,27 +5,16 @@ import {
 	TFile,
 	TAbstractFile,
 	Platform,
-	request,
-	WorkspaceLeaf,
-	MarkdownRenderer,
-	MarkdownRenderChild,
 } from "obsidian";
 
-import type { MarkdownPostProcessorContext } from "obsidian";
-
 // Local imports
-import { QuickNotePostProcessor } from "./DGQuickAudioNoteFormatter";
-import { DGQuickNoteModal } from "./DGQuickNoteModal";
 import { monkeyPatchConsole } from "./monkeyPatchConsole";
-import { CreateNewAudioNoteInNewFileModal } from "./CreateNewAudioNoteInNewFileModal";
-import { EnqueueAudioModal } from "./EnqueueAudioModal";
 import { ImportWhisperModal } from "./ImportWhisperModal";
 import { WhisperInboxImporter } from "./WhisperInboxImporter";
 import { createAudioPlayer } from "./audio/AudioPlayerFactory";
 import type { AudioPlayerEnvironment } from "./audio/AudioPlayerFactory";
 import { registerAudioNoteCommands } from "./commands/registerCommands";
 import { AudioNoteService } from "./services/AudioNoteService";
-import { renderAudioNote } from "./renderers/AudioNoteRenderer";
 import { secondsToTimeString, getUniqueId } from "./utils";
 import { ensureFolderExists, normalizeFolderPath } from "./AudioNotesUtils";
 import {
@@ -40,7 +29,6 @@ import {
 import {
 	AudioElementCache,
 	AudioNote,
-	AudioNoteWithPositionInfo,
 	getAudioPlayerIdentify,
 	getStartAndEndFromBracketString,
 } from "./AudioNotes";
@@ -75,7 +63,6 @@ export default class AutomaticAudioNotes extends Plugin {
 	knownCurrentTimes: Map<string, number> = new Map();
 	knownAudioPlayers: AudioElementCache = new AudioElementCache(30);
 	currentlyPlayingAudioFakeUuid: string | null = null;
-	atLeastOneNoteRendered: boolean = false;
 	private lastMeetingFolder: string | null = null;
 	private lastMeetingFilePath: string | null = null;
 	private whisperInboxImporter: WhisperInboxImporter | null = null;
@@ -322,24 +309,6 @@ export default class AutomaticAudioNotes extends Plugin {
 			factory: (controller, containerEl) =>
 				new BasesCalendarView(controller, containerEl, this),
 		});
-		const ribbonIconEl = this.addRibbonIcon(
-			"microphone",
-			"Quick Audio Note with Transcription",
-			(evt: MouseEvent) => {
-				// Called when the user clicks the icon.
-				if (
-					!this.settings.DGApiKey &&
-					!this.settings.hasScriberrCredentials
-				) {
-					new Notice(
-						"No transcription provider configured. Use Whisper import instead or set Deepgram/Scriberr credentials in settings."
-					);
-					new ImportWhisperModal(this).open();
-				} else {
-					new DGQuickNoteModal(this).open();
-				}
-			}
-		);
 		// Go through the loaded settings and set the timestamps of any src's that have been played in the last 3 months.
 		// Resave the data after filtering out any src's that were played more than 3 months ago.
 		const todayMinusThreeMonthsInMilliseconds = new Date().getTime() - 7.884e9;
@@ -382,18 +351,6 @@ export default class AutomaticAudioNotes extends Plugin {
 
 		registerAudioNoteCommands(this);
 
-		// Register the HTML renderer.
-		this.registerMarkdownCodeBlockProcessor(`audio-note`, (src, el, ctx) =>
-			renderAudioNote(this, src, el, ctx)
-		);
-
-		this.registerMarkdownCodeBlockProcessor(
-			`dg-audio-note`,
-			(src, el, ctx) => {
-				return QuickNotePostProcessor(src, el, ctx);
-			}
-		);
-		// Done!
 		console.info("Audio Notes: Obsidian Audio Notes loaded");
 
 		this.app.workspace.onLayoutReady(() => {
@@ -435,48 +392,6 @@ export default class AutomaticAudioNotes extends Plugin {
 
 		if (this.settings.calendarSidebarPinned) {
 			await this.syncCalendarSidebar(true);
-		}
-	}
-
-	public async incrementUsageCount() {
-		const data = await this.loadData();
-		data.counts = (data.counts || 0) + 1;
-		this.saveData(data);
-	}
-
-	public handleFirstRender() {
-		if (!this.atLeastOneNoteRendered) {
-			this.atLeastOneNoteRendered = true;
-			void this._onFirstRender();
-		}
-	}
-
-	public replaceElementWithError(el: HTMLElement, error: Error): void {
-		const pre = createEl("pre");
-		pre.createEl("code", {
-			attr: {
-				style: `color: var(--text-error) !important`,
-			},
-		}).createSpan({
-			text:
-				"There was an error rendering the audio note:\n" +
-				error +
-				"\n\n" +
-				`${error}`,
-		});
-		el.replaceWith(pre);
-	}
-
-	private async _onFirstRender() {
-		const data = await this.loadData();
-		const uuid = data.uuid;
-		const counts = data.counts || 0;
-		if (counts > 0) {
-			request({
-				url: "https://iszrj6j2vk.execute-api.us-east-1.amazonaws.com/prod/init",
-				method: "POST",
-				body: `{"uuid": "${uuid}", "counts": ${counts}}`,
-			});
 		}
 	}
 

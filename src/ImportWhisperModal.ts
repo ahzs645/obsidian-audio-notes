@@ -7,6 +7,7 @@ import {
 } from "obsidian";
 import type AutomaticAudioNotes from "./main";
 import {
+	extractWhisperArchive,
 	importWhisperArchive,
 	notifyWhisperImportSuccess,
 	WhisperDuplicateError,
@@ -17,6 +18,7 @@ import {
 	type MeetingLabelSelection,
 } from "./MeetingLabelPickerModal";
 import { applyMeetingLabelToFile } from "./meeting-label-manager";
+import { TrimWhisperModal, type TrimResult } from "./TrimWhisperModal";
 
 export class ImportWhisperModal extends Modal {
 	private plugin: AutomaticAudioNotes;
@@ -26,6 +28,7 @@ export class ImportWhisperModal extends Modal {
 	private noteTitle: string;
 	private dragCounter = 0;
 	private importButton: HTMLButtonElement | undefined;
+	private trimButton: HTMLButtonElement | undefined;
 	private noteTitleInput?: TextComponent;
 	private fileInput?: HTMLInputElement;
 	private dropzoneEl?: HTMLElement;
@@ -167,7 +170,17 @@ export class ImportWhisperModal extends Modal {
 				})
 		);
 
-		this.importButton = contentEl.createEl("button", {
+		const buttonRow = contentEl.createDiv({ cls: "aan-whisper-button-row" });
+
+		this.trimButton = buttonRow.createEl("button", {
+			text: "Trim & Import",
+		});
+		this.trimButton.disabled = true;
+		this.trimButton.addEventListener("click", () =>
+			this.openTrimModal()
+		);
+
+		this.importButton = buttonRow.createEl("button", {
 			text: "Import",
 			cls: "mod-cta",
 		});
@@ -184,6 +197,9 @@ export class ImportWhisperModal extends Modal {
 	private toggleImportButton() {
 		if (!this.importButton) return;
 		this.importButton.disabled = !this.selectedFiles.length;
+		if (this.trimButton) {
+			this.trimButton.disabled = this.selectedFiles.length !== 1;
+		}
 	}
 
 	private clearSelectedFiles() {
@@ -386,6 +402,97 @@ export class ImportWhisperModal extends Modal {
 			text: this.meetingLabelSelection.label.displayName,
 			cls: "aan-whisper-label-text",
 		});
+	}
+
+	private async openTrimModal() {
+		if (this.selectedFiles.length !== 1) {
+			new Notice("Trim is only available for a single archive.");
+			return;
+		}
+		const file = this.selectedFiles[0];
+		try {
+			if (this.trimButton) {
+				this.trimButton.disabled = true;
+				this.trimButton.textContent = "Loading…";
+			}
+			const buffer = await file.arrayBuffer();
+			const extracted = extractWhisperArchive(buffer);
+			const trimModal = new TrimWhisperModal(this.plugin, {
+				audioBuffer: extracted.audioBuffer,
+				audioExtension: extracted.audioExtension,
+				durationSec: extracted.durationSec,
+				fileName: file.name,
+				onConfirm: (trimResult: TrimResult) => {
+					this.importWithTrim(buffer, file.name, trimResult);
+				},
+			});
+			trimModal.open();
+		} catch (error) {
+			console.error("Audio Notes: failed to open trim modal", error);
+			new Notice(
+				`Failed to load archive for trimming: ${(error as Error)?.message ?? error}`
+			);
+		} finally {
+			if (this.trimButton) {
+				this.trimButton.disabled = false;
+				this.trimButton.textContent = "Trim & Import";
+			}
+		}
+	}
+
+	private async importWithTrim(
+		archiveBuffer: ArrayBuffer,
+		fileName: string,
+		trimResult: TrimResult
+	) {
+		try {
+			this.importButton?.setAttribute("disabled", "true");
+			if (this.trimButton) this.trimButton.disabled = true;
+			if (this.importButton) {
+				this.importButton.textContent = "Importing…";
+			}
+			const overrideTitle = this.noteTitle?.trim() || undefined;
+			const result = await importWhisperArchive(
+				this.plugin,
+				archiveBuffer,
+				fileName,
+				{
+					audioFolder: this.plugin.settings.whisperAudioFolder,
+					transcriptFolder:
+						this.plugin.settings.whisperTranscriptFolder,
+					useDateFolders: this.useDateFolders,
+					createNote: this.createNote,
+					noteFolder: this.plugin.settings.whisperNoteFolder,
+					noteTitle: overrideTitle,
+					trimOptions: {
+						startSec: trimResult.trimRange.startSec,
+						endSec: trimResult.trimRange.endSec,
+						trimmedAudioBuffer: trimResult.trimmedAudioBuffer,
+					},
+				}
+			);
+			await this.applyMeetingLabel(result.notePath);
+			notifyWhisperImportSuccess(result);
+			void this.openImportedNote(result);
+			this.close();
+		} catch (error) {
+			if (error instanceof WhisperDuplicateError) {
+				new Notice(
+					`Skipped: already imported (${error.existingTranscriptPath ?? "duplicate transcript"}).`,
+					6000
+				);
+			} else {
+				console.error("Audio Notes: trimmed import failed", error);
+				new Notice(
+					`Failed to import trimmed archive: ${(error as Error)?.message ?? error}`
+				);
+			}
+			this.importButton?.removeAttribute("disabled");
+			if (this.trimButton) this.trimButton.disabled = false;
+			if (this.importButton) {
+				this.importButton.textContent = "Import";
+			}
+		}
 	}
 
 	private async importFiles() {
