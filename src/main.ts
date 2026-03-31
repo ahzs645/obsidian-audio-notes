@@ -15,6 +15,7 @@ import { createAudioPlayer } from "./audio/AudioPlayerFactory";
 import type { AudioPlayerEnvironment } from "./audio/AudioPlayerFactory";
 import { registerAudioNoteCommands } from "./commands/registerCommands";
 import { AudioNoteService } from "./services/AudioNoteService";
+import { MeetingAiService } from "./services/MeetingAiService";
 import { secondsToTimeString, getUniqueId } from "./utils";
 import { ensureFolderExists, normalizeFolderPath } from "./AudioNotesUtils";
 import {
@@ -60,6 +61,7 @@ export default class AutomaticAudioNotes extends Plugin {
 	settings: AudioNotesSettings;
 	transcriptDatastore: TranscriptsCache;
 	audioNoteService: AudioNoteService;
+	meetingAiService: MeetingAiService;
 	knownCurrentTimes: Map<string, number> = new Map();
 	knownAudioPlayers: AudioElementCache = new AudioElementCache(30);
 	currentlyPlayingAudioFakeUuid: string | null = null;
@@ -146,6 +148,11 @@ export default class AutomaticAudioNotes extends Plugin {
 			loadedData["_scriberrBaseUrl"],
 			loadedData["_scriberrApiKey"],
 			loadedData["_scriberrProfileName"],
+			loadedData["_meetingAiProvider"],
+			loadedData["_meetingAiClaudeBinaryPath"],
+			loadedData["_meetingAiClaudeModel"],
+			loadedData["_meetingAiClaudeEffort"],
+			loadedData["_meetingAiCustomInstructions"],
 				loadedData["_storeAttachmentsWithMeeting"],
 				loadedData["_whisperAudioFolder"],
 				loadedData["_whisperTranscriptFolder"],
@@ -276,6 +283,15 @@ export default class AutomaticAudioNotes extends Plugin {
 			data["_whisperAutoImportInbox"] =
 				this.settings.whisperAutoImportInbox;
 			data["_calendarTagColors"] = this.settings.calendarTagColors;
+			data["_meetingAiProvider"] = this.settings.meetingAiProvider;
+			data["_meetingAiClaudeBinaryPath"] =
+				this.settings.meetingAiClaudeBinaryPath;
+			data["_meetingAiClaudeModel"] =
+				this.settings.meetingAiClaudeModel;
+			data["_meetingAiClaudeEffort"] =
+				this.settings.meetingAiClaudeEffort;
+			data["_meetingAiCustomInstructions"] =
+				this.settings.meetingAiCustomInstructions;
 			data["_meetingTemplateEnabled"] =
 				this.settings.meetingTemplateEnabled;
 			data["_periodicDailyNoteEnabled"] =
@@ -300,6 +316,7 @@ export default class AutomaticAudioNotes extends Plugin {
 	async onload() {
 		// Load Settings
 		await this.loadSettings();
+		this.meetingAiService = new MeetingAiService(this);
 		this.addSettingTab(new AudioNotesSettingsTab(this.app, this));
 		this.registerView(AUDIO_NOTES_CALENDAR_VIEW, (leaf) => new MeetingCalendarView(leaf, this));
 		this.registerView(AUDIO_NOTES_TRANSCRIPT_VIEW, (leaf) => new TranscriptSidebarView(leaf, this));

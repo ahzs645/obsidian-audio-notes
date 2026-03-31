@@ -60,9 +60,11 @@ export class TranscriptSidebarView extends ItemView {
 	private isUploadingMeetingAudio = false;
 	private isUploadingTranscript = false;
 	private isTranscribingMeeting = false;
+	private isGeneratingMeetingAi = false;
 	private isDeletingMeeting = false;
 	private currentAudioPath: string | null = null;
 	private currentHasAudioReference = false;
+	private currentTranscriptText = "";
 	private readonly meetingFiles: MeetingFileService;
 	private readonly attachments: AttachmentManager;
 	private readonly dashboardController: DashboardController;
@@ -178,6 +180,12 @@ export class TranscriptSidebarView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		this.renderBase();
+		// @ts-ignore custom workspace signal
+		this.registerEvent(
+			(this.app.workspace as any).on("audio-notes:settings-updated", () => {
+				this.updateAiProps();
+			})
+		);
 		if (this.currentFilePath) {
 			await this.loadFileByPath(this.currentFilePath);
 		} else {
@@ -422,6 +430,10 @@ export class TranscriptSidebarView extends ItemView {
 				canTranscribeScriberr:
 					this.transcriptionService.canUseScriberr() &&
 					Boolean(this.currentAudioPath),
+			canGenerateAiNotes: this.plugin.meetingAiService.canGenerateNotes(
+				this.currentTranscriptText
+			),
+			isGeneratingAiNotes: this.isGeneratingMeetingAi,
 			hasTranscript: Boolean(this.currentTranscriptPath),
 			onUploadMeetingAudio: (files: File[]) =>
 				this.handleMeetingAudioUpload(files),
@@ -429,16 +441,19 @@ export class TranscriptSidebarView extends ItemView {
 				this.handleTranscriptFileUpload(files),
 			onTranscribeMeeting: (provider: "deepgram" | "scriberr") =>
 				this.handleTranscriptionRequest(provider),
+			onGenerateAiNotes: () => this.handleGenerateMeetingAiNotes(),
 		});
 
 		if (this.currentTranscriptPath) {
 			await this.loadTranscript(this.currentTranscriptPath);
 		} else {
+			this.currentTranscriptText = "";
 			setTranscriptProps({
 				segments: [],
 				transcriptText: "",
 				metadataDuration: null,
 			});
+			this.updateAiProps();
 		}
 	}
 
@@ -449,11 +464,13 @@ export class TranscriptSidebarView extends ItemView {
 					path
 				);
 			if (!transcript) {
-			this.transcriptComponent?.$set({
-				segments: [],
-				transcriptText: "",
-				metadataDuration: null,
+				this.currentTranscriptText = "";
+				this.transcriptComponent?.$set({
+					segments: [],
+					transcriptText: "",
+					metadataDuration: null,
 				});
+				this.updateAiProps();
 				return;
 			}
 			const segments =
@@ -466,11 +483,13 @@ export class TranscriptSidebarView extends ItemView {
 							)
 					  )
 					: null;
+			this.currentTranscriptText = transcript.getEntireTranscript();
 			this.transcriptComponent?.$set({
 				segments,
-				transcriptText: transcript.getEntireTranscript(),
+				transcriptText: this.currentTranscriptText,
 				metadataDuration: duration,
 			});
+			this.updateAiProps();
 		} catch (error) {
 			console.error(error);
 			new Notice("Could not load transcript.", 4000);
@@ -517,15 +536,18 @@ export class TranscriptSidebarView extends ItemView {
 				onDeleteAttachment: (path: string) =>
 					this.deleteAttachment(path),
 				speakerLabelOverrides: this.speakerLabelOverrides,
-					onRenameSpeaker: async (
-						speakerKey: string,
-						newLabel: string
-					) => {
-						await this.speakerLabelManager.renameSpeaker(
-							speakerKey,
-							newLabel
-						);
-					},
+				canGenerateAiNotes: false,
+				isGeneratingAiNotes: false,
+				onGenerateAiNotes: async () => Promise.resolve(),
+				onRenameSpeaker: async (
+					speakerKey: string,
+					newLabel: string
+				) => {
+					await this.speakerLabelManager.renameSpeaker(
+						speakerKey,
+						newLabel
+					);
+				},
 			},
 		});
 
@@ -596,6 +618,7 @@ export class TranscriptSidebarView extends ItemView {
 		this.currentFilePath = null;
 		this.currentTranscriptPath = null;
 		this.currentAudioPath = null;
+		this.currentTranscriptText = "";
 		this.currentMeetingLabel = undefined;
 		this.updateLabelHeader();
 		this.resetAttachments();
@@ -612,6 +635,7 @@ export class TranscriptSidebarView extends ItemView {
 		this.attachments.reset();
 		this.attachments.setMeetingFilePath(null);
 		this.currentHasAudioReference = false;
+		this.currentTranscriptText = "";
 		this.transcriptComponent?.$set({
 			attachments: [],
 			attachmentsEnabled: false,
@@ -891,5 +915,45 @@ export class TranscriptSidebarView extends ItemView {
 			this.isTranscribingMeeting = false;
 			this.transcriptComponent?.$set({ isTranscribing: false });
 		}
-}
+	}
+
+	private async handleGenerateMeetingAiNotes(): Promise<void> {
+		if (!this.currentMeetingFile) {
+			new Notice("Open a meeting note before generating AI notes.", 4000);
+			return;
+		}
+		if (!this.currentTranscriptText.trim()) {
+			new Notice("Add or generate a transcript first.", 4000);
+			return;
+		}
+
+		this.isGeneratingMeetingAi = true;
+		this.updateAiProps();
+		try {
+			await this.plugin.meetingAiService.generateMeetingNotes(
+				this.currentMeetingFile,
+				this.currentTranscriptText
+			);
+			new Notice("AI notes added to the meeting note.", 4000);
+		} catch (error) {
+			console.error("Audio Notes: Could not generate AI notes.", error);
+			const message =
+				error instanceof Error && error.message.trim().length
+					? error.message.trim()
+					: "Could not generate AI notes.";
+			new Notice(message, 7000);
+		} finally {
+			this.isGeneratingMeetingAi = false;
+			this.updateAiProps();
+		}
+	}
+
+	private updateAiProps(): void {
+		this.transcriptComponent?.$set({
+			canGenerateAiNotes: this.plugin.meetingAiService.canGenerateNotes(
+				this.currentTranscriptText
+			),
+			isGeneratingAiNotes: this.isGeneratingMeetingAi,
+		});
+	}
 }

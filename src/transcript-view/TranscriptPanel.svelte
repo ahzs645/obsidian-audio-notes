@@ -29,6 +29,10 @@ export let showTranscriptionCta = false;
 export let canTranscribeDeepgram = false;
 export let canTranscribeScriberr = false;
 export let requestTranscription: (provider: "deepgram" | "scriberr") => void = () => {};
+export let canGenerateAiNotes = false;
+export let isGeneratingAiNotes = false;
+export let onGenerateAiNotes: () => Promise<void> = async () =>
+	Promise.resolve();
 export let formatDurationLabel: (duration: number | null) => string = () => "";
 export let toggleSearch: () => void = () => {};
 export let searchMatches: TranscriptSearchMatch[] = [];
@@ -306,6 +310,16 @@ onMount(() => {
 					>
 						Copy all
 					</button>
+					{#if canGenerateAiNotes || isGeneratingAiNotes}
+						<button
+							class="aan-transcript-btn primary"
+							type="button"
+							on:click={() => void onGenerateAiNotes()}
+							disabled={!canGenerateAiNotes || isGeneratingAiNotes}
+						>
+							{isGeneratingAiNotes ? "Generating AI…" : "Generate AI notes"}
+						</button>
+					{/if}
 				</div>
 			</header>
 

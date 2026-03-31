@@ -28,6 +28,9 @@ export class ApiKeyInfo {
 	) {}
 }
 
+export type MeetingAiProviderKind = "disabled" | "claude";
+export type MeetingAiClaudeEffort = "low" | "medium" | "high" | "max";
+
 export class AudioNotesSettingsTab extends PluginSettingTab {
 	plugin: AutomaticAudioNotes;
 
@@ -319,6 +322,131 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.scriberrProfileName = value;
 						await this.plugin.saveSettings();
+					})
+			);
+
+		containerEl.createEl("h2", {
+			text: "AI meeting notes",
+		});
+		new Setting(containerEl)
+			.setName("Local AI provider")
+			.setDesc(
+				"Desktop only. Generate meeting summaries from the transcript using a locally authenticated agent CLI."
+			)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("disabled", "Disabled")
+					.addOption("claude", "Claude Code")
+					.setValue(this.plugin.settings.meetingAiProvider)
+					.onChange(async (value) => {
+						this.plugin.settings.meetingAiProvider =
+							(value as MeetingAiProviderKind) || "disabled";
+						await this.plugin.saveSettings();
+						this.display();
+					})
+			);
+
+		const aiDisabled = this.plugin.settings.meetingAiProvider === "disabled";
+		const claudeDisabled =
+			aiDisabled || this.plugin.settings.meetingAiProvider !== "claude";
+
+		new Setting(containerEl)
+			.setName("Claude binary path")
+			.setDesc("Path to the Claude Code executable. Defaults to `claude`.")
+			.setDisabled(claudeDisabled)
+			.addText((text) =>
+				text
+					.setPlaceholder("claude")
+					.setValue(this.plugin.settings.meetingAiClaudeBinaryPath)
+					.setDisabled(claudeDisabled)
+					.onChange(async (value) => {
+						this.plugin.settings.meetingAiClaudeBinaryPath = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Claude model")
+			.setDesc(
+				"Optional. Leave blank to use your Claude Code default model."
+			)
+			.setDisabled(claudeDisabled)
+			.addText((text) =>
+				text
+					.setPlaceholder("claude-sonnet-4-6")
+					.setValue(this.plugin.settings.meetingAiClaudeModel)
+					.setDisabled(claudeDisabled)
+					.onChange(async (value) => {
+						this.plugin.settings.meetingAiClaudeModel = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Claude effort")
+			.setDesc("Controls how much reasoning Claude Code uses for the note draft.")
+			.setDisabled(claudeDisabled)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("low", "Low")
+					.addOption("medium", "Medium")
+					.addOption("high", "High")
+					.addOption("max", "Max")
+					.setValue(this.plugin.settings.meetingAiClaudeEffort)
+					.setDisabled(claudeDisabled)
+					.onChange(async (value) => {
+						this.plugin.settings.meetingAiClaudeEffort =
+							(value as MeetingAiClaudeEffort) || "medium";
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("AI instructions")
+			.setDesc(
+				"Optional global instructions appended to every AI meeting-notes prompt."
+			)
+			.setDisabled(aiDisabled)
+			.addTextArea((text) => {
+				text
+					.setPlaceholder(
+						"Example: prefer concise bullets, highlight risks, and group action items by owner when explicit."
+					)
+					.setValue(this.plugin.settings.meetingAiCustomInstructions)
+					.setDisabled(aiDisabled)
+					.onChange(async (value) => {
+						this.plugin.settings.meetingAiCustomInstructions = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.rows = 6;
+				text.inputEl.style.width = "100%";
+			});
+
+		new Setting(containerEl)
+			.setName("Check Claude connection")
+			.setDesc(
+				"Verifies that Claude Code is installed and authenticated on this machine."
+			)
+			.setDisabled(claudeDisabled)
+			.addButton((button) =>
+				button
+					.setButtonText("Check")
+					.setDisabled(claudeDisabled)
+					.onClick(async () => {
+						button.setDisabled(true);
+						try {
+							const health =
+								await this.plugin.meetingAiService.checkHealth();
+							new Notice(health.message, health.available ? 4000 : 7000);
+						} catch (error) {
+							console.error(
+								"Audio Notes: AI provider health check failed",
+								error
+							);
+							new Notice("Could not verify Claude Code.", 7000);
+						} finally {
+							button.setDisabled(claudeDisabled);
+						}
 					})
 			);
 
@@ -836,6 +964,11 @@ export interface StringifiedAudioNotesSettings {
 	scriberrBaseUrl: string;
 	scriberrApiKey: string;
 	scriberrProfileName: string;
+	meetingAiProvider: MeetingAiProviderKind;
+	meetingAiClaudeBinaryPath: string;
+	meetingAiClaudeModel: string;
+	meetingAiClaudeEffort: MeetingAiClaudeEffort;
+	meetingAiCustomInstructions: string;
 	storeAttachmentsWithMeeting: boolean;
 	whisperAudioFolder: string;
 	whisperTranscriptFolder: string;
@@ -869,6 +1002,11 @@ const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	scriberrBaseUrl: "https://localhost:8080/api/v1",
 	scriberrApiKey: "",
 	scriberrProfileName: "",
+	meetingAiProvider: "disabled",
+	meetingAiClaudeBinaryPath: "claude",
+	meetingAiClaudeModel: "",
+	meetingAiClaudeEffort: "medium",
+	meetingAiCustomInstructions: "",
 	storeAttachmentsWithMeeting: false,
 	whisperAudioFolder: "MediaArchive/audio",
 	whisperTranscriptFolder: "transcripts",
@@ -905,6 +1043,11 @@ export class AudioNotesSettings {
 		private _scriberrBaseUrl: string,
 		private _scriberrApiKey: string,
 		private _scriberrProfileName: string,
+		private _meetingAiProvider: MeetingAiProviderKind,
+		private _meetingAiClaudeBinaryPath: string,
+		private _meetingAiClaudeModel: string,
+		private _meetingAiClaudeEffort: MeetingAiClaudeEffort,
+		private _meetingAiCustomInstructions: string,
 			private _storeAttachmentsWithMeeting: boolean,
 			private _whisperAudioFolder: string,
 			private _whisperTranscriptFolder: string,
@@ -939,6 +1082,11 @@ export class AudioNotesSettings {
 			DEFAULT_SETTINGS.scriberrBaseUrl,
 			DEFAULT_SETTINGS.scriberrApiKey,
 			DEFAULT_SETTINGS.scriberrProfileName,
+			DEFAULT_SETTINGS.meetingAiProvider,
+			DEFAULT_SETTINGS.meetingAiClaudeBinaryPath,
+			DEFAULT_SETTINGS.meetingAiClaudeModel,
+			DEFAULT_SETTINGS.meetingAiClaudeEffort,
+			DEFAULT_SETTINGS.meetingAiCustomInstructions,
 				DEFAULT_SETTINGS.storeAttachmentsWithMeeting,
 				DEFAULT_SETTINGS.whisperAudioFolder,
 				DEFAULT_SETTINGS.whisperTranscriptFolder,
@@ -1023,6 +1171,38 @@ export class AudioNotesSettings {
 			data.scriberrProfileName !== undefined
 		) {
 			settings.scriberrProfileName = data.scriberrProfileName!;
+		}
+		if (
+			data.meetingAiProvider !== null &&
+			data.meetingAiProvider !== undefined
+		) {
+			settings.meetingAiProvider = data.meetingAiProvider!;
+		}
+		if (
+			data.meetingAiClaudeBinaryPath !== null &&
+			data.meetingAiClaudeBinaryPath !== undefined
+		) {
+			settings.meetingAiClaudeBinaryPath =
+				data.meetingAiClaudeBinaryPath!;
+		}
+		if (
+			data.meetingAiClaudeModel !== null &&
+			data.meetingAiClaudeModel !== undefined
+		) {
+			settings.meetingAiClaudeModel = data.meetingAiClaudeModel!;
+		}
+		if (
+			data.meetingAiClaudeEffort !== null &&
+			data.meetingAiClaudeEffort !== undefined
+		) {
+			settings.meetingAiClaudeEffort = data.meetingAiClaudeEffort!;
+		}
+		if (
+			data.meetingAiCustomInstructions !== null &&
+			data.meetingAiCustomInstructions !== undefined
+		) {
+			settings.meetingAiCustomInstructions =
+				data.meetingAiCustomInstructions!;
 		}
 		if (
 			data.storeAttachmentsWithMeeting !== null &&
@@ -1243,6 +1423,64 @@ export class AudioNotesSettings {
 
 	set scriberrProfileName(value: string) {
 		this._scriberrProfileName = value?.trim() || "";
+	}
+
+	get meetingAiProvider(): MeetingAiProviderKind {
+		return this._meetingAiProvider || DEFAULT_SETTINGS.meetingAiProvider;
+	}
+
+	set meetingAiProvider(value: MeetingAiProviderKind) {
+		this._meetingAiProvider =
+			value === "claude" ? "claude" : DEFAULT_SETTINGS.meetingAiProvider;
+	}
+
+	get meetingAiClaudeBinaryPath(): string {
+		return (
+			this._meetingAiClaudeBinaryPath ||
+			DEFAULT_SETTINGS.meetingAiClaudeBinaryPath
+		);
+	}
+
+	set meetingAiClaudeBinaryPath(value: string) {
+		this._meetingAiClaudeBinaryPath =
+			value?.trim() || DEFAULT_SETTINGS.meetingAiClaudeBinaryPath;
+	}
+
+	get meetingAiClaudeModel(): string {
+		return this._meetingAiClaudeModel || "";
+	}
+
+	set meetingAiClaudeModel(value: string) {
+		this._meetingAiClaudeModel = value?.trim() || "";
+	}
+
+	get meetingAiClaudeEffort(): MeetingAiClaudeEffort {
+		return (
+			this._meetingAiClaudeEffort ||
+			DEFAULT_SETTINGS.meetingAiClaudeEffort
+		);
+	}
+
+	set meetingAiClaudeEffort(value: MeetingAiClaudeEffort) {
+		switch (value) {
+			case "low":
+			case "medium":
+			case "high":
+			case "max":
+				this._meetingAiClaudeEffort = value;
+				return;
+			default:
+				this._meetingAiClaudeEffort =
+					DEFAULT_SETTINGS.meetingAiClaudeEffort;
+		}
+	}
+
+	get meetingAiCustomInstructions(): string {
+		return this._meetingAiCustomInstructions || "";
+	}
+
+	set meetingAiCustomInstructions(value: string) {
+		this._meetingAiCustomInstructions = value?.trim() || "";
 	}
 
 	get storeAttachmentsWithMeeting(): boolean {

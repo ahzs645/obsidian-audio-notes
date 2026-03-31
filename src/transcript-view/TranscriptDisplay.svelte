@@ -40,9 +40,13 @@ export let onUploadTranscript: (files: File[]) => Promise<void> = async () =>
 export let canTranscribeDeepgram = false;
 export let canTranscribeScriberr = false;
 export let hasTranscript = false;
+export let canGenerateAiNotes = false;
+export let isGeneratingAiNotes = false;
 export let onTranscribeMeeting: (
 	provider: "deepgram" | "scriberr"
 ) => Promise<void> = async () => Promise.resolve();
+export let onGenerateAiNotes: () => Promise<void> = async () =>
+	Promise.resolve();
 export let speakerLabelOverrides: Record<string, string> = {};
 export let onRenameSpeaker: (
 	speakerKey: string,
@@ -662,6 +666,9 @@ let transcriptUploadInput: HTMLInputElement | null = null;
 			{canTranscribeDeepgram}
 			{canTranscribeScriberr}
 			{requestTranscription}
+			{canGenerateAiNotes}
+			{isGeneratingAiNotes}
+			{onGenerateAiNotes}
 			{formatDurationLabel}
 			{toggleSearch}
 			{searchMatches}
