@@ -155,6 +155,12 @@
 	color: var(--text-muted);
 }
 
+.aan-upload-audio-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
 .aan-attachments-header {
 	display: flex;
 	justify-content: space-between;

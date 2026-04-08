@@ -61,6 +61,9 @@ export let onRenameSpeaker: (
 	key: string,
 	label: string
 ) => Promise<void> = async () => Promise.resolve();
+export let showAudioUploadButton = false;
+export let triggerAudioPicker: () => void = () => {};
+export let audioUploadInProgress = false;
 
 $: canTranscribe = canTranscribeDeepgram || canTranscribeScriberr;
 
@@ -243,6 +246,32 @@ onMount(() => {
 					</p>
 				</div>
 				<div class="audio-note-transcript-actions">
+					{#if showAudioUploadButton}
+						<button
+							class="aan-transcript-btn aan-upload-audio-btn"
+							type="button"
+							on:click={triggerAudioPicker}
+							disabled={audioUploadInProgress}
+							title="Upload meeting audio"
+						>
+							<svg
+								aria-hidden="true"
+								viewBox="0 0 24 24"
+								focusable="false"
+								class="aan-transcript-icon"
+							>
+								<path
+									d="M12 3v12M12 3l-4 4M12 3l4 4M4 15v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								/>
+							</svg>
+							{audioUploadInProgress ? "Uploading…" : "Add audio"}
+						</button>
+					{/if}
 					<button
 						class="aan-transcript-btn icon-only collapse-toggle"
 						type="button"

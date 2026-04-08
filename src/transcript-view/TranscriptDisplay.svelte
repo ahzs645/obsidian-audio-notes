@@ -630,7 +630,7 @@ let transcriptUploadInput: HTMLInputElement | null = null;
 		{onOpenAttachment}
 		{onDeleteAttachment}
 	/>
-	{#if needsAudioUpload}
+	{#if needsAudioUpload && !hasTranscript}
 		<AudioUploadPanel
 			{audioUploadInProgress}
 			{triggerAudioPicker}
@@ -642,7 +642,6 @@ let transcriptUploadInput: HTMLInputElement | null = null;
 			{handleTranscriptFileInput}
 			{onUploadTranscript}
 			bind:transcriptUploadInput={transcriptUploadInput}
-			{hasTranscript}
 		/>
 	{/if}
 	{#if showTranscriptPanel}
@@ -692,6 +691,18 @@ let transcriptUploadInput: HTMLInputElement | null = null;
 			{getSpeakerColorClass}
 			{speakerLabelOverrides}
 			{onRenameSpeaker}
+			showAudioUploadButton={needsAudioUpload && hasTranscript}
+			{triggerAudioPicker}
+			{audioUploadInProgress}
+		/>
+	{/if}
+	{#if needsAudioUpload && hasTranscript}
+		<input
+			type="file"
+			accept="audio/*"
+			class="aan-attachments-input"
+			bind:this={audioUploadInput}
+			on:change={handleAudioFileInput}
 		/>
 	{/if}
 </div>
