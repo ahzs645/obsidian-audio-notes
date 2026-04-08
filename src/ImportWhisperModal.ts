@@ -8,6 +8,7 @@ import {
 import type AutomaticAudioNotes from "./main";
 import {
 	extractWhisperArchive,
+	importVttFile,
 	importWhisperArchive,
 	notifyWhisperImportSuccess,
 	WhisperDuplicateError,
@@ -84,7 +85,7 @@ export class ImportWhisperModal extends Modal {
 		this.fileInput = fileSetting.controlEl.createEl("input", {
 			type: "file",
 		});
-		this.fileInput.accept = ".whisper";
+		this.fileInput.accept = ".whisper,.vtt";
 		this.fileInput.multiple = true;
 		this.fileInput.addEventListener("change", (evt: Event) => {
 			const target = evt.target as HTMLInputElement;
@@ -219,7 +220,7 @@ export class ImportWhisperModal extends Modal {
 		this.updateSelectionUi();
 		if (rejectedCount) {
 			new Notice(
-				`${rejectedCount} file${rejectedCount === 1 ? "" : "s"} skipped. Only .whisper archives are supported.`,
+				`${rejectedCount} file${rejectedCount === 1 ? "" : "s"} skipped. Only .whisper archives and .vtt files are supported.`,
 				5000
 			);
 		}
@@ -228,7 +229,7 @@ export class ImportWhisperModal extends Modal {
 	private addSelectedFiles(files: File[]) {
 		const { accepted, rejectedCount } = this.filterWhisperFiles(files);
 		if (!accepted.length && rejectedCount) {
-			new Notice("Only .whisper archives are supported.", 5000);
+			new Notice("Only .whisper archives and .vtt files are supported.", 5000);
 			return;
 		}
 		const merged = new Map<string, File>();
@@ -243,7 +244,7 @@ export class ImportWhisperModal extends Modal {
 		this.updateSelectionUi();
 		if (rejectedCount) {
 			new Notice(
-				`${rejectedCount} file${rejectedCount === 1 ? "" : "s"} skipped. Only .whisper archives are supported.`,
+				`${rejectedCount} file${rejectedCount === 1 ? "" : "s"} skipped. Only .whisper archives and .vtt files are supported.`,
 				5000
 			);
 		}
@@ -252,7 +253,7 @@ export class ImportWhisperModal extends Modal {
 	private syncNoteTitle() {
 		if (this.selectedFiles.length === 1) {
 			this.noteTitle =
-				this.selectedFiles[0].name.replace(/\.whisper$/i, "") || "";
+				this.selectedFiles[0].name.replace(/\.(whisper|vtt)$/i, "") || "";
 			this.noteTitleInput?.setValue(this.noteTitle);
 			return;
 		}
@@ -287,8 +288,8 @@ export class ImportWhisperModal extends Modal {
 		}
 		this.dropzoneTextEl.setText(
 			this.selectedFiles.length
-				? "Drop more .whisper files here or click to browse"
-				: "Drop .whisper files here or click to browse"
+				? "Drop more .whisper or .vtt files here or click to browse"
+				: "Drop .whisper or .vtt files here or click to browse"
 		);
 		this.dropzoneEl.classList.toggle(
 			"has-selection",
@@ -300,8 +301,10 @@ export class ImportWhisperModal extends Modal {
 		accepted: File[];
 		rejectedCount: number;
 	} {
-		const accepted = files.filter((file) =>
-			file.name.toLowerCase().endsWith(".whisper")
+		const accepted = files.filter(
+			(file) =>
+				file.name.toLowerCase().endsWith(".whisper") ||
+				file.name.toLowerCase().endsWith(".vtt")
 		);
 		return {
 			accepted,
@@ -498,7 +501,7 @@ export class ImportWhisperModal extends Modal {
 
 	private async importFiles() {
 		if (!this.selectedFiles.length) {
-			new Notice("Select at least one .whisper file first.");
+			new Notice("Select at least one .whisper or .vtt file first.");
 			return;
 		}
 		const total = this.selectedFiles.length;
@@ -517,24 +520,36 @@ export class ImportWhisperModal extends Modal {
 					this.importButton.textContent = `Importing ${index + 1}/${total}…`;
 				}
 				try {
-					const buffer = await file.arrayBuffer();
 					const overrideTitle =
 						total === 1
 							? this.noteTitle?.trim() || undefined
 							: undefined;
-					const result = await importWhisperArchive(
-						this.plugin,
-						buffer,
-						file.name,
-						{
-							audioFolder: this.plugin.settings.whisperAudioFolder,
-							transcriptFolder: this.plugin.settings.whisperTranscriptFolder,
-							useDateFolders: this.useDateFolders,
-							createNote: this.createNote,
-							noteFolder: this.plugin.settings.whisperNoteFolder,
-							noteTitle: overrideTitle,
-						}
-					);
+					const importOptions = {
+						audioFolder: this.plugin.settings.whisperAudioFolder,
+						transcriptFolder: this.plugin.settings.whisperTranscriptFolder,
+						useDateFolders: this.useDateFolders,
+						createNote: this.createNote,
+						noteFolder: this.plugin.settings.whisperNoteFolder,
+						noteTitle: overrideTitle,
+					};
+					let result: WhisperImportResult;
+					if (file.name.toLowerCase().endsWith(".vtt")) {
+						const vttContent = await file.text();
+						result = await importVttFile(
+							this.plugin,
+							vttContent,
+							file.name,
+							importOptions
+						);
+					} else {
+						const buffer = await file.arrayBuffer();
+						result = await importWhisperArchive(
+							this.plugin,
+							buffer,
+							file.name,
+							importOptions
+						);
+					}
 					results.push(result);
 					await this.applyMeetingLabel(result.notePath);
 				} catch (error) {
@@ -554,7 +569,7 @@ export class ImportWhisperModal extends Modal {
 			console.error("Audio Notes: Whisper import failed", error);
 			new Notice(
 				`Failed to import ${
-					currentFileName || "Whisper archive"
+					currentFileName || "file"
 				}: ${(error as Error)?.message ?? error}`
 			);
 			this.importButton?.removeAttribute("disabled");

@@ -6,6 +6,7 @@ import type AutomaticAudioNotes from "./main";
 import {
 	generateMeetingNoteContent,
 } from "./MeetingNoteTemplate";
+import { parseTranscript } from "./Transcript";
 import {
 	deriveGoogleDriveUrlWithRetries,
 	getAvailableFilesystemPath,
@@ -1171,4 +1172,185 @@ async function maybeCreateNote(
 	});
 	await plugin.app.vault.adapter.write(notePath, content);
 	return notePath;
+}
+
+const VTT_MONTHS: Record<string, number> = {
+	january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+	july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
+};
+const VTT_DAYS = "Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday";
+const VTT_MONTH_NAMES = "January|February|March|April|May|June|July|August|September|October|November|December";
+const VTT_FILENAME_PATTERN = new RegExp(
+	`^(.*?)\\s+-\\s+(?:${VTT_DAYS}),\\s+(${VTT_MONTH_NAMES})\\s+(\\d{1,2}),\\s+(\\d{4})\\s+(\\d{1,2})-(\\d{2})\\s+(AM|PM)\\s+-\\s+(\\d{1,2})-(\\d{2})\\s+(AM|PM)$`,
+	"i"
+);
+
+export function parseVttFilenameDate(filename: string): {
+	title: string;
+	startMs: number | undefined;
+	endMs: number | undefined;
+} {
+	const withoutExt = filename.replace(/\.vtt$/i, "");
+	const match = withoutExt.match(VTT_FILENAME_PATTERN);
+	if (!match) {
+		return { title: withoutExt.trim(), startMs: undefined, endMs: undefined };
+	}
+	const [, rawTitle, monthName, dayStr, yearStr, startH, startM, startMeridiem, endH, endM, endMeridiem] = match;
+	const month = VTT_MONTHS[monthName.toLowerCase()];
+	const day = parseInt(dayStr, 10);
+	const year = parseInt(yearStr, 10);
+	let startHour = parseInt(startH, 10);
+	const startMinute = parseInt(startM, 10);
+	if (startMeridiem.toUpperCase() === "PM" && startHour !== 12) startHour += 12;
+	if (startMeridiem.toUpperCase() === "AM" && startHour === 12) startHour = 0;
+	let endHour = parseInt(endH, 10);
+	const endMinute = parseInt(endM, 10);
+	if (endMeridiem.toUpperCase() === "PM" && endHour !== 12) endHour += 12;
+	if (endMeridiem.toUpperCase() === "AM" && endHour === 12) endHour = 0;
+	const startDate = new Date(year, month, day, startHour, startMinute, 0, 0);
+	let endDate = new Date(year, month, day, endHour, endMinute, 0, 0);
+	if (endDate <= startDate) {
+		endDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000);
+	}
+	return {
+		title: rawTitle.trim(),
+		startMs: startDate.getTime(),
+		endMs: endDate.getTime(),
+	};
+}
+
+export async function importVttFile(
+	plugin: AutomaticAudioNotes,
+	vttContent: string,
+	originalName: string,
+	overrideOptions?: Partial<WhisperImportOptions>
+): Promise<WhisperImportResult> {
+	const options = {
+		...DEFAULT_OPTIONS(plugin),
+		...overrideOptions,
+	};
+
+	const transcript = parseTranscript(vttContent);
+	if (!transcript.segments.length) {
+		throw new Error("No cues found in VTT file.");
+	}
+
+	const segments: ProcessedSegment[] = transcript.segments.map((seg) => ({
+		id: seg.id,
+		start: seg.start,
+		end: seg.end,
+		text: seg.text,
+		speakerId: seg.speakerId ?? null,
+		speakerName: seg.speakerName ?? seg.speakerLabel ?? null,
+		words: [],
+	}));
+
+	const { title: parsedTitle, startMs, endMs } = parseVttFilenameDate(originalName);
+	const durationFromSegments =
+		segments.reduce((max, seg) => Math.max(max, seg.end), 0) * 1000;
+	const meetingDurationMs =
+		startMs !== undefined && endMs !== undefined
+			? endMs - startMs
+			: durationFromSegments;
+
+	// maybeCreateNote treats dateCreated as the meeting END time, so pass endMs.
+	const dateCreatedMs = endMs ?? Date.now();
+	const segmentsSha1 = buildSegmentsSha1(segments);
+
+	// Duplicate check by segments hash
+	const existingIndex = await getWhisperImportIndex(
+		plugin,
+		options.transcriptFolder,
+		originalName
+	);
+	const existingBySegments = existingIndex.bySegmentsSha1.get(segmentsSha1);
+	if (existingBySegments?.size) {
+		const existingPath = [...existingBySegments][0];
+		throw new WhisperDuplicateError(
+			`This VTT file appears to already be imported: ${existingPath}`,
+			existingPath
+		);
+	}
+
+	const baseName = slugify(
+		parsedTitle || originalName.replace(/\.vtt$/i, ""),
+		`vtt-${Date.now()}`
+	);
+
+	const subfolder = subfolderFromDate(
+		startMs ?? dateCreatedMs,
+		options.useDateFolders
+	);
+	const transcriptFolder = subfolder
+		? `${options.transcriptFolder}/${subfolder}`
+		: options.transcriptFolder;
+
+	await ensureFolderExists(plugin.app.vault, transcriptFolder);
+
+	const transcriptPath = await getAvailablePath(
+		plugin.app.vault,
+		`${transcriptFolder}/${baseName}.json`
+	);
+
+	const transcriptPayload = {
+		source: "whisper",
+		whisperFingerprint: null,
+		audioPath: null,
+		recordingArchive: null,
+		recordingDrivePath: null,
+		recordingUrl: null,
+		audioSha1: null,
+		segmentsSha1,
+		originalMediaFilename: parsedTitle || null,
+		originalWhisperFile: originalName,
+		model: "vtt-import",
+		createdAt: dateCreatedMs,
+		updatedAt: dateCreatedMs,
+		speakers: [],
+		segments,
+		durationMs: meetingDurationMs,
+	};
+
+	await plugin.app.vault.adapter.write(
+		transcriptPath,
+		JSON.stringify(transcriptPayload, null, 2)
+	);
+
+	const indexEntry = buildWhisperImportIndexEntry(
+		transcriptPath,
+		transcriptPayload,
+		originalName
+	);
+	if (indexEntry) {
+		await recordWhisperImportIndexEntry(
+			plugin,
+			options.transcriptFolder,
+			indexEntry
+		);
+	}
+
+	const metadata: WhisperMetadata = {
+		dateCreated: dateCreatedMs,
+		dateUpdated: dateCreatedMs,
+		originalMediaFilename: parsedTitle || undefined,
+	};
+
+	return {
+		audioPath: "",
+		transcriptPath,
+		segmentCount: segments.length,
+		notePath: await maybeCreateNote(
+			plugin,
+			options,
+			baseName,
+			metadata,
+			{},
+			transcriptPath,
+			meetingDurationMs
+		),
+		noteTitle:
+			options.noteTitle ||
+			parsedTitle ||
+			baseName.replace(/-/g, " "),
+	};
 }
