@@ -11,6 +11,7 @@
 	export let onUploadTranscript: (files: File[]) => Promise<void> = async () =>
 		Promise.resolve();
 	export let transcriptUploadInput: HTMLInputElement | null = null;
+	export let hasTranscript = false;
 
 	let audioDragActive = false;
 	let transcriptDragActive = false;
@@ -124,7 +125,9 @@
 
 <section class="aan-audio-upload-panel">
 	<p class="aan-audio-upload-title">
-		Add meeting audio to enable playback, or import an existing transcript to start without a recording.
+		{hasTranscript
+			? "Add meeting audio to enable playback."
+			: "Add meeting audio to enable playback, or import an existing transcript to start without a recording."}
 	</p>
 	<div class="aan-audio-upload-actions">
 		<button
@@ -143,6 +146,7 @@
 				{audioUploadInProgress ? "Uploading…" : "Click or drop an audio file here"}
 			</span>
 		</button>
+		{#if !hasTranscript}
 		<button
 			class="aan-audio-upload-target"
 			class:is-dragging={transcriptDragActive}
@@ -163,6 +167,7 @@
 					: "Click or drop transcript files here"}
 			</span>
 		</button>
+		{/if}
 	</div>
 	<input
 		type="file"

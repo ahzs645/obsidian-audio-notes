@@ -642,6 +642,7 @@ let transcriptUploadInput: HTMLInputElement | null = null;
 			{handleTranscriptFileInput}
 			{onUploadTranscript}
 			bind:transcriptUploadInput={transcriptUploadInput}
+			{hasTranscript}
 		/>
 	{/if}
 	{#if showTranscriptPanel}
