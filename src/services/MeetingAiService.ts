@@ -2,7 +2,7 @@ import { spawn } from "child_process";
 import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { Platform, TFile } from "obsidian";
+import { normalizePath, Platform, TFile } from "obsidian";
 import type {
 	AudioNotesSettings,
 	MeetingAiProviderKind,
@@ -314,8 +314,21 @@ export class MeetingAiService {
 			await this.plugin.app.fileManager.processFrontMatter(file, (fm) => {
 				fm.title = draft.title;
 			});
+			await this.renameMeetingFile(file, draft.title);
 		}
 		return draft;
+	}
+
+	private async renameMeetingFile(file: TFile, title: string): Promise<void> {
+		const nextPath = getUniqueMarkdownPath(
+			this.plugin,
+			file,
+			sanitizeMarkdownFileName(title)
+		);
+		if (!nextPath || nextPath === file.path) {
+			return;
+		}
+		await this.plugin.app.vault.rename(file, nextPath);
 	}
 
 	private resolveProvider(): MeetingAiProvider | null {
@@ -519,6 +532,45 @@ function upsertAiNotesSection(content: string, draft: MeetingAiDraft): string {
 
 function renderAiNotesBlock(draft: MeetingAiDraft): string {
 	return draft.markdownNotes || "_No meeting notes generated._";
+}
+
+function sanitizeMarkdownFileName(title: string): string {
+	return title
+		.replace(/[\\/:*?"<>|#^[\]]/g, " ")
+		.replace(/\s+/g, " ")
+		.trim()
+		.slice(0, 120)
+		.trim();
+}
+
+function getUniqueMarkdownPath(
+	plugin: AutomaticAudioNotes,
+	file: TFile,
+	fileName: string
+): string | null {
+	if (!fileName) {
+		return null;
+	}
+	const folderPath = file.path.includes("/")
+		? file.path.slice(0, file.path.lastIndexOf("/"))
+		: "";
+	const basePath = normalizePath(
+		folderPath ? `${folderPath}/${fileName}.md` : `${fileName}.md`
+	);
+	if (basePath === file.path || !plugin.app.vault.getAbstractFileByPath(basePath)) {
+		return basePath;
+	}
+	for (let index = 2; index < 100; index++) {
+		const candidate = normalizePath(
+			folderPath
+				? `${folderPath}/${fileName} ${index}.md`
+				: `${fileName} ${index}.md`
+		);
+		if (!plugin.app.vault.getAbstractFileByPath(candidate)) {
+			return candidate;
+		}
+	}
+	return null;
 }
 
 function findNextLevelTwoHeadingIndex(content: string, fromIndex: number): number {
