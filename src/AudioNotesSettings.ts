@@ -32,6 +32,22 @@ export type MeetingAiProviderKind = "disabled" | "claude" | "codex";
 export type MeetingAiClaudeEffort = "low" | "medium" | "high" | "max";
 export type MeetingAiCodexEffort = "low" | "medium" | "high" | "xhigh";
 
+const CUSTOM_AI_MODEL_VALUE = "__custom__";
+const CLAUDE_MODEL_OPTIONS = [
+	{ value: "", label: "Claude Code default" },
+	{ value: "claude-opus-4-6", label: "Claude Opus 4.6" },
+	{ value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+	{ value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
+];
+const CODEX_MODEL_OPTIONS = [
+	{ value: "gpt-5.4", label: "GPT-5.4" },
+	{ value: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
+	{ value: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
+	{ value: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" },
+	{ value: "gpt-5-codex", label: "GPT-5 Codex" },
+	{ value: "", label: "Codex CLI default" },
+];
+
 export class AudioNotesSettingsTab extends PluginSettingTab {
 	plugin: AutomaticAudioNotes;
 
@@ -369,22 +385,52 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					})
 			);
 
-		new Setting(containerEl)
-			.setName("Claude model")
-			.setDesc(
-				"Optional. Leave blank to use your Claude Code default model."
-			)
-			.setDisabled(claudeDisabled)
-			.addText((text) =>
-				text
-					.setPlaceholder("claude-sonnet-4-6")
-					.setValue(this.plugin.settings.meetingAiClaudeModel)
-					.setDisabled(claudeDisabled)
-					.onChange(async (value) => {
-						this.plugin.settings.meetingAiClaudeModel = value;
-						await this.plugin.saveSettings();
-					})
-			);
+			new Setting(containerEl)
+				.setName("Claude model")
+				.setDesc(
+					"Choose a common Claude model, or select Custom to type another model name."
+				)
+				.setDisabled(claudeDisabled)
+				.addDropdown((dropdown) => {
+					const current = this.plugin.settings.meetingAiClaudeModel;
+					for (const option of CLAUDE_MODEL_OPTIONS) {
+						dropdown.addOption(option.value, option.label);
+					}
+					dropdown
+						.addOption(CUSTOM_AI_MODEL_VALUE, "Custom...")
+						.setValue(getPresetModelValue(current, CLAUDE_MODEL_OPTIONS))
+						.setDisabled(claudeDisabled)
+						.onChange(async (value) => {
+							if (value === CUSTOM_AI_MODEL_VALUE) {
+								if (isPresetModelValue(
+									this.plugin.settings.meetingAiClaudeModel,
+									CLAUDE_MODEL_OPTIONS
+								)) {
+									this.plugin.settings.meetingAiClaudeModel = "";
+								}
+								await this.plugin.saveSettings();
+								this.display();
+								return;
+							}
+							this.plugin.settings.meetingAiClaudeModel = value;
+							await this.plugin.saveSettings();
+							this.display();
+						});
+				})
+				.addText((text) => {
+					const current = this.plugin.settings.meetingAiClaudeModel;
+					const customSelected =
+						getPresetModelValue(current, CLAUDE_MODEL_OPTIONS) ===
+						CUSTOM_AI_MODEL_VALUE;
+					text
+						.setPlaceholder("Custom Claude model")
+						.setValue(customSelected ? current : "")
+						.setDisabled(claudeDisabled || !customSelected)
+						.onChange(async (value) => {
+							this.plugin.settings.meetingAiClaudeModel = value;
+							await this.plugin.saveSettings();
+						});
+				});
 
 		new Setting(containerEl)
 			.setName("Claude effort")
@@ -420,22 +466,52 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					})
 			);
 
-		new Setting(containerEl)
-			.setName("Codex model")
-			.setDesc(
-				"Defaults to `gpt-5.4`. Clear this if you want to use your Codex CLI default model."
-			)
-			.setDisabled(codexDisabled)
-			.addText((text) =>
-				text
-					.setPlaceholder("gpt-5.4")
-					.setValue(this.plugin.settings.meetingAiCodexModel)
-					.setDisabled(codexDisabled)
-					.onChange(async (value) => {
-						this.plugin.settings.meetingAiCodexModel = value;
-						await this.plugin.saveSettings();
-					})
-			);
+			new Setting(containerEl)
+				.setName("Codex model")
+				.setDesc(
+					"Choose a common Codex/OpenAI model, or select Custom to type another model name."
+				)
+				.setDisabled(codexDisabled)
+				.addDropdown((dropdown) => {
+					const current = this.plugin.settings.meetingAiCodexModel;
+					for (const option of CODEX_MODEL_OPTIONS) {
+						dropdown.addOption(option.value, option.label);
+					}
+					dropdown
+						.addOption(CUSTOM_AI_MODEL_VALUE, "Custom...")
+						.setValue(getPresetModelValue(current, CODEX_MODEL_OPTIONS))
+						.setDisabled(codexDisabled)
+						.onChange(async (value) => {
+							if (value === CUSTOM_AI_MODEL_VALUE) {
+								if (isPresetModelValue(
+									this.plugin.settings.meetingAiCodexModel,
+									CODEX_MODEL_OPTIONS
+								)) {
+									this.plugin.settings.meetingAiCodexModel = "";
+								}
+								await this.plugin.saveSettings();
+								this.display();
+								return;
+							}
+							this.plugin.settings.meetingAiCodexModel = value;
+							await this.plugin.saveSettings();
+							this.display();
+						});
+				})
+				.addText((text) => {
+					const current = this.plugin.settings.meetingAiCodexModel;
+					const customSelected =
+						getPresetModelValue(current, CODEX_MODEL_OPTIONS) ===
+						CUSTOM_AI_MODEL_VALUE;
+					text
+						.setPlaceholder("Custom Codex/OpenAI model")
+						.setValue(customSelected ? current : "")
+						.setDisabled(codexDisabled || !customSelected)
+						.onChange(async (value) => {
+							this.plugin.settings.meetingAiCodexModel = value;
+							await this.plugin.saveSettings();
+						});
+				});
 
 		new Setting(containerEl)
 			.setName("Codex reasoning")
@@ -1005,6 +1081,20 @@ function parseColorMap(input: string): Record<string, string> {
 		result[normalizedTag] = normalizedColor;
 	}
 	return result;
+}
+
+function getPresetModelValue(
+	value: string,
+	options: { value: string; label: string }[]
+): string {
+	return isPresetModelValue(value, options) ? value : CUSTOM_AI_MODEL_VALUE;
+}
+
+function isPresetModelValue(
+	value: string,
+	options: { value: string; label: string }[]
+): boolean {
+	return options.some((option) => option.value === value);
 }
 
 export interface StringifiedAudioNotesSettings {
