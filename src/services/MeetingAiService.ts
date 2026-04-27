@@ -11,13 +11,27 @@ import type AutomaticAudioNotes from "../main";
 
 const AI_SECTION_START = "<!-- AUDIO-NOTES-AI:START -->";
 const AI_SECTION_END = "<!-- AUDIO-NOTES-AI:END -->";
+const AI_NOTES_HEADING = "## AI Meeting Notes";
 
 const CLAUDE_OUTPUT_SCHEMA = JSON.stringify({
 	type: "object",
 	additionalProperties: false,
-	required: ["summary", "decisions", "action_items", "open_questions"],
+	required: [
+		"title",
+		"summary",
+		"detailed_notes",
+		"decisions",
+		"action_items",
+		"open_questions",
+	],
 	properties: {
+		title: {
+			type: "string",
+		},
 		summary: {
+			type: "string",
+		},
+		detailed_notes: {
 			type: "string",
 		},
 		decisions: {
@@ -51,7 +65,9 @@ export interface MeetingAiHealth {
 }
 
 export interface MeetingAiDraft {
+	title: string;
 	summary: string;
+	detailedNotes: string;
 	decisions: string[];
 	actionItems: string[];
 	openQuestions: string[];
@@ -153,9 +169,17 @@ class ClaudeCodeMeetingAiProvider implements MeetingAiProvider {
 			parsed;
 
 		return {
+			title:
+				typeof structured.title === "string"
+					? structured.title.trim()
+					: "",
 			summary:
 				typeof structured.summary === "string"
 					? structured.summary.trim()
+					: "",
+			detailedNotes:
+				typeof structured.detailed_notes === "string"
+					? structured.detailed_notes.trim()
 					: "",
 			decisions: normalizeStringArray(structured.decisions),
 			actionItems: normalizeStringArray(structured.action_items),
@@ -242,8 +266,14 @@ class CodexMeetingAiProvider implements MeetingAiProvider {
 			>;
 
 			return {
+				title:
+					typeof parsed.title === "string" ? parsed.title.trim() : "",
 				summary:
 					typeof parsed.summary === "string" ? parsed.summary.trim() : "",
+				detailedNotes:
+					typeof parsed.detailed_notes === "string"
+						? parsed.detailed_notes.trim()
+						: "",
 				decisions: normalizeStringArray(parsed.decisions),
 				actionItems: normalizeStringArray(parsed.action_items),
 				openQuestions: normalizeStringArray(parsed.open_questions),
@@ -342,16 +372,20 @@ function buildMeetingPrompt(
 ): string {
 	const customInstructions = settings.meetingAiCustomInstructions.trim();
 	return [
-		"You are drafting concise meeting notes from a transcript for an Obsidian note.",
+		"Create detailed meeting notes from a transcript for an Obsidian note.",
+		"Generate a concise, descriptive meeting title from the transcript.",
+		"Write the notes in clean markdown that could be saved as a standalone downloadable .md file.",
 		"Use only the transcript below. Do not invent facts, owners, deadlines, or decisions.",
 		"If an item is ambiguous, leave it out or put it in open_questions.",
-		"Keep the summary short and useful for someone scanning the note later.",
+		"Keep uncertainty explicit when the transcript is unclear.",
 		"",
-		`Meeting title: ${input.title}`,
+		`Current file title: ${input.title}`,
 		...(input.notePath ? [`Note path: ${input.notePath}`] : []),
 		"",
 		"Return structured output with:",
+		"- title: a short descriptive meeting title",
 		"- summary: 1-3 short paragraphs",
+		"- detailed_notes: markdown notes with useful headings and bullets",
 		"- decisions: concrete decisions actually made",
 		"- action_items: concrete follow-ups; include owner or due date only if explicit",
 		"- open_questions: unresolved questions or missing decisions",
@@ -493,6 +527,20 @@ function upsertAiNotesSection(content: string, draft: MeetingAiDraft): string {
 		return [before, block, after].filter(Boolean).join("\n\n").trimEnd() + "\n";
 	}
 
+	const headingIndex = content.indexOf(AI_NOTES_HEADING);
+	if (headingIndex !== -1) {
+		const nextHeadingIndex = findNextLevelTwoHeadingIndex(
+			content,
+			headingIndex + AI_NOTES_HEADING.length
+		);
+		const before = content.slice(0, headingIndex).replace(/\s*$/, "");
+		const after =
+			nextHeadingIndex === -1
+				? ""
+				: content.slice(nextHeadingIndex).replace(/^\s*/, "");
+		return [before, block, after].filter(Boolean).join("\n\n").trimEnd() + "\n";
+	}
+
 	const trimmed = content.trimEnd();
 	return trimmed.length ? `${trimmed}\n\n${block}\n` : `${block}\n`;
 }
@@ -500,13 +548,18 @@ function upsertAiNotesSection(content: string, draft: MeetingAiDraft): string {
 function renderAiNotesBlock(draft: MeetingAiDraft): string {
 	const generatedAt = new Date().toLocaleString();
 	return [
-		AI_SECTION_START,
-		"## AI Notes",
+		AI_NOTES_HEADING,
 		"",
 		`_Generated via ${draft.providerLabel} on ${generatedAt}._`,
 		"",
+		"### Suggested Title",
+		draft.title || "_No title generated._",
+		"",
 		"### Summary",
 		draft.summary || "_No summary generated._",
+		"",
+		"### Detailed Notes",
+		draft.detailedNotes || "_No detailed notes generated._",
 		"",
 		"### Decisions",
 		...renderBulletList(draft.decisions),
@@ -516,8 +569,12 @@ function renderAiNotesBlock(draft: MeetingAiDraft): string {
 		"",
 		"### Open Questions",
 		...renderBulletList(draft.openQuestions),
-		AI_SECTION_END,
 	].join("\n");
+}
+
+function findNextLevelTwoHeadingIndex(content: string, fromIndex: number): number {
+	const match = content.slice(fromIndex).match(/\n## (?!#)/);
+	return match?.index === undefined ? -1 : fromIndex + match.index + 1;
 }
 
 function renderBulletList(items: string[], checkbox = false): string[] {
