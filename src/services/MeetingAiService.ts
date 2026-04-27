@@ -426,7 +426,8 @@ async function runCommand(
 	stdin?: string
 ): Promise<{ stdout: string; stderr: string }> {
 	return new Promise((resolve, reject) => {
-		const child = spawn(command, args, {
+		const launch = buildCommandLaunch(command, args);
+		const child = spawn(launch.command, launch.args, {
 			shell: process.platform === "win32",
 			stdio: "pipe",
 		});
@@ -459,6 +460,25 @@ async function runCommand(
 		}
 		child.stdin.end();
 	});
+}
+
+function buildCommandLaunch(
+	command: string,
+	args: string[]
+): { command: string; args: string[] } {
+	if (process.platform === "win32" || command.includes("/")) {
+		return { command, args };
+	}
+
+	const shell = process.env.SHELL || "/bin/zsh";
+	return {
+		command: shell,
+		args: ["-lc", [command, ...args].map(shellQuote).join(" ")],
+	};
+}
+
+function shellQuote(value: string): string {
+	return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function upsertAiNotesSection(content: string, draft: MeetingAiDraft): string {
