@@ -28,8 +28,9 @@ export class ApiKeyInfo {
 	) {}
 }
 
-export type MeetingAiProviderKind = "disabled" | "claude";
+export type MeetingAiProviderKind = "disabled" | "claude" | "codex";
 export type MeetingAiClaudeEffort = "low" | "medium" | "high" | "max";
+export type MeetingAiCodexEffort = "low" | "medium" | "high" | "xhigh";
 
 export class AudioNotesSettingsTab extends PluginSettingTab {
 	plugin: AutomaticAudioNotes;
@@ -337,6 +338,7 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 				dropdown
 					.addOption("disabled", "Disabled")
 					.addOption("claude", "Claude Code")
+					.addOption("codex", "Codex / ChatGPT")
 					.setValue(this.plugin.settings.meetingAiProvider)
 					.onChange(async (value) => {
 						this.plugin.settings.meetingAiProvider =
@@ -349,6 +351,8 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 		const aiDisabled = this.plugin.settings.meetingAiProvider === "disabled";
 		const claudeDisabled =
 			aiDisabled || this.plugin.settings.meetingAiProvider !== "claude";
+		const codexDisabled =
+			aiDisabled || this.plugin.settings.meetingAiProvider !== "codex";
 
 		new Setting(containerEl)
 			.setName("Claude binary path")
@@ -402,6 +406,57 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Codex binary path")
+			.setDesc("Path to the Codex CLI executable. Defaults to `codex`.")
+			.setDisabled(codexDisabled)
+			.addText((text) =>
+				text
+					.setPlaceholder("codex")
+					.setValue(this.plugin.settings.meetingAiCodexBinaryPath)
+					.setDisabled(codexDisabled)
+					.onChange(async (value) => {
+						this.plugin.settings.meetingAiCodexBinaryPath = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Codex model")
+			.setDesc(
+				"Defaults to `gpt-5.4`. Clear this if you want to use your Codex CLI default model."
+			)
+			.setDisabled(codexDisabled)
+			.addText((text) =>
+				text
+					.setPlaceholder("gpt-5.4")
+					.setValue(this.plugin.settings.meetingAiCodexModel)
+					.setDisabled(codexDisabled)
+					.onChange(async (value) => {
+						this.plugin.settings.meetingAiCodexModel = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Codex reasoning")
+			.setDesc("Controls how much reasoning Codex uses for the note draft.")
+			.setDisabled(codexDisabled)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("low", "Low")
+					.addOption("medium", "Medium")
+					.addOption("high", "High")
+					.addOption("xhigh", "Extra high")
+					.setValue(this.plugin.settings.meetingAiCodexEffort)
+					.setDisabled(codexDisabled)
+					.onChange(async (value) => {
+						this.plugin.settings.meetingAiCodexEffort =
+							(value as MeetingAiCodexEffort) || "medium";
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
 			.setName("AI instructions")
 			.setDesc(
 				"Optional global instructions appended to every AI meeting-notes prompt."
@@ -423,15 +478,15 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName("Check Claude connection")
+			.setName("Check AI connection")
 			.setDesc(
-				"Verifies that Claude Code is installed and authenticated on this machine."
+				"Verifies that the selected AI CLI is installed and authenticated on this machine."
 			)
-			.setDisabled(claudeDisabled)
+			.setDisabled(aiDisabled)
 			.addButton((button) =>
 				button
 					.setButtonText("Check")
-					.setDisabled(claudeDisabled)
+					.setDisabled(aiDisabled)
 					.onClick(async () => {
 						button.setDisabled(true);
 						try {
@@ -443,9 +498,9 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 								"Audio Notes: AI provider health check failed",
 								error
 							);
-							new Notice("Could not verify Claude Code.", 7000);
+							new Notice("Could not verify the AI provider.", 7000);
 						} finally {
-							button.setDisabled(claudeDisabled);
+							button.setDisabled(aiDisabled);
 						}
 					})
 			);
@@ -968,6 +1023,9 @@ export interface StringifiedAudioNotesSettings {
 	meetingAiClaudeBinaryPath: string;
 	meetingAiClaudeModel: string;
 	meetingAiClaudeEffort: MeetingAiClaudeEffort;
+	meetingAiCodexBinaryPath: string;
+	meetingAiCodexModel: string;
+	meetingAiCodexEffort: MeetingAiCodexEffort;
 	meetingAiCustomInstructions: string;
 	storeAttachmentsWithMeeting: boolean;
 	whisperAudioFolder: string;
@@ -1006,6 +1064,9 @@ const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	meetingAiClaudeBinaryPath: "claude",
 	meetingAiClaudeModel: "",
 	meetingAiClaudeEffort: "medium",
+	meetingAiCodexBinaryPath: "codex",
+	meetingAiCodexModel: "gpt-5.4",
+	meetingAiCodexEffort: "medium",
 	meetingAiCustomInstructions: "",
 	storeAttachmentsWithMeeting: false,
 	whisperAudioFolder: "MediaArchive/audio",
@@ -1047,6 +1108,9 @@ export class AudioNotesSettings {
 		private _meetingAiClaudeBinaryPath: string,
 		private _meetingAiClaudeModel: string,
 		private _meetingAiClaudeEffort: MeetingAiClaudeEffort,
+		private _meetingAiCodexBinaryPath: string,
+		private _meetingAiCodexModel: string,
+		private _meetingAiCodexEffort: MeetingAiCodexEffort,
 		private _meetingAiCustomInstructions: string,
 			private _storeAttachmentsWithMeeting: boolean,
 			private _whisperAudioFolder: string,
@@ -1086,6 +1150,9 @@ export class AudioNotesSettings {
 			DEFAULT_SETTINGS.meetingAiClaudeBinaryPath,
 			DEFAULT_SETTINGS.meetingAiClaudeModel,
 			DEFAULT_SETTINGS.meetingAiClaudeEffort,
+			DEFAULT_SETTINGS.meetingAiCodexBinaryPath,
+			DEFAULT_SETTINGS.meetingAiCodexModel,
+			DEFAULT_SETTINGS.meetingAiCodexEffort,
 			DEFAULT_SETTINGS.meetingAiCustomInstructions,
 				DEFAULT_SETTINGS.storeAttachmentsWithMeeting,
 				DEFAULT_SETTINGS.whisperAudioFolder,
@@ -1196,6 +1263,25 @@ export class AudioNotesSettings {
 			data.meetingAiClaudeEffort !== undefined
 		) {
 			settings.meetingAiClaudeEffort = data.meetingAiClaudeEffort!;
+		}
+		if (
+			data.meetingAiCodexBinaryPath !== null &&
+			data.meetingAiCodexBinaryPath !== undefined
+		) {
+			settings.meetingAiCodexBinaryPath =
+				data.meetingAiCodexBinaryPath!;
+		}
+		if (
+			data.meetingAiCodexModel !== null &&
+			data.meetingAiCodexModel !== undefined
+		) {
+			settings.meetingAiCodexModel = data.meetingAiCodexModel!;
+		}
+		if (
+			data.meetingAiCodexEffort !== null &&
+			data.meetingAiCodexEffort !== undefined
+		) {
+			settings.meetingAiCodexEffort = data.meetingAiCodexEffort!;
 		}
 		if (
 			data.meetingAiCustomInstructions !== null &&
@@ -1431,7 +1517,9 @@ export class AudioNotesSettings {
 
 	set meetingAiProvider(value: MeetingAiProviderKind) {
 		this._meetingAiProvider =
-			value === "claude" ? "claude" : DEFAULT_SETTINGS.meetingAiProvider;
+			value === "claude" || value === "codex"
+				? value
+				: DEFAULT_SETTINGS.meetingAiProvider;
 	}
 
 	get meetingAiClaudeBinaryPath(): string {
@@ -1472,6 +1560,47 @@ export class AudioNotesSettings {
 			default:
 				this._meetingAiClaudeEffort =
 					DEFAULT_SETTINGS.meetingAiClaudeEffort;
+		}
+	}
+
+	get meetingAiCodexBinaryPath(): string {
+		return (
+			this._meetingAiCodexBinaryPath ||
+			DEFAULT_SETTINGS.meetingAiCodexBinaryPath
+		);
+	}
+
+	set meetingAiCodexBinaryPath(value: string) {
+		this._meetingAiCodexBinaryPath =
+			value?.trim() || DEFAULT_SETTINGS.meetingAiCodexBinaryPath;
+	}
+
+	get meetingAiCodexModel(): string {
+		return this._meetingAiCodexModel || "";
+	}
+
+	set meetingAiCodexModel(value: string) {
+		this._meetingAiCodexModel = value?.trim() || "";
+	}
+
+	get meetingAiCodexEffort(): MeetingAiCodexEffort {
+		return (
+			this._meetingAiCodexEffort ||
+			DEFAULT_SETTINGS.meetingAiCodexEffort
+		);
+	}
+
+	set meetingAiCodexEffort(value: MeetingAiCodexEffort) {
+		switch (value) {
+			case "low":
+			case "medium":
+			case "high":
+			case "xhigh":
+				this._meetingAiCodexEffort = value;
+				return;
+			default:
+				this._meetingAiCodexEffort =
+					DEFAULT_SETTINGS.meetingAiCodexEffort;
 		}
 	}
 

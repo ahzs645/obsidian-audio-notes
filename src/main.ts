@@ -152,6 +152,9 @@ export default class AutomaticAudioNotes extends Plugin {
 			loadedData["_meetingAiClaudeBinaryPath"],
 			loadedData["_meetingAiClaudeModel"],
 			loadedData["_meetingAiClaudeEffort"],
+			loadedData["_meetingAiCodexBinaryPath"],
+			loadedData["_meetingAiCodexModel"],
+			loadedData["_meetingAiCodexEffort"],
 			loadedData["_meetingAiCustomInstructions"],
 				loadedData["_storeAttachmentsWithMeeting"],
 				loadedData["_whisperAudioFolder"],
@@ -290,6 +293,12 @@ export default class AutomaticAudioNotes extends Plugin {
 				this.settings.meetingAiClaudeModel;
 			data["_meetingAiClaudeEffort"] =
 				this.settings.meetingAiClaudeEffort;
+			data["_meetingAiCodexBinaryPath"] =
+				this.settings.meetingAiCodexBinaryPath;
+			data["_meetingAiCodexModel"] =
+				this.settings.meetingAiCodexModel;
+			data["_meetingAiCodexEffort"] =
+				this.settings.meetingAiCodexEffort;
 			data["_meetingAiCustomInstructions"] =
 				this.settings.meetingAiCustomInstructions;
 			data["_meetingTemplateEnabled"] =

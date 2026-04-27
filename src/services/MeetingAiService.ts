@@ -1,4 +1,7 @@
 import { spawn } from "child_process";
+import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
 import { Platform, TFile } from "obsidian";
 import type {
 	AudioNotesSettings,
@@ -138,7 +141,7 @@ class ClaudeCodeMeetingAiProvider implements MeetingAiProvider {
 				? ["--effort", settings.meetingAiClaudeEffort]
 				: []),
 		];
-		const prompt = buildClaudeMeetingPrompt(settings, input);
+		const prompt = buildMeetingPrompt(settings, input);
 		const result = await runCommand(
 			settings.meetingAiClaudeBinaryPath,
 			args,
@@ -159,6 +162,96 @@ class ClaudeCodeMeetingAiProvider implements MeetingAiProvider {
 			openQuestions: normalizeStringArray(structured.open_questions),
 			providerLabel: this.label,
 		};
+	}
+}
+
+class CodexMeetingAiProvider implements MeetingAiProvider {
+	readonly kind = "codex" as const;
+	readonly label = "Codex / ChatGPT";
+
+	async checkHealth(settings: AudioNotesSettings): Promise<MeetingAiHealth> {
+		const binaryPath = settings.meetingAiCodexBinaryPath;
+		try {
+			const result = await runCommand(binaryPath, ["login", "status"]);
+			const status = `${result.stdout}\n${result.stderr}`.trim();
+			const loggedIn = /logged in/i.test(status);
+			return {
+				available: loggedIn,
+				configured: true,
+				provider: this.kind,
+				providerLabel: this.label,
+				authLabel: loggedIn ? status : undefined,
+				message: loggedIn
+					? `${this.label} is ready (${status}).`
+					: `${this.label} is installed but not authenticated. Run \`codex login\`.`,
+			};
+		} catch (error) {
+			return {
+				available: false,
+				configured: true,
+				provider: this.kind,
+				providerLabel: this.label,
+				message: toMessage(
+					error,
+					`Could not run ${binaryPath}. Make sure Codex CLI is installed.`
+				),
+			};
+		}
+	}
+
+	async generate(
+		settings: AudioNotesSettings,
+		input: MeetingAiInput
+	): Promise<MeetingAiDraft> {
+		const tempDir = await mkdtemp(join(tmpdir(), "audio-notes-codex-"));
+		const schemaPath = join(tempDir, "meeting-notes.schema.json");
+		const outputPath = join(tempDir, "meeting-notes.json");
+		try {
+			await writeFile(schemaPath, CLAUDE_OUTPUT_SCHEMA, "utf8");
+			const args = [
+				"exec",
+				"--ephemeral",
+				"--skip-git-repo-check",
+				"-s",
+				"read-only",
+				...(settings.meetingAiCodexModel
+					? ["--model", settings.meetingAiCodexModel]
+					: []),
+				...(settings.meetingAiCodexEffort
+					? [
+							"--config",
+							`model_reasoning_effort="${settings.meetingAiCodexEffort}"`,
+					  ]
+					: []),
+				"--output-schema",
+				schemaPath,
+				"--output-last-message",
+				outputPath,
+				"-",
+			];
+			const prompt = buildMeetingPrompt(settings, input);
+			const result = await runCommand(
+				settings.meetingAiCodexBinaryPath,
+				args,
+				prompt
+			);
+			const rawOutput = (await readFile(outputPath, "utf8")).trim();
+			const parsed = JSON.parse(rawOutput || result.stdout.trim()) as Record<
+				string,
+				unknown
+			>;
+
+			return {
+				summary:
+					typeof parsed.summary === "string" ? parsed.summary.trim() : "",
+				decisions: normalizeStringArray(parsed.decisions),
+				actionItems: normalizeStringArray(parsed.action_items),
+				openQuestions: normalizeStringArray(parsed.open_questions),
+				providerLabel: this.label,
+			};
+		} finally {
+			await rm(tempDir, { recursive: true, force: true });
+		}
 	}
 }
 
@@ -235,13 +328,15 @@ export class MeetingAiService {
 		switch (this.plugin.settings.meetingAiProvider) {
 			case "claude":
 				return new ClaudeCodeMeetingAiProvider();
+			case "codex":
+				return new CodexMeetingAiProvider();
 			default:
 				return null;
 		}
 	}
 }
 
-function buildClaudeMeetingPrompt(
+function buildMeetingPrompt(
 	settings: AudioNotesSettings,
 	input: MeetingAiInput
 ): string {
