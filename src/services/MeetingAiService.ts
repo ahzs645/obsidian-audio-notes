@@ -347,16 +347,10 @@ function buildMeetingPrompt(
 	settings: AudioNotesSettings,
 	input: MeetingAiInput
 ): string {
+	const basePrompt = settings.meetingAiPrompt.trim();
 	const customInstructions = settings.meetingAiCustomInstructions.trim();
 	return [
-		"Create detailed meeting notes from a transcript for an Obsidian note.",
-		"Generate a concise, descriptive meeting title from the transcript.",
-		"Write clean markdown that could be saved directly as a standalone downloadable .md file.",
-		"Match this vault's existing meeting-note style: start with a useful overview, then use topic-based markdown headings and bullets/tables where helpful.",
-		"Do not add an AI wrapper heading, generated-by line, or forced sections. Include Decisions, Action Items, Open Questions, or Next Steps only when useful.",
-		"Use only the transcript below. Do not invent facts, owners, deadlines, or decisions.",
-		"If the transcript is unclear, say so naturally in the notes instead of pretending certainty.",
-		"Keep uncertainty explicit when the transcript is unclear.",
+		basePrompt,
 		"",
 		`Current file title: ${input.title}`,
 		...(input.notePath ? [`Note path: ${input.notePath}`] : []),

@@ -533,6 +533,36 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("AI prompt")
+			.setDesc(
+				"Base prompt sent to the selected AI provider before file metadata, output requirements, optional instructions, and the transcript."
+			)
+			.setDisabled(aiDisabled)
+			.addTextArea((text) => {
+				text
+					.setPlaceholder(DEFAULT_MEETING_AI_PROMPT)
+					.setValue(this.plugin.settings.meetingAiPrompt)
+					.setDisabled(aiDisabled)
+					.onChange(async (value) => {
+						this.plugin.settings.meetingAiPrompt = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.rows = 8;
+				text.inputEl.style.width = "100%";
+			})
+			.addButton((button) =>
+				button
+					.setButtonText("Reset")
+					.setDisabled(aiDisabled)
+					.onClick(async () => {
+						this.plugin.settings.meetingAiPrompt =
+							DEFAULT_MEETING_AI_PROMPT;
+						await this.plugin.saveSettings();
+						this.display();
+					})
+			);
+
+		new Setting(containerEl)
 			.setName("AI instructions")
 			.setDesc(
 				"Optional global instructions appended to every AI meeting-notes prompt."
@@ -1116,6 +1146,7 @@ export interface StringifiedAudioNotesSettings {
 	meetingAiCodexBinaryPath: string;
 	meetingAiCodexModel: string;
 	meetingAiCodexEffort: MeetingAiCodexEffort;
+	meetingAiPrompt: string;
 	meetingAiCustomInstructions: string;
 	storeAttachmentsWithMeeting: boolean;
 	whisperAudioFolder: string;
@@ -1138,6 +1169,17 @@ export interface StringifiedAudioNotesSettings {
 	meetingLabelCategories: MeetingLabelCategory[];
 }
 
+export const DEFAULT_MEETING_AI_PROMPT = [
+	"Create detailed meeting notes from a transcript for an Obsidian note.",
+	"Generate a concise, descriptive meeting title from the transcript.",
+	"Write clean markdown that could be saved directly as a standalone downloadable .md file.",
+	"Match this vault's existing meeting-note style: start with a useful overview, then use topic-based markdown headings and bullets/tables where helpful.",
+	"Do not add an AI wrapper heading, generated-by line, or forced sections. Include Decisions, Action Items, Open Questions, or Next Steps only when useful.",
+	"Use only the transcript below. Do not invent facts, owners, deadlines, or decisions.",
+	"If the transcript is unclear, say so naturally in the notes instead of pretending certainty.",
+	"Keep uncertainty explicit when the transcript is unclear.",
+].join("\n");
+
 const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	plusDuration: "30",
 	minusDuration: "30",
@@ -1157,6 +1199,7 @@ const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	meetingAiCodexBinaryPath: "codex",
 	meetingAiCodexModel: "gpt-5.4",
 	meetingAiCodexEffort: "medium",
+	meetingAiPrompt: DEFAULT_MEETING_AI_PROMPT,
 	meetingAiCustomInstructions: "",
 	storeAttachmentsWithMeeting: false,
 	whisperAudioFolder: "MediaArchive/audio",
@@ -1201,6 +1244,7 @@ export class AudioNotesSettings {
 		private _meetingAiCodexBinaryPath: string,
 		private _meetingAiCodexModel: string,
 		private _meetingAiCodexEffort: MeetingAiCodexEffort,
+		private _meetingAiPrompt: string,
 		private _meetingAiCustomInstructions: string,
 			private _storeAttachmentsWithMeeting: boolean,
 			private _whisperAudioFolder: string,
@@ -1243,6 +1287,7 @@ export class AudioNotesSettings {
 			DEFAULT_SETTINGS.meetingAiCodexBinaryPath,
 			DEFAULT_SETTINGS.meetingAiCodexModel,
 			DEFAULT_SETTINGS.meetingAiCodexEffort,
+			DEFAULT_SETTINGS.meetingAiPrompt,
 			DEFAULT_SETTINGS.meetingAiCustomInstructions,
 				DEFAULT_SETTINGS.storeAttachmentsWithMeeting,
 				DEFAULT_SETTINGS.whisperAudioFolder,
@@ -1372,6 +1417,12 @@ export class AudioNotesSettings {
 			data.meetingAiCodexEffort !== undefined
 		) {
 			settings.meetingAiCodexEffort = data.meetingAiCodexEffort!;
+		}
+		if (
+			data.meetingAiPrompt !== null &&
+			data.meetingAiPrompt !== undefined
+		) {
+			settings.meetingAiPrompt = data.meetingAiPrompt!;
 		}
 		if (
 			data.meetingAiCustomInstructions !== null &&
@@ -1692,6 +1743,14 @@ export class AudioNotesSettings {
 				this._meetingAiCodexEffort =
 					DEFAULT_SETTINGS.meetingAiCodexEffort;
 		}
+	}
+
+	get meetingAiPrompt(): string {
+		return this._meetingAiPrompt || DEFAULT_SETTINGS.meetingAiPrompt;
+	}
+
+	set meetingAiPrompt(value: string) {
+		this._meetingAiPrompt = value?.trim() || DEFAULT_SETTINGS.meetingAiPrompt;
 	}
 
 	get meetingAiCustomInstructions(): string {
