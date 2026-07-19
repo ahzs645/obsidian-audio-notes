@@ -11,6 +11,7 @@ import {
 import { monkeyPatchConsole } from "./monkeyPatchConsole";
 import { ImportWhisperModal } from "./ImportWhisperModal";
 import { WhisperInboxImporter } from "./WhisperInboxImporter";
+import { WhisperExternalWatcher } from "./WhisperExternalWatcher";
 import { createAudioPlayer } from "./audio/AudioPlayerFactory";
 import type { AudioPlayerEnvironment } from "./audio/AudioPlayerFactory";
 import { registerAudioNoteCommands } from "./commands/registerCommands";
@@ -68,6 +69,7 @@ export default class AutomaticAudioNotes extends Plugin {
 	private lastMeetingFolder: string | null = null;
 	private lastMeetingFilePath: string | null = null;
 	private whisperInboxImporter: WhisperInboxImporter | null = null;
+	whisperExternalWatcher: WhisperExternalWatcher | null = null;
 
 	private get isDesktop(): boolean {
 		return Platform.isDesktop || Platform.isDesktopApp || Platform.isMacOS;
@@ -167,6 +169,8 @@ export default class AutomaticAudioNotes extends Plugin {
 			loadedData["_whisperNoteFolder"],
 			loadedData["_whisperInboxFolder"],
 			loadedData["_whisperAutoImportInbox"],
+			loadedData["_whisperExternalWatchFolder"],
+			loadedData["_whisperExternalWatchEnabled"],
 			loadedData["_calendarTagColors"],
 			_meetingTemplateEnabled,
 			_periodicDailyNoteEnabled,
@@ -371,6 +375,7 @@ export default class AutomaticAudioNotes extends Plugin {
 		);
 		this.audioNoteService = new AudioNoteService(this);
 		this.whisperInboxImporter = new WhisperInboxImporter(this);
+		this.whisperExternalWatcher = new WhisperExternalWatcher(this);
 
 		// Log to log.txt file if on mobile and debugging mode is enabled.
 		if (!this.isDesktop && this.settings.debugMode) {
@@ -416,6 +421,7 @@ export default class AutomaticAudioNotes extends Plugin {
 				false
 			);
 			void this.normalizeExistingWhisperSchedules();
+			this.whisperExternalWatcher?.start();
 		});
 
 		if (this.settings.calendarSidebarPinned) {
@@ -1012,6 +1018,7 @@ export default class AutomaticAudioNotes extends Plugin {
 		this.app.workspace.detachLeavesOfType(AUDIO_NOTES_TRANSCRIPT_VIEW);
 		this.whisperInboxImporter?.destroy();
 		this.whisperInboxImporter = null;
+		this.whisperExternalWatcher = null;
 		this.knownCurrentTimes.clear();
 		this.knownAudioPlayers.clear();
 		this.currentlyPlayingAudioFakeUuid = null;

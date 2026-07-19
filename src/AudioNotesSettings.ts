@@ -739,6 +739,33 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+		new Setting(containerEl)
+			.setName("External watch folder")
+			.setDesc(
+				"Desktop only. Absolute path to a folder outside the vault (for example your Downloads folder) that will be scanned for .whisper and .whisper.zip archives. Imported archives are moved into an 'imported' subfolder."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("/Users/you/Downloads/audio")
+					.setValue(this.plugin.settings.whisperExternalWatchFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.whisperExternalWatchFolder = value;
+						await this.plugin.saveSettings();
+					})
+			);
+		new Setting(containerEl)
+			.setName("Auto-import from external watch folder")
+			.setDesc(
+				"Scan the external watch folder on startup and every minute, importing any new Whisper archives automatically."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.whisperExternalWatchEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.whisperExternalWatchEnabled = value;
+						await this.plugin.saveSettings();
+					})
+			);
 
 		containerEl.createEl("h3", { text: "Meeting labels" });
 			const labelsDescription = containerEl.createEl("p");
@@ -1158,6 +1185,8 @@ export interface StringifiedAudioNotesSettings {
 	whisperNoteFolder: string;
 	whisperInboxFolder: string;
 	whisperAutoImportInbox: boolean;
+	whisperExternalWatchFolder: string;
+	whisperExternalWatchEnabled: boolean;
 	calendarTagColors: Record<string, string>;
 	meetingTemplateEnabled: boolean;
 	periodicDailyNoteEnabled: boolean;
@@ -1211,6 +1240,8 @@ const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	whisperNoteFolder: "02-meetings",
 	whisperInboxFolder: "Inbox/whisper",
 	whisperAutoImportInbox: false,
+	whisperExternalWatchFolder: "",
+	whisperExternalWatchEnabled: false,
 	calendarTagColors: {},
 	meetingTemplateEnabled: true,
 	periodicDailyNoteEnabled: true,
@@ -1256,6 +1287,8 @@ export class AudioNotesSettings {
 		private _whisperNoteFolder: string,
 		private _whisperInboxFolder: string,
 		private _whisperAutoImportInbox: boolean,
+		private _whisperExternalWatchFolder: string,
+		private _whisperExternalWatchEnabled: boolean,
 		private _calendarTagColors: Record<string, string>,
 		private _meetingTemplateEnabled: boolean,
 		private _periodicDailyNoteEnabled: boolean,
@@ -1299,6 +1332,8 @@ export class AudioNotesSettings {
 			DEFAULT_SETTINGS.whisperNoteFolder,
 			DEFAULT_SETTINGS.whisperInboxFolder,
 			DEFAULT_SETTINGS.whisperAutoImportInbox,
+			DEFAULT_SETTINGS.whisperExternalWatchFolder,
+			DEFAULT_SETTINGS.whisperExternalWatchEnabled,
 			DEFAULT_SETTINGS.calendarTagColors,
 			DEFAULT_SETTINGS.meetingTemplateEnabled,
 			DEFAULT_SETTINGS.periodicDailyNoteEnabled,
@@ -1494,6 +1529,20 @@ export class AudioNotesSettings {
 		) {
 			settings.whisperAutoImportInbox =
 				data.whisperAutoImportInbox!;
+		}
+		if (
+			data.whisperExternalWatchFolder !== null &&
+			data.whisperExternalWatchFolder !== undefined
+		) {
+			settings.whisperExternalWatchFolder =
+				data.whisperExternalWatchFolder!;
+		}
+		if (
+			data.whisperExternalWatchEnabled !== null &&
+			data.whisperExternalWatchEnabled !== undefined
+		) {
+			settings.whisperExternalWatchEnabled =
+				data.whisperExternalWatchEnabled!;
 		}
 		if (
 			data.calendarTagColors !== null &&
@@ -1843,6 +1892,22 @@ export class AudioNotesSettings {
 
 	set whisperAutoImportInbox(value: boolean) {
 		this._whisperAutoImportInbox = Boolean(value);
+	}
+
+	get whisperExternalWatchFolder(): string {
+		return this._whisperExternalWatchFolder || "";
+	}
+
+	set whisperExternalWatchFolder(value: string) {
+		this._whisperExternalWatchFolder = value?.trim() || "";
+	}
+
+	get whisperExternalWatchEnabled(): boolean {
+		return Boolean(this._whisperExternalWatchEnabled);
+	}
+
+	set whisperExternalWatchEnabled(value: boolean) {
+		this._whisperExternalWatchEnabled = Boolean(value);
 	}
 
 	get calendarTagColors(): Record<string, string> {

@@ -495,3 +495,81 @@ input.title-input {
 	white-space: nowrap;
 }
 /* END Export Modal */
+
+/* Label triage modal */
+.aan-label-triage-summary {
+	color: var(--text-muted);
+}
+
+.aan-label-triage-controls {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+
+.aan-label-triage-ai-status {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin-top: 4px;
+}
+
+.aan-label-triage-list {
+	max-height: 50vh;
+	overflow-y: auto;
+	border-top: 1px solid var(--background-modifier-border);
+	margin-top: 8px;
+}
+
+.aan-label-triage-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 8px 4px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.aan-label-triage-info {
+	min-width: 0;
+	flex: 1;
+}
+
+.aan-label-triage-title {
+	cursor: pointer;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.aan-label-triage-title:hover {
+	color: var(--text-accent);
+}
+
+.aan-label-triage-meta {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.aan-label-triage-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+}
+
+.aan-label-triage-label {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	max-width: 180px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.aan-label-triage-label.has-label {
+	color: var(--text-normal);
+}
+/* END Label triage modal */

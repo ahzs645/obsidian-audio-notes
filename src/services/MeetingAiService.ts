@@ -30,6 +30,17 @@ const CLAUDE_OUTPUT_SCHEMA = JSON.stringify({
 	},
 });
 
+const LABEL_OUTPUT_SCHEMA = JSON.stringify({
+	type: "object",
+	additionalProperties: false,
+	required: ["label"],
+	properties: {
+		label: {
+			type: "string",
+		},
+	},
+});
+
 export interface MeetingAiHealth {
 	available: boolean;
 	configured: boolean;
@@ -51,14 +62,21 @@ interface MeetingAiInput {
 	notePath?: string;
 }
 
+export interface MeetingLabelSuggestionInput {
+	title: string;
+	context: string;
+	candidateTags: string[];
+}
+
 interface MeetingAiProvider {
 	readonly kind: Exclude<MeetingAiProviderKind, "disabled">;
 	readonly label: string;
 	checkHealth(settings: AudioNotesSettings): Promise<MeetingAiHealth>;
-	generate(
+	generateJson(
 		settings: AudioNotesSettings,
-		input: MeetingAiInput
-	): Promise<MeetingAiDraft>;
+		prompt: string,
+		schemaJson: string
+	): Promise<Record<string, unknown>>;
 }
 
 class ClaudeCodeMeetingAiProvider implements MeetingAiProvider {
@@ -109,16 +127,17 @@ class ClaudeCodeMeetingAiProvider implements MeetingAiProvider {
 		}
 	}
 
-	async generate(
+	async generateJson(
 		settings: AudioNotesSettings,
-		input: MeetingAiInput
-	): Promise<MeetingAiDraft> {
+		prompt: string,
+		schemaJson: string
+	): Promise<Record<string, unknown>> {
 		const args = [
 			"-p",
 			"--output-format",
 			"json",
 			"--json-schema",
-			CLAUDE_OUTPUT_SCHEMA,
+			schemaJson,
 			"--tools",
 			"",
 			...(settings.meetingAiClaudeModel
@@ -128,28 +147,16 @@ class ClaudeCodeMeetingAiProvider implements MeetingAiProvider {
 				? ["--effort", settings.meetingAiClaudeEffort]
 				: []),
 		];
-		const prompt = buildMeetingPrompt(settings, input);
 		const result = await runCommand(
 			settings.meetingAiClaudeBinaryPath,
 			args,
 			prompt
 		);
 		const parsed = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
-		const structured =
+		return (
 			(parsed.structured_output as Record<string, unknown> | undefined) ??
-			parsed;
-
-		return {
-			title:
-				typeof structured.title === "string"
-					? structured.title.trim()
-					: "",
-			markdownNotes:
-				typeof structured.markdown_notes === "string"
-					? structured.markdown_notes.trim()
-					: "",
-			providerLabel: this.label,
-		};
+			parsed
+		);
 	}
 }
 
@@ -187,15 +194,16 @@ class CodexMeetingAiProvider implements MeetingAiProvider {
 		}
 	}
 
-	async generate(
+	async generateJson(
 		settings: AudioNotesSettings,
-		input: MeetingAiInput
-	): Promise<MeetingAiDraft> {
+		prompt: string,
+		schemaJson: string
+	): Promise<Record<string, unknown>> {
 		const tempDir = await mkdtemp(join(tmpdir(), "audio-notes-codex-"));
 		const schemaPath = join(tempDir, "meeting-notes.schema.json");
 		const outputPath = join(tempDir, "meeting-notes.json");
 		try {
-			await writeFile(schemaPath, CLAUDE_OUTPUT_SCHEMA, "utf8");
+			await writeFile(schemaPath, schemaJson, "utf8");
 			const args = [
 				"exec",
 				"--ephemeral",
@@ -217,27 +225,16 @@ class CodexMeetingAiProvider implements MeetingAiProvider {
 				outputPath,
 				"-",
 			];
-			const prompt = buildMeetingPrompt(settings, input);
 			const result = await runCommand(
 				settings.meetingAiCodexBinaryPath,
 				args,
 				prompt
 			);
 			const rawOutput = (await readFile(outputPath, "utf8")).trim();
-			const parsed = JSON.parse(rawOutput || result.stdout.trim()) as Record<
+			return JSON.parse(rawOutput || result.stdout.trim()) as Record<
 				string,
 				unknown
 			>;
-
-			return {
-				title:
-					typeof parsed.title === "string" ? parsed.title.trim() : "",
-				markdownNotes:
-					typeof parsed.markdown_notes === "string"
-						? parsed.markdown_notes.trim()
-						: "",
-				providerLabel: this.label,
-			};
 		} finally {
 			await rm(tempDir, { recursive: true, force: true });
 		}
@@ -300,11 +297,27 @@ export class MeetingAiService {
 			throw new Error(health.message);
 		}
 
-		const draft = await provider.generate(this.plugin.settings, {
+		const prompt = buildMeetingPrompt(this.plugin.settings, {
 			title: file.basename,
 			transcriptText,
 			notePath: file.path,
 		});
+		const structured = await provider.generateJson(
+			this.plugin.settings,
+			prompt,
+			CLAUDE_OUTPUT_SCHEMA
+		);
+		const draft: MeetingAiDraft = {
+			title:
+				typeof structured.title === "string"
+					? structured.title.trim()
+					: "",
+			markdownNotes:
+				typeof structured.markdown_notes === "string"
+					? structured.markdown_notes.trim()
+					: "",
+			providerLabel: provider.label,
+		};
 		const current = await this.plugin.app.vault.read(file);
 		const updated = upsertAiNotesSection(current, draft);
 		if (updated !== current) {
@@ -317,6 +330,30 @@ export class MeetingAiService {
 			await this.renameMeetingFile(file, draft.title);
 		}
 		return draft;
+	}
+
+	isConfigured(): boolean {
+		return this.isDesktopSupported() && Boolean(this.resolveProvider());
+	}
+
+	async suggestMeetingLabel(
+		input: MeetingLabelSuggestionInput
+	): Promise<string> {
+		const provider = this.resolveProvider();
+		if (!provider) {
+			throw new Error("No local AI provider is enabled in settings.");
+		}
+		const prompt = buildLabelSuggestionPrompt(input);
+		const structured = await provider.generateJson(
+			this.plugin.settings,
+			prompt,
+			LABEL_OUTPUT_SCHEMA
+		);
+		const label =
+			typeof structured.label === "string"
+				? structured.label.trim().replace(/^#/, "").toLowerCase()
+				: "";
+		return input.candidateTags.includes(label) ? label : "";
 	}
 
 	private async renameMeetingFile(file: TFile, title: string): Promise<void> {
@@ -368,6 +405,26 @@ function buildMeetingPrompt(
 		"",
 		"Transcript:",
 		input.transcriptText.trim(),
+	].join("\n");
+}
+
+function buildLabelSuggestionPrompt(
+	input: MeetingLabelSuggestionInput
+): string {
+	return [
+		"Choose the best meeting label for this Obsidian meeting note.",
+		"Pick exactly one tag from the following list. If none of them fits, return an empty string.",
+		"",
+		"Available tags:",
+		...input.candidateTags.map((tag) => `- ${tag}`),
+		"",
+		`Note title: ${input.title}`,
+		"",
+		"Note content:",
+		input.context.trim(),
+		"",
+		"Return structured output with:",
+		'- label: the chosen tag exactly as written in the list above, or "" if none fits',
 	].join("\n");
 }
 

@@ -18,6 +18,7 @@ import {
 } from "../MeetingLabelPickerModal";
 import { applyMeetingLabelToFile } from "../meeting-label-manager";
 import { MeetingLabelCategoryModal } from "../settings/MeetingLabelCategoryModal";
+import { LabelTriageModal } from "../LabelTriageModal";
 import { normalizeTagPrefix, slugifyTagSegment } from "../meeting-labels";
 
 export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
@@ -94,6 +95,22 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 		name: "Import Whisper transcription archive",
 		callback: () => {
 			new ImportWhisperModal(plugin).open();
+		},
+	});
+
+	plugin.addCommand({
+		id: "scan-external-whisper-watch-folder",
+		name: "Import Whisper archives from external watch folder",
+		callback: () => {
+			void plugin.whisperExternalWatcher?.scan({ manual: true });
+		},
+	});
+
+	plugin.addCommand({
+		id: "review-unlabeled-meetings",
+		name: "Review unlabeled meeting notes",
+		callback: () => {
+			new LabelTriageModal(plugin).open();
 		},
 	});
 

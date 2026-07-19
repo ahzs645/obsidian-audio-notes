@@ -86,6 +86,15 @@ export class WhisperDuplicateError extends Error {
 	}
 }
 
+export function isWhisperArchiveName(name: string): boolean {
+	const lower = name.toLowerCase();
+	return lower.endsWith(".whisper") || lower.endsWith(".whisper.zip");
+}
+
+export function stripWhisperArchiveExtension(name: string): string {
+	return name.replace(/\.whisper(\.zip)?$/i, "");
+}
+
 interface ExistingImportMatch {
 	transcriptPath: string;
 	audioPath?: string;
@@ -898,6 +907,9 @@ export async function importWhisperArchive(
 		...DEFAULT_OPTIONS(plugin),
 		...overrideOptions,
 	};
+	if (isWhisperArchiveName(originalName)) {
+		originalName = `${stripWhisperArchiveExtension(originalName)}.whisper`;
+	}
 	const extracted = extractWhisperArchive(data);
 	const { metadata } = extracted;
 

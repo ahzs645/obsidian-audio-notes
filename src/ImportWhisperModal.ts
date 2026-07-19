@@ -10,7 +10,9 @@ import {
 	extractWhisperArchive,
 	importVttFile,
 	importWhisperArchive,
+	isWhisperArchiveName,
 	notifyWhisperImportSuccess,
+	stripWhisperArchiveExtension,
 	WhisperDuplicateError,
 	type WhisperImportResult,
 } from "./WhisperImporter";
@@ -85,7 +87,7 @@ export class ImportWhisperModal extends Modal {
 		this.fileInput = fileSetting.controlEl.createEl("input", {
 			type: "file",
 		});
-		this.fileInput.accept = ".whisper,.vtt";
+		this.fileInput.accept = ".whisper,.zip,.vtt";
 		this.fileInput.multiple = true;
 		this.fileInput.addEventListener("change", (evt: Event) => {
 			const target = evt.target as HTMLInputElement;
@@ -220,7 +222,7 @@ export class ImportWhisperModal extends Modal {
 		this.updateSelectionUi();
 		if (rejectedCount) {
 			new Notice(
-				`${rejectedCount} file${rejectedCount === 1 ? "" : "s"} skipped. Only .whisper archives and .vtt files are supported.`,
+				`${rejectedCount} file${rejectedCount === 1 ? "" : "s"} skipped. Only .whisper (or .whisper.zip) archives and .vtt files are supported.`,
 				5000
 			);
 		}
@@ -229,7 +231,7 @@ export class ImportWhisperModal extends Modal {
 	private addSelectedFiles(files: File[]) {
 		const { accepted, rejectedCount } = this.filterWhisperFiles(files);
 		if (!accepted.length && rejectedCount) {
-			new Notice("Only .whisper archives and .vtt files are supported.", 5000);
+			new Notice("Only .whisper (or .whisper.zip) archives and .vtt files are supported.", 5000);
 			return;
 		}
 		const merged = new Map<string, File>();
@@ -244,7 +246,7 @@ export class ImportWhisperModal extends Modal {
 		this.updateSelectionUi();
 		if (rejectedCount) {
 			new Notice(
-				`${rejectedCount} file${rejectedCount === 1 ? "" : "s"} skipped. Only .whisper archives and .vtt files are supported.`,
+				`${rejectedCount} file${rejectedCount === 1 ? "" : "s"} skipped. Only .whisper (or .whisper.zip) archives and .vtt files are supported.`,
 				5000
 			);
 		}
@@ -253,7 +255,9 @@ export class ImportWhisperModal extends Modal {
 	private syncNoteTitle() {
 		if (this.selectedFiles.length === 1) {
 			this.noteTitle =
-				this.selectedFiles[0].name.replace(/\.(whisper|vtt)$/i, "") || "";
+				stripWhisperArchiveExtension(
+					this.selectedFiles[0].name
+				).replace(/\.vtt$/i, "") || "";
 			this.noteTitleInput?.setValue(this.noteTitle);
 			return;
 		}
@@ -303,7 +307,7 @@ export class ImportWhisperModal extends Modal {
 	} {
 		const accepted = files.filter(
 			(file) =>
-				file.name.toLowerCase().endsWith(".whisper") ||
+				isWhisperArchiveName(file.name) ||
 				file.name.toLowerCase().endsWith(".vtt")
 		);
 		return {

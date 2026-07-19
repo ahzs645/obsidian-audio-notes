@@ -7,6 +7,7 @@ import {
 import type AutomaticAudioNotes from "./main";
 import {
 	importWhisperArchive,
+	isWhisperArchiveName,
 	WhisperDuplicateError,
 } from "./WhisperImporter";
 
@@ -70,7 +71,7 @@ export class WhisperInboxImporter {
 			return false;
 		}
 		const normalizedPath = normalizePath(path);
-		if (!normalizedPath.toLowerCase().endsWith(".whisper")) {
+		if (!isWhisperArchiveName(normalizedPath)) {
 			return false;
 		}
 		return (
