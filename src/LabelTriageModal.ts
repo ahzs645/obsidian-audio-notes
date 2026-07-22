@@ -14,30 +14,45 @@ import {
 	findLabelCategoryForTag,
 	getEffectiveMeetingLabelCategories,
 	normalizeTagName,
+	type MeetingLabelInfo,
 	type NormalizedMeetingLabelCategory,
 } from "./meeting-labels";
+import { NOTES_PLACEHOLDER_LINE } from "./MeetingNoteTemplate";
 
 const AI_CONTEXT_MAX_CHARS = 4000;
+const CREATE_LABEL_OPTION = "__create-new-label__";
 
 interface TriageItem {
 	file: TFile;
 	title: string;
 	date: string;
 	attendees: string[];
+	hasContent: boolean;
 	chosenTag?: string;
 	source?: "ai" | "manual";
 	rowEl?: HTMLElement;
 	labelEl?: HTMLElement;
+	selectEl?: HTMLSelectElement;
+	applyButton?: HTMLButtonElement;
+}
+
+interface LabelOption {
+	tag: string;
+	info: MeetingLabelInfo;
 }
 
 export class LabelTriageModal extends Modal {
 	private items: TriageItem[] = [];
 	private categories: NormalizedMeetingLabelCategory[] = [];
+	private labelOptions: LabelOption[] = [];
 	private listEl?: HTMLElement;
 	private summaryEl?: HTMLElement;
 	private aiStatusEl?: HTMLElement;
 	private suggestButton?: HTMLButtonElement;
 	private applyAllButton?: HTMLButtonElement;
+	private emptyToggleEl?: HTMLElement;
+	private emptyToggleTextEl?: HTMLElement;
+	private showEmpty = false;
 	private suggesting = false;
 	private closed = false;
 
@@ -50,7 +65,6 @@ export class LabelTriageModal extends Modal {
 		this.categories = getEffectiveMeetingLabelCategories(
 			this.plugin.settings.meetingLabelCategories
 		);
-		this.items = this.collectUnlabeledMeetings();
 
 		const { contentEl } = this;
 		contentEl.empty();
@@ -58,6 +72,7 @@ export class LabelTriageModal extends Modal {
 		contentEl.createEl("h2", { text: "Unlabeled meeting notes" });
 		this.summaryEl = contentEl.createEl("p", {
 			cls: "aan-label-triage-summary",
+			text: "Scanning meeting notes…",
 		});
 
 		const controls = contentEl.createDiv({
@@ -74,24 +89,72 @@ export class LabelTriageModal extends Modal {
 			text: "Apply all chosen labels",
 			cls: "mod-cta",
 		});
+		this.applyAllButton.disabled = true;
 		this.applyAllButton.addEventListener("click", () => {
 			void this.applyAll();
 		});
+
+		this.emptyToggleEl = contentEl.createEl("label", {
+			cls: "aan-label-triage-toggle",
+		});
+		this.emptyToggleEl.hide();
+		const emptyCheckbox = this.emptyToggleEl.createEl("input", {
+			type: "checkbox",
+		});
+		emptyCheckbox.addEventListener("change", () => {
+			this.showEmpty = emptyCheckbox.checked;
+			this.renderList();
+		});
+		this.emptyToggleTextEl = this.emptyToggleEl.createSpan();
+
 		this.aiStatusEl = contentEl.createEl("p", {
 			cls: "aan-label-triage-ai-status",
 		});
 		void this.refreshAiStatus();
 
 		this.listEl = contentEl.createDiv({ cls: "aan-label-triage-list" });
-		for (const item of this.items) {
-			this.renderRow(item);
-		}
-		this.updateSummary();
+		void this.loadItems();
 	}
 
 	onClose() {
 		this.closed = true;
 		this.contentEl.empty();
+	}
+
+	private async loadItems() {
+		const items = this.collectUnlabeledMeetings();
+		for (const item of items) {
+			if (this.closed) return;
+			try {
+				const content = await this.plugin.app.vault.cachedRead(
+					item.file
+				);
+				item.hasContent = hasMeaningfulContent(content);
+			} catch {
+				item.hasContent = true;
+			}
+		}
+		if (this.closed) return;
+		this.items = items;
+		this.labelOptions = this.collectCandidateTags().map((tag) => ({
+			tag,
+			info: buildMeetingLabelInfo(tag, this.categories),
+		}));
+		this.renderList();
+	}
+
+	private visibleItems(): TriageItem[] {
+		return this.items.filter((item) => this.showEmpty || item.hasContent);
+	}
+
+	private renderList() {
+		if (!this.listEl) return;
+		this.listEl.empty();
+		for (const item of this.visibleItems()) {
+			this.renderRow(item);
+		}
+		this.updateSummary();
+		this.updateApplyAllButton();
 	}
 
 	private collectUnlabeledMeetings(): TriageItem[] {
@@ -123,6 +186,7 @@ export class LabelTriageModal extends Modal {
 				title: file.basename,
 				date,
 				attendees: getAttendeesFromFrontmatter(frontmatter),
+				hasContent: true,
 			});
 		}
 		return items.sort((a, b) => b.date.localeCompare(a.date));
@@ -151,83 +215,190 @@ export class LabelTriageModal extends Modal {
 		const row = this.listEl.createDiv({ cls: "aan-label-triage-row" });
 		item.rowEl = row;
 
+		const folder =
+			item.file.parent && item.file.parent.path !== "/"
+				? item.file.parent.path
+				: "";
 		const info = row.createDiv({ cls: "aan-label-triage-info" });
 		const titleEl = info.createDiv({
 			text: item.title,
 			cls: "aan-label-triage-title",
 		});
+		titleEl.setAttribute(
+			"title",
+			folder ? `${item.title}\n${item.file.path}` : item.title
+		);
 		titleEl.addEventListener("click", () => {
 			void this.plugin.app.workspace
 				.getLeaf(true)
 				.openFile(item.file);
 			this.close();
 		});
-		const metaParts = [item.date, item.attendees.join(", ")].filter(
-			Boolean
-		);
+		const metaParts = [
+			item.date,
+			folder,
+			item.attendees.join(", "),
+		].filter(Boolean);
 		if (metaParts.length) {
-			info.createDiv({
+			const metaEl = info.createDiv({
 				text: metaParts.join(" • "),
 				cls: "aan-label-triage-meta",
 			});
+			metaEl.setAttribute("title", metaParts.join(" • "));
 		}
 
 		const actions = row.createDiv({ cls: "aan-label-triage-actions" });
 		item.labelEl = actions.createDiv({
-			text: "No label chosen",
 			cls: "aan-label-triage-label",
 		});
-		const pickButton = actions.createEl("button", { text: "Pick…" });
-		pickButton.addEventListener("click", () => {
-			const picker = new MeetingLabelPickerModal(
-				this.plugin.app,
-				this.plugin,
-				(selection) => {
-					item.chosenTag = selection.tag;
-					item.source = "manual";
-					this.updateRowLabel(item);
-				}
-			);
-			picker.open();
-		});
-		const applyButton = actions.createEl("button", {
+		item.selectEl = this.buildLabelSelect(item, actions);
+		item.applyButton = actions.createEl("button", {
 			text: "Apply",
 			cls: "mod-cta",
 		});
-		applyButton.addEventListener("click", () => {
+		item.applyButton.addEventListener("click", () => {
 			void this.applyItem(item);
 		});
 
 		this.updateRowLabel(item);
 	}
 
-	private updateRowLabel(item: TriageItem) {
-		if (!item.labelEl) return;
-		item.labelEl.replaceChildren();
-		if (!item.chosenTag) {
-			item.labelEl.setText("No label chosen");
-			item.labelEl.removeClass("has-label");
+	private buildLabelSelect(
+		item: TriageItem,
+		container: HTMLElement
+	): HTMLSelectElement {
+		const select = container.createEl("select", {
+			cls: "dropdown aan-label-triage-select",
+		});
+		select.createEl("option", { text: "Choose label…", value: "" });
+
+		const grouped = new Map<string, LabelOption[]>();
+		for (const option of this.labelOptions) {
+			const groupName = option.info.categoryName ?? "Other";
+			const group = grouped.get(groupName) ?? [];
+			group.push(option);
+			grouped.set(groupName, group);
+		}
+		for (const [groupName, options] of grouped) {
+			const groupEl = select.createEl("optgroup");
+			groupEl.label = groupName;
+			for (const option of options) {
+				groupEl.createEl("option", {
+					text: formatLabelOptionText(option.info),
+					value: option.tag,
+				});
+			}
+		}
+		select.createEl("option", {
+			text: "＋ New label…",
+			value: CREATE_LABEL_OPTION,
+		});
+
+		select.addEventListener("change", () => {
+			const value = select.value;
+			if (value === CREATE_LABEL_OPTION) {
+				select.value = item.chosenTag ?? "";
+				const picker = new MeetingLabelPickerModal(
+					this.plugin.app,
+					this.plugin,
+					(selection) => {
+						item.chosenTag = selection.tag;
+						item.source = "manual";
+						this.updateRowLabel(item);
+					}
+				);
+				picker.open();
+				return;
+			}
+			item.chosenTag = value || undefined;
+			item.source = value ? "manual" : undefined;
+			this.updateRowLabel(item);
+		});
+		return select;
+	}
+
+	private ensureSelectOption(select: HTMLSelectElement, tag: string) {
+		if (
+			Array.from(select.options).some((option) => option.value === tag)
+		) {
 			return;
 		}
-		const info = buildMeetingLabelInfo(item.chosenTag, this.categories);
-		item.labelEl.addClass("has-label");
-		item.labelEl.setText(
-			`${info.icon ? `${info.icon} ` : ""}${info.displayName}${
-				item.source === "ai" ? " (AI)" : ""
-			}`
+		const info = buildMeetingLabelInfo(tag, this.categories);
+		const option = document.createElement("option");
+		option.value = tag;
+		option.text = formatLabelOptionText(info);
+		const createOption = Array.from(select.options).find(
+			(entry) => entry.value === CREATE_LABEL_OPTION
 		);
-		item.labelEl.setAttribute("title", `#${item.chosenTag}`);
+		select.insertBefore(option, createOption ?? null);
+		if (!this.labelOptions.some((entry) => entry.tag === tag)) {
+			this.labelOptions.push({ tag, info });
+			this.labelOptions.sort((a, b) => a.tag.localeCompare(b.tag));
+		}
+	}
+
+	private updateRowLabel(item: TriageItem) {
+		if (item.selectEl) {
+			if (item.chosenTag) {
+				this.ensureSelectOption(item.selectEl, item.chosenTag);
+			}
+			item.selectEl.value = item.chosenTag ?? "";
+			item.selectEl.setAttribute(
+				"title",
+				item.chosenTag ? `#${item.chosenTag}` : "Choose a label"
+			);
+		}
+		if (item.applyButton) {
+			item.applyButton.disabled = !item.chosenTag;
+		}
+		if (item.labelEl) {
+			if (item.source === "ai" && item.chosenTag) {
+				item.labelEl.setText("AI suggestion");
+				item.labelEl.addClass("has-label");
+			} else {
+				item.labelEl.setText("");
+				item.labelEl.removeClass("has-label");
+			}
+		}
+		this.updateApplyAllButton();
+	}
+
+	private updateApplyAllButton() {
+		if (!this.applyAllButton) return;
+		const count = this.items.filter((item) => item.chosenTag).length;
+		this.applyAllButton.textContent = count
+			? `Apply all chosen labels (${count})`
+			: "Apply all chosen labels";
+		this.applyAllButton.disabled = !count;
 	}
 
 	private updateSummary() {
 		if (!this.summaryEl) return;
+		const visible = this.visibleItems();
 		this.summaryEl.setText(
-			this.items.length
-				? `${this.items.length} meeting note${
-						this.items.length === 1 ? "" : "s"
+			visible.length
+				? `${visible.length} meeting note${
+						visible.length === 1 ? "" : "s"
 				  } without a label.`
+				: this.items.length
+				? "All meeting notes with content have labels."
 				: "All meeting notes have labels. Nice and tidy."
 		);
+		if (this.emptyToggleEl && this.emptyToggleTextEl) {
+			const emptyCount = this.items.filter(
+				(item) => !item.hasContent
+			).length;
+			if (emptyCount) {
+				this.emptyToggleTextEl.setText(
+					`Include ${emptyCount} note${
+						emptyCount === 1 ? "" : "s"
+					} with no content beyond the import template`
+				);
+				this.emptyToggleEl.show();
+			} else {
+				this.emptyToggleEl.hide();
+			}
+		}
 	}
 
 	private async refreshAiStatus() {
@@ -254,7 +425,7 @@ export class LabelTriageModal extends Modal {
 
 	private async suggestAll() {
 		if (this.suggesting || !this.suggestButton) return;
-		const pending = this.items.filter((item) => !item.chosenTag);
+		const pending = this.visibleItems().filter((item) => !item.chosenTag);
 		if (!pending.length) {
 			new Notice("Every listed note already has a label chosen.");
 			return;
@@ -321,6 +492,11 @@ export class LabelTriageModal extends Modal {
 		return body.slice(0, AI_CONTEXT_MAX_CHARS);
 	}
 
+	private removeItem(item: TriageItem) {
+		this.items = this.items.filter((entry) => entry !== item);
+		item.rowEl?.remove();
+	}
+
 	private async applyItem(item: TriageItem) {
 		if (!item.chosenTag) {
 			new Notice("Choose a label for this note first.");
@@ -332,9 +508,9 @@ export class LabelTriageModal extends Modal {
 				item.file,
 				item.chosenTag
 			);
-			this.items = this.items.filter((entry) => entry !== item);
-			item.rowEl?.remove();
+			this.removeItem(item);
 			this.updateSummary();
+			this.updateApplyAllButton();
 		} catch (error) {
 			console.error(
 				"Audio Notes: could not apply meeting label",
@@ -349,7 +525,7 @@ export class LabelTriageModal extends Modal {
 		const ready = this.items.filter((item) => item.chosenTag);
 		if (!ready.length) {
 			new Notice(
-				"No labels chosen yet. Use Pick… or the AI suggestions first."
+				"No labels chosen yet. Use the dropdowns or AI suggestions first."
 			);
 			return;
 		}
@@ -361,8 +537,7 @@ export class LabelTriageModal extends Modal {
 					item.file,
 					item.chosenTag
 				);
-				this.items = this.items.filter((entry) => entry !== item);
-				item.rowEl?.remove();
+				this.removeItem(item);
 				applied += 1;
 			} catch (error) {
 				console.error(
@@ -373,6 +548,28 @@ export class LabelTriageModal extends Modal {
 			}
 		}
 		this.updateSummary();
+		this.updateApplyAllButton();
 		new Notice(`Applied labels to ${applied} meeting notes.`);
 	}
+}
+
+function formatLabelOptionText(info: MeetingLabelInfo): string {
+	return `${info.icon ? `${info.icon} ` : ""}${info.displayName}`;
+}
+
+function hasMeaningfulContent(content: string): boolean {
+	let body = content.replace(/^---\n[\s\S]*?\n---\n?/, "");
+	body = body.replace(/```audio-note[\s\S]*?(```|$)/g, "");
+	for (const line of body.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		if (trimmed.startsWith(">")) continue;
+		if (trimmed.startsWith("#")) continue;
+		if (trimmed.startsWith("<!--")) continue;
+		if (trimmed === NOTES_PLACEHOLDER_LINE) continue;
+		if (trimmed === "_No meeting notes generated._") continue;
+		if (/^[-*+]$/.test(trimmed)) continue;
+		return true;
+	}
+	return false;
 }

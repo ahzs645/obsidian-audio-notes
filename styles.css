@@ -2053,6 +2053,21 @@ input.title-input {
 .aan-label-triage-label.has-label {
   color: var(--text-normal);
 }
+.aan-label-triage-label:empty {
+  display: none;
+}
+.aan-label-triage-select {
+  max-width: 200px;
+}
+.aan-label-triage-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
 
 /* src/styles/calendar.css */
 .aan-calendar-view {

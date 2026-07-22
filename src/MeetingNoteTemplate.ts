@@ -29,6 +29,9 @@ export interface ResolvedMeetingContext {
 	periodicWeekly?: string;
 }
 
+export const NOTES_PLACEHOLDER_LINE =
+	"- Capture decisions, summaries, or paste AI output here.";
+
 const TEMPLATE_CSS_CLASS = "aan-meeting-note";
 const TEMPLATE_HIDE_PROPERTIES_CLASS = "aan-hide-properties";
 const TEMPLATE_HIDE_INLINE_PLAYER_CLASS = "aan-hide-inline-player";
@@ -174,7 +177,7 @@ function buildTemplateBody(context: ResolvedMeetingContext): string {
 		buildScheduleCallout(context),
 		"",
 		"## Notes",
-		"- Capture decisions, summaries, or paste AI output here.",
+		NOTES_PLACEHOLDER_LINE,
 	];
 	return sections.join("\n");
 }

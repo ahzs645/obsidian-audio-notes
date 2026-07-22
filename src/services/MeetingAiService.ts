@@ -631,7 +631,11 @@ function findNextLevelTwoHeadingIndex(content: string, fromIndex: number): numbe
 
 function toMessage(cause: unknown, fallback: string): string {
 	if (cause instanceof Error && cause.message.trim().length > 0) {
-		return cause.message.trim();
+		const message = cause.message.trim();
+		if (/command not found|ENOENT|not recognized|no such file/i.test(message)) {
+			return fallback;
+		}
+		return message;
 	}
 	return fallback;
 }
