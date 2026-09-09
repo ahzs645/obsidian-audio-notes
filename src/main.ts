@@ -11,6 +11,7 @@ import {
 import { monkeyPatchConsole } from "./monkeyPatchConsole";
 import { ImportWhisperModal } from "./ImportWhisperModal";
 import { WhisperInboxImporter } from "./WhisperInboxImporter";
+import { startWhisperIndexing, isIndexedWhisperTranscript } from "./WhisperImporter";
 import { WhisperExternalWatcher } from "./WhisperExternalWatcher";
 import { createAudioPlayer } from "./audio/AudioPlayerFactory";
 import type { AudioPlayerEnvironment } from "./audio/AudioPlayerFactory";
@@ -420,7 +421,7 @@ export default class AutomaticAudioNotes extends Plugin {
 				this.app.workspace.getActiveFile() ?? null,
 				false
 			);
-			void this.normalizeExistingWhisperSchedules();
+			startWhisperIndexing(this, () => this.normalizeExistingWhisperSchedules());
 			this.whisperExternalWatcher?.start();
 		});
 
@@ -848,13 +849,7 @@ export default class AutomaticAudioNotes extends Plugin {
 	}
 
 	private async isWhisperTranscript(file: TFile): Promise<boolean> {
-		try {
-			const contents = await this.app.vault.read(file);
-			const parsed = JSON.parse(contents);
-			return parsed?.source === "whisper";
-		} catch {
-			return false;
-		}
+		return isIndexedWhisperTranscript(this, file.path);
 	}
 
 	private formatFrontmatterDate(date: Date): string {

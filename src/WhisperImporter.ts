@@ -1,7 +1,8 @@
 import AdmZip from "adm-zip";
+import { IncrementalIndex } from "./IncrementalIndex";
 import { createHash } from "crypto";
 import path from "path";
-import { Notice, normalizePath, Vault } from "obsidian";
+import { Notice, Modal, normalizePath, Vault } from "obsidian";
 import type AutomaticAudioNotes from "./main";
 import {
 	generateMeetingNoteContent,
@@ -66,6 +67,7 @@ export interface ProcessedSegment {
 }
 
 export interface WhisperImportResult {
+	duplicateCheckPending?: boolean;
 	audioPath: string;
 	transcriptPath: string;
 	segmentCount: number;
@@ -102,6 +104,7 @@ interface ExistingImportMatch {
 }
 
 interface WhisperImportIndexEntry {
+	duplicateReviewRequired?: boolean;
 	transcriptPath: string;
 	audioPath?: string;
 	recordingArchive?: string;
@@ -117,6 +120,7 @@ interface WhisperImportIndexEntry {
 
 interface WhisperImportIndex {
 	root: string;
+	progress: { complete: number; total: number; pending: number; unresolved: number };
 	entriesByPath: Map<string, WhisperImportIndexEntry>;
 	byAudioSha1: Map<string, Set<string>>;
 	bySegmentsSha1: Map<string, Set<string>>;
@@ -155,10 +159,87 @@ const DEFAULT_OPTIONS = (plugin: AutomaticAudioNotes): WhisperImportOptions => (
 	noteFolder: plugin.settings.whisperNoteFolder,
 });
 
-const whisperImportIndexCache = new WeakMap<
-	AutomaticAudioNotes,
-	Map<string, Promise<WhisperImportIndex>>
->();
+const catalogs = new WeakMap<AutomaticAudioNotes, Map<string, Promise<IncrementalIndex<WhisperImportIndexEntry>>>>();
+
+// Serialize all import entry points for this vault, including watcher/manual overlap.
+const importQueues = new WeakMap<AutomaticAudioNotes, Promise<unknown>>();
+function serializeImport<T>(plugin: AutomaticAudioNotes, work: () => Promise<T>): Promise<T> {
+	const previous = importQueues.get(plugin) ?? Promise.resolve();
+	const next = previous.catch(() => undefined).then(work);
+	importQueues.set(plugin, next.catch(() => undefined));
+	return next;
+}
+
+async function getCatalog(plugin: AutomaticAudioNotes, folder?: string) {
+	const root = normalizeIndexRoot(folder);
+	let cache = catalogs.get(plugin);
+	if (!cache) { cache = new Map(); catalogs.set(plugin, cache); }
+	let promise = cache.get(root);
+	if (!promise) {
+		promise = (async () => {
+			const adapter = plugin.app.vault.adapter;
+			const checkpoint = `${plugin.manifest.dir}/whisper-index-${hashBuffer(Buffer.from(root))}.json`;
+			const catalog = new IncrementalIndex<WhisperImportIndexEntry>({
+				files: () => plugin.app.vault.getFiles()
+					.filter(f => f.extension === "json" && isPathInsideRoot(f.path, root) && !f.path.startsWith(`${plugin.app.vault.configDir}/`))
+					.map(f => ({ path: f.path, mtime: f.stat.mtime, size: f.stat.size })),
+				read: async file => buildWhisperImportIndexEntry(file.path, JSON.parse(await adapter.read(file.path)), file.path),
+				load: async () => await adapter.exists(checkpoint) ? adapter.read(checkpoint) : null,
+				save: async contents => {
+					await adapter.write(`${checkpoint}.tmp`, contents);
+					await adapter.rename(`${checkpoint}.tmp`, checkpoint);
+				},
+			});
+			plugin.register(() => catalog.stop());
+			await catalog.initialize();
+			return catalog;
+		})();
+		cache.set(root, promise);
+	}
+	return promise;
+}
+
+export function startWhisperIndexing(plugin: AutomaticAudioNotes, onComplete?: () => Promise<void>): void {
+	const status = plugin.addStatusBarItem();
+	status.setText("Whisper index: loading saved progress…");
+	let paused = false;
+	let stopped = false;
+	const notified = new Set<string>();
+	plugin.register(() => { stopped = true; });
+	const update = async (work: boolean) => {
+		try {
+			if (stopped) return;
+			const catalog = await getCatalog(plugin, plugin.settings.whisperTranscriptFolder);
+			catalog.reconcile();
+			if (work && !paused) await catalog.step();
+			if (stopped) return;
+			const reviews = await getWhisperDuplicateReview(plugin);
+			const possible = reviews.filter(r => r.state === "possible-duplicate").length;
+			const pending = reviews.filter(r => r.state === "pending").length;
+			const p = catalog.progress;
+			const root = normalizeIndexRoot(plugin.settings.whisperTranscriptFolder);
+			if (!p.pending && !p.unresolved && !notified.has(root)) {
+				notified.add(root);
+				if (onComplete) void onComplete().catch(console.error);
+			}
+			status.setText(`Whisper index: ${p.complete}/${p.total}${p.unresolved ? ` · ${p.unresolved} unresolved` : ""}${possible ? ` · ${possible} possible duplicates` : ""}${pending ? ` · ${pending} imports awaiting check` : ""}${paused ? " · paused" : ""}${catalog.saveError ? " · save failed" : ""}`);
+		} catch (error) {
+			status.setText("Whisper index: unavailable");
+			console.error("Audio Notes: catalog unavailable", error);
+		}
+	};
+	plugin.registerDomEvent(status, "click", () => {
+		void getCatalog(plugin, plugin.settings.whisperTranscriptFolder).then(c => {
+			const p = c.progress;
+			new Notice(`Whisper index: ${p.complete}/${p.total} checked, ${p.pending} pending, ${p.unresolved} unresolved. ${c.saveError}\n${c.unresolved.slice(0, 5).join("\n")}`, 10_000);
+		});
+	});
+	plugin.addCommand({ id: "review-whisper-duplicates", name: "Review import duplicate checks", callback: () => { void openDuplicateReview(plugin).catch(console.error); } });
+	plugin.addCommand({ id: "pause-resume-whisper-index", name: "Pause/resume background Whisper indexing", callback: () => { paused = !paused; void update(false); } });
+	plugin.addCommand({ id: "retry-whisper-index", name: "Retry unresolved Whisper index files", callback: () => { void getCatalog(plugin, plugin.settings.whisperTranscriptFolder).then(c => { c.retry(); void update(true); }); } });
+	plugin.registerInterval(window.setInterval(() => { void update(true); }, 5_000));
+	void update(false);
+}
 
 function slugify(input: string | undefined, fallback: string): string {
 	if (!input || input.trim() === "") {
@@ -380,6 +461,7 @@ function isPathInsideRoot(path: string, normalizedRoot: string): boolean {
 function createEmptyWhisperImportIndex(root: string): WhisperImportIndex {
 	return {
 		root,
+		progress: { complete: 0, total: 0, pending: 0, unresolved: 0 },
 		entriesByPath: new Map(),
 		byAudioSha1: new Map(),
 		bySegmentsSha1: new Map(),
@@ -499,6 +581,7 @@ function buildWhisperImportIndexEntry(
 		typeof data?.recordingUrl === "string" ? data.recordingUrl : undefined;
 	return {
 		transcriptPath: normalizedPath,
+		duplicateReviewRequired: data?.duplicateReviewRequired === true,
 		audioPath,
 		recordingArchive,
 		recordingDrivePath,
@@ -528,66 +611,17 @@ function buildWhisperImportIndexEntry(
 	};
 }
 
-async function buildWhisperImportIndex(
-	plugin: AutomaticAudioNotes,
-	normalizedRoot: string,
-	defaultName: string
-): Promise<WhisperImportIndex> {
-	const index = createEmptyWhisperImportIndex(normalizedRoot);
-	const jsonFiles = plugin.app.vault.getFiles().filter(
-		(file) =>
-			file.extension === "json" &&
-			isPathInsideRoot(file.path, normalizedRoot)
-	);
-
-	const BATCH_SIZE = 50;
-	for (let i = 0; i < jsonFiles.length; i += BATCH_SIZE) {
-		const batch = jsonFiles.slice(i, i + BATCH_SIZE);
-		const results = await Promise.allSettled(
-			batch.map(async (file) => {
-				const contents = await plugin.app.vault.read(file);
-				const parsed = JSON.parse(contents);
-				return buildWhisperImportIndexEntry(
-					file.path,
-					parsed,
-					defaultName
-				);
-			})
-		);
-		for (const result of results) {
-			if (result.status === "fulfilled" && result.value) {
-				addWhisperImportIndexEntry(index, result.value);
-			}
-		}
-	}
-	return index;
-}
-
 async function getWhisperImportIndex(
 	plugin: AutomaticAudioNotes,
 	transcriptFolder: string | undefined,
-	defaultName: string
+	_defaultName: string
 ): Promise<WhisperImportIndex> {
-	const normalizedRoot = normalizeIndexRoot(transcriptFolder);
-	let pluginCache = whisperImportIndexCache.get(plugin);
-	if (!pluginCache) {
-		pluginCache = new Map();
-		whisperImportIndexCache.set(plugin, pluginCache);
-	}
-	const existing = pluginCache.get(normalizedRoot);
-	if (existing) {
-		return existing;
-	}
-	const next = buildWhisperImportIndex(
-		plugin,
-		normalizedRoot,
-		defaultName
-	).catch((error) => {
-		pluginCache?.delete(normalizedRoot);
-		throw error;
-	});
-	pluginCache.set(normalizedRoot, next);
-	return next;
+	const catalog = await getCatalog(plugin, transcriptFolder);
+	catalog.reconcile();
+	const index = createEmptyWhisperImportIndex(normalizeIndexRoot(transcriptFolder));
+	index.progress = catalog.progress;
+	for (const entry of catalog.entries) addWhisperImportIndexEntry(index, entry);
+	return index;
 }
 
 async function resolveIndexedMatch(
@@ -774,12 +808,9 @@ async function recordWhisperImportIndexEntry(
 	transcriptFolder: string | undefined,
 	entry: WhisperImportIndexEntry
 ) {
-	const index = await getWhisperImportIndex(
-		plugin,
-		transcriptFolder,
-		entry.transcriptPath
-	);
-	addWhisperImportIndexEntry(index, entry);
+	const catalog = await getCatalog(plugin, transcriptFolder);
+	const stat = await plugin.app.vault.adapter.stat(entry.transcriptPath);
+	if (stat) await catalog.record({ path: entry.transcriptPath, mtime: stat.mtime, size: stat.size }, entry);
 }
 
 function buildMeetingNoteFolder(baseFolder: string, meetingDate: Date): string {
@@ -897,7 +928,7 @@ function trimSegments(
 		});
 }
 
-export async function importWhisperArchive(
+async function importWhisperArchiveInternal(
 	plugin: AutomaticAudioNotes,
 	data: ArrayBuffer,
 	originalName: string,
@@ -1021,7 +1052,10 @@ export async function importWhisperArchive(
 		plugin.app.vault,
 		`${transcriptFolder}/${baseName}.json`
 	);
+	const progress = (await getCatalog(plugin, options.transcriptFolder)).progress;
+	const duplicateCheckPending = progress.pending > 0 || progress.unresolved > 0;
 	const transcriptPayload = {
+		duplicateReviewRequired: true,
 		source: "whisper",
 		whisperFingerprint,
 		audioPath: audioPath ?? null,
@@ -1043,7 +1077,7 @@ export async function importWhisperArchive(
 	if (audioPath) {
 		await plugin.app.vault.adapter.writeBinary(audioPath, audioBuffer);
 	}
-	await plugin.app.vault.adapter.write(
+	await plugin.app.vault.create(
 		transcriptPath,
 		JSON.stringify(transcriptPayload, null, 2)
 	);
@@ -1064,6 +1098,7 @@ export async function importWhisperArchive(
 		audioPath: audioPath ?? recordingDrivePath ?? localAudioPath ?? "",
 		transcriptPath,
 		segmentCount: segments.length,
+		duplicateCheckPending,
 		recordingArchive,
 		recordingDrivePath,
 		recordingUrl,
@@ -1093,7 +1128,7 @@ export function notifyWhisperImportSuccess(result: WhisperImportResult) {
 	new Notice(
 		`Whisper archive imported.\nAudio: ${result.audioPath}\nTranscript: ${result.transcriptPath}${
 			result.notePath ? `\nNote: ${result.notePath}` : ""
-		}`
+		}${result.duplicateCheckPending ? "\nDuplicate check pending; historical indexing continues." : ""}`
 	);
 }
 
@@ -1231,7 +1266,7 @@ export function parseVttFilenameDate(filename: string): {
 	};
 }
 
-export async function importVttFile(
+async function importVttFileInternal(
 	plugin: AutomaticAudioNotes,
 	vttContent: string,
 	originalName: string,
@@ -1284,6 +1319,7 @@ export async function importVttFile(
 		);
 	}
 
+
 	const baseName = slugify(
 		parsedTitle || originalName.replace(/\.vtt$/i, ""),
 		`vtt-${Date.now()}`
@@ -1304,7 +1340,10 @@ export async function importVttFile(
 		`${transcriptFolder}/${baseName}.json`
 	);
 
+	const progress = (await getCatalog(plugin, options.transcriptFolder)).progress;
+	const duplicateCheckPending = progress.pending > 0 || progress.unresolved > 0;
 	const transcriptPayload = {
+		duplicateReviewRequired: true,
 		source: "whisper",
 		whisperFingerprint: null,
 		audioPath: null,
@@ -1323,7 +1362,7 @@ export async function importVttFile(
 		durationMs: meetingDurationMs,
 	};
 
-	await plugin.app.vault.adapter.write(
+	await plugin.app.vault.create(
 		transcriptPath,
 		JSON.stringify(transcriptPayload, null, 2)
 	);
@@ -1351,6 +1390,7 @@ export async function importVttFile(
 		audioPath: "",
 		transcriptPath,
 		segmentCount: segments.length,
+		duplicateCheckPending,
 		notePath: await maybeCreateNote(
 			plugin,
 			options,
@@ -1365,4 +1405,58 @@ export async function importVttFile(
 			parsedTitle ||
 			baseName.replace(/-/g, " "),
 	};
+}
+
+export async function isIndexedWhisperTranscript(plugin: AutomaticAudioNotes, path: string): Promise<boolean> {
+	const catalog = await getCatalog(plugin, plugin.settings.whisperTranscriptFolder);
+	catalog.reconcile();
+	return catalog.entries.some(entry => entry.transcriptPath === path);
+}
+
+export function importWhisperArchive(plugin: AutomaticAudioNotes, data: ArrayBuffer, originalName: string, overrideOptions?: Partial<WhisperImportOptions>): Promise<WhisperImportResult> {
+	return serializeImport(plugin, () => importWhisperArchiveInternal(plugin, data, originalName, overrideOptions));
+}
+export function importVttFile(plugin: AutomaticAudioNotes, content: string, originalName: string, overrideOptions?: Partial<WhisperImportOptions>): Promise<WhisperImportResult> {
+	return serializeImport(plugin, () => importVttFileInternal(plugin, content, originalName, overrideOptions));
+}
+
+export interface DuplicateReviewRow {
+	path: string;
+	state: "pending" | "clear" | "possible-duplicate";
+	matches: string[];
+}
+export async function getWhisperDuplicateReview(plugin: AutomaticAudioNotes, folder?: string): Promise<DuplicateReviewRow[]> {
+	const index = await getWhisperImportIndex(plugin, folder ?? plugin.settings.whisperTranscriptFolder, "");
+	const incomplete = index.progress.pending > 0 || index.progress.unresolved > 0;
+	return [...index.entriesByPath.values()].filter(e => e.duplicateReviewRequired).map(entry => {
+		const candidates = new Set<string>();
+		for (const [map, key] of [[index.byAudioSha1, entry.audioSha1], [index.bySegmentsSha1, entry.segmentsSha1], [index.byFingerprint, entry.fingerprint]] as const) {
+			if (key) for (const path of map.get(key) ?? []) candidates.add(path);
+		}
+		if (entry.normalizedName) for (const path of index.byName.get(entry.normalizedName) ?? []) {
+			const other = index.entriesByPath.get(path)!;
+			if ((!entry.normalizedDate || !other.normalizedDate || entry.normalizedDate === other.normalizedDate) &&
+				(!entry.durationMs || !other.durationMs || Math.abs(entry.durationMs - other.durationMs) < 2000)) candidates.add(path);
+		}
+		candidates.delete(entry.transcriptPath);
+		return { path: entry.transcriptPath, matches: [...candidates].sort(), state: candidates.size ? "possible-duplicate" : incomplete ? "pending" : "clear" };
+	});
+}
+
+async function openDuplicateReview(plugin: AutomaticAudioNotes): Promise<void> {
+	const rows = await getWhisperDuplicateReview(plugin);
+	const modal = new Modal(plugin.app);
+	modal.contentEl.createEl("h2", { text: "Import duplicate review" });
+	modal.contentEl.createEl("p", { text: "Checks update as the catalog grows. Possible matches need review; no files are automatically removed. Reopen this view to refresh." });
+	if (!rows.length) modal.contentEl.createEl("p", { text: "No new imports to review." });
+	for (const row of rows.sort((a, b) => a.state.localeCompare(b.state))) {
+		const item = modal.contentEl.createDiv();
+		const label = row.state === "pending" ? "Duplicate check pending" : row.state === "clear" ? "No match in current catalog" : "Possible duplicate";
+		item.createEl("p", { text: `${label}: ${row.path}` });
+		for (const path of [row.path, ...row.matches]) {
+			const button = item.createEl("button", { text: path });
+			button.addEventListener("click", () => { void plugin.app.workspace.openLinkText(path, "", true); });
+		}
+	}
+	modal.open();
 }

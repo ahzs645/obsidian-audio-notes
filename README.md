@@ -286,3 +286,13 @@ with open(output_filename, "w") as f:
 
 print("Done!")
 ```
+
+### Background duplicate catalog
+
+The Whisper duplicate catalog is built gradually while Obsidian is open: one transcript is started every five seconds, with at most two outstanding reads. Imports no longer trigger a full transcript scan. Progress is saved after each file in a separate `whisper-index-*.json` checkpoint in the plugin directory and resumes after restarting Obsidian. Changed/new transcripts are indexed again; deleted transcripts are removed from the catalog.
+
+The status bar shows checked/total counts and unresolved files. Click it for details, or use **Pause/resume background Whisper indexing** and **Retry unresolved Whisper index files** in the command palette. Pausing stops new reads for this session; an already-started read can finish. Failed or slow reads remain unresolved and are retried after five minutes, after pending files. A timed-out read retains its concurrency slot until the cloud provider finishes it, preventing an unlimited download backlog.
+
+Known duplicates are skipped immediately. Unmatched files now import without waiting for historical indexing, with a visible "duplicate check pending" message while the catalog is incomplete. This applies to manual, inbox, and external-folder imports. Import operations are serialized within this plugin instance so simultaneous requests for the same recording do not create two copies. Newly imported transcript metadata is checkpointed immediately.
+
+Use **Review import duplicate checks** to see pending checks, possible matches, and imports with no match in the current catalog. Review obligations are saved in transcript metadata and survive checkpoint rebuilding and restart. As historical records become available, matching audio hashes, segment hashes, fingerprints, or name/date/duration candidates are flagged for review. The status bar shows pending checks and possible duplicates. Nothing is automatically merged, overwritten, or deleted. Until all historical records are checked, an unmatched result remains pending. Offline historical files therefore no longer block new imports; they only delay the final duplicate check. External-folder archives follow the usual move-to-imported behavior after a successful import.

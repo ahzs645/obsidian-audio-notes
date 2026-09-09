@@ -55,6 +55,7 @@ export class WhisperExternalWatcher {
 				(entry) => entry.isFile() && isWhisperArchiveName(entry.name)
 			);
 			let imported = 0;
+			let pendingChecks = 0;
 			let duplicates = 0;
 			let failed = 0;
 			for (const entry of archives) {
@@ -69,7 +70,8 @@ export class WhisperExternalWatcher {
 						buffer.byteOffset,
 						buffer.byteOffset + buffer.byteLength
 					);
-					await importWhisperArchive(this.plugin, data, entry.name);
+					const result = await importWhisperArchive(this.plugin, data, entry.name);
+					if (result.duplicateCheckPending) pendingChecks += 1;
 					imported += 1;
 					await this.moveToImported(folder, fullPath, entry.name);
 				} catch (error) {
@@ -88,6 +90,7 @@ export class WhisperExternalWatcher {
 			}
 			if (imported || failed || options?.manual) {
 				const parts = [`${imported} imported`];
+				if (pendingChecks) parts.push(`${pendingChecks} duplicate checks pending`);
 				if (duplicates) {
 					parts.push(`${duplicates} already imported`);
 				}

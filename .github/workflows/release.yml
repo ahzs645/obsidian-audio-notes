@@ -22,7 +22,8 @@ jobs:
 
       - name: Build plugin
         run: |
-          npm install
+          npm ci
+          npm test
           npm run build
 
       - name: Get version from tag

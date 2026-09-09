@@ -118,8 +118,8 @@ export class WhisperInboxImporter {
 				);
 				new Notice(
 					result.notePath
-						? `Imported ${refreshed.name} from Whisper inbox.`
-						: `Imported ${refreshed.name} from Whisper inbox without creating a note.`,
+						? `Imported ${refreshed.name} from Whisper inbox.${result.duplicateCheckPending ? " Duplicate check pending." : ""}`
+						: `Imported ${refreshed.name} from Whisper inbox without creating a note.${result.duplicateCheckPending ? " Duplicate check pending." : ""}`,
 					5000
 				);
 				return;

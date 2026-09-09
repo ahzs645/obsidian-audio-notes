@@ -599,7 +599,7 @@ export class ImportWhisperModal extends Modal {
 		}
 		const noteCount = results.filter((result) => Boolean(result.notePath)).length;
 		new Notice(
-			`${results.length} Whisper archives imported.\nNotes created: ${noteCount}`
+			`${results.length} Whisper archives imported.\nNotes created: ${noteCount}${results.some(r => r.duplicateCheckPending) ? "\nSome duplicate checks are pending; historical indexing continues." : ""}`
 		);
 	}
 
