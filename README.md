@@ -296,3 +296,12 @@ The status bar shows checked/total counts and unresolved files. Click it for det
 Known duplicates are skipped immediately. Unmatched files now import without waiting for historical indexing, with a visible "duplicate check pending" message while the catalog is incomplete. This applies to manual, inbox, and external-folder imports. Import operations are serialized within this plugin instance so simultaneous requests for the same recording do not create two copies. Newly imported transcript metadata is checkpointed immediately.
 
 Use **Review import duplicate checks** to see pending checks, possible matches, and imports with no match in the current catalog. Review obligations are saved in transcript metadata and survive checkpoint rebuilding and restart. As historical records become available, matching audio hashes, segment hashes, fingerprints, or name/date/duration candidates are flagged for review. The status bar shows pending checks and possible duplicates. Nothing is automatically merged, overwritten, or deleted. Until all historical records are checked, an unmatched result remains pending. Offline historical files therefore no longer block new imports; they only delay the final duplicate check. External-folder archives follow the usual move-to-imported behavior after a successful import.
+
+
+### AI model discovery
+
+The sparkle button beside **Live Transcript** generates meeting notes. Its dropdown retrieves model names and model-specific effort choices from the locally authenticated Codex or Claude Code CLI. The settings page uses the same catalog. Codex uses `app-server` model discovery; Claude Code uses its initialization metadata. Discovery sends no transcript or generation prompt.
+
+The catalog refreshes on plugin startup and every six hours while Obsidian is open; **Refresh models** requests an immediate update. The last successful list is saved in `ai-models.json` for offline use. Failed refreshes keep that list and show an error. Saved/custom model IDs remain available even if absent from the latest catalog. Choosing a model that does not support the previous effort falls back to **Provider default**. Model availability follows the configured CLI and account, so an outdated CLI may still need updating.
+
+Index checkpoints retain a temporary recovery copy as well as the main file. Startup can recover progress left in the temporary file by older versions, and failed saves retry even after all transcripts have been checked.

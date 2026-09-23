@@ -184,10 +184,23 @@ async function getCatalog(plugin: AutomaticAudioNotes, folder?: string) {
 					.filter(f => f.extension === "json" && isPathInsideRoot(f.path, root) && !f.path.startsWith(`${plugin.app.vault.configDir}/`))
 					.map(f => ({ path: f.path, mtime: f.stat.mtime, size: f.stat.size })),
 				read: async file => buildWhisperImportIndexEntry(file.path, JSON.parse(await adapter.read(file.path)), file.path),
-				load: async () => await adapter.exists(checkpoint) ? adapter.read(checkpoint) : null,
+				load: async () => {
+					// The temporary copy is written first and may contain progress from
+					// older versions whose rename-over-existing operation failed.
+					for (const path of [`${checkpoint}.tmp`, checkpoint]) {
+						try {
+							if (!await adapter.exists(path)) continue;
+							const raw = await adapter.read(path), saved = JSON.parse(raw);
+							if (saved?.version === 1 && Array.isArray(saved.records)) return raw;
+						} catch { /* Try the other checkpoint copy. */ }
+					}
+					return null;
+				},
 				save: async contents => {
 					await adapter.write(`${checkpoint}.tmp`, contents);
-					await adapter.rename(`${checkpoint}.tmp`, checkpoint);
+					// Obsidian rename rejects an existing destination. Keep two copies:
+					// if either write is interrupted the other remains recoverable.
+					await adapter.write(checkpoint, contents);
 				},
 			});
 			plugin.register(() => catalog.stop());

@@ -418,8 +418,8 @@ export class ExportModal extends Modal {
 			content: this.content,
 			categoryFilter: this.getCategoryFilter(),
 			dateRange: {
-				start: this.startDate ? new Date(this.startDate) : null,
-				end: this.endDate ? new Date(this.endDate) : null,
+				start: parseLocalDate(this.startDate),
+				end: parseLocalDate(this.endDate),
 			},
 			metadata: { ...this.metadata },
 		};
@@ -515,4 +515,11 @@ export class ExportModal extends Modal {
 			return "text/plain";
 		}
 	}
+}
+
+/** Parse a date input value (YYYY-MM-DD) as local midnight rather than UTC. */
+function parseLocalDate(value: string): Date | null {
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+	if (!match) return null;
+	return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
 }

@@ -6,6 +6,7 @@ import {
 } from "../MeetingLabelPickerModal";
 import { MeetingLabelCategoryModal } from "../settings/MeetingLabelCategoryModal";
 import { normalizeTagPrefix, slugifyTagSegment } from "../meeting-labels";
+import { localDateKey } from "../meeting-events";
 
 export interface NewMeetingDetails {
 	title: string;
@@ -39,7 +40,7 @@ export class NewMeetingModal extends Modal {
 		const now = new Date();
 		this.titleValue = options.initialTitle ?? "New meeting";
 		this.dateValue =
-			options.initialDate?.trim() || now.toISOString().slice(0, 10);
+			options.initialDate?.trim() || localDateKey(now);
 		const defaultStartTime = `${now
 			.getHours()
 			.toString()

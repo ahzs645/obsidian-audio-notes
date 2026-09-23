@@ -36,6 +36,30 @@
 	background: rgba(var(--interactive-accent-rgb, 68, 138, 255), 0.15);
 }
 
+.audio-player-container .audio-note-play-button {
+	position: relative;
+}
+
+/* Buffering after the first press (file may be syncing from Google Drive). */
+.audio-player-container .audio-note-play-button.is-loading svg {
+	opacity: 0.35;
+}
+
+.audio-player-container .audio-note-play-button.is-loading::after {
+	content: "";
+	position: absolute;
+	inset: 3px;
+	border-radius: 50%;
+	border: 2px solid transparent;
+	border-top-color: var(--interactive-accent);
+	animation: aan-spin 0.8s linear infinite;
+}
+
+.seek-slider:disabled {
+	cursor: default;
+	opacity: 0.6;
+}
+
 .aan-player-speed-control {
 	display: inline-flex;
 	align-items: center;

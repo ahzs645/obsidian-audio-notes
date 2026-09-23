@@ -82,8 +82,9 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 	}
 
 	onOpen() {
-		super.onOpen();
+		// SuggestModal.onOpen() renders the list right away, so load labels first.
 		this.availableLabels = this.computeAvailableLabels();
+		super.onOpen();
 		this.renderSelectedTags();
 		if (this.initialQuery) {
 			this.inputEl.value = this.initialQuery;
@@ -275,6 +276,11 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 	renderSuggestion(suggestion: MeetingLabelSuggestion, el: HTMLElement) {
 		el.empty();
 		el.addClass("aan-label-picker-item");
+		if (suggestion.kind === "existing" || suggestion.kind === "create") {
+			setHoverLabel(el, `${suggestion.label.displayName}\n#${suggestion.tag}`);
+		} else if (suggestion.kind === "create-subtag") {
+			setHoverLabel(el, `${suggestion.parentLabel.displayName}\n#${suggestion.parentTag}`);
+		}
 
 		if (suggestion.kind === "create-category") {
 			const title = el.createDiv("aan-label-picker-title");
@@ -409,4 +415,8 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 
 		return Array.from(results.values());
 	}
+}
+
+function setHoverLabel(element: HTMLElement, text: string) {
+	element.setAttribute("title", text);
 }

@@ -22,60 +22,56 @@
 	export let filePicker: HTMLInputElement | null = null;
 </script>
 
-<section class="audio-note-attachments-panel">
+<!-- The whole row is a drop target so files can be dropped without expanding it first. -->
+<section
+	class="audio-note-attachments-panel"
+	class:is-dragging={dragActive}
+	class:is-expanded={!attachmentsCollapsed}
+	on:dragenter={handleDragEnter}
+	on:dragover={handleDragOver}
+	on:dragleave={handleDragLeave}
+	on:drop={handleDrop}
+	aria-busy={isUploadingAttachments}
+>
 	<header class="aan-attachments-header">
-		<div>
-			<p class="aan-attachments-title">Attachments</p>
+		<button
+			class="aan-attachments-summary"
+			type="button"
+			on:click={() => (attachmentsCollapsed = !attachmentsCollapsed)}
+			aria-expanded={!attachmentsCollapsed}
+			title={attachmentsCollapsed ? "Show attachments" : "Hide attachments"}
+		>
+			<svg class="aan-attachments-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" />
+			</svg>
+			<span class="aan-attachments-title">{dragActive ? "Drop to attach" : "Attachments"}</span>
 			{#if attachments.length}
-				<p class="aan-attachments-subtitle">
-					{attachments.length} file{attachments.length === 1 ? "" : "s"}
-				</p>
+				<span class="aan-attachments-count">{attachments.length}</span>
 			{/if}
-		</div>
-		<div class="aan-attachments-actions">
-			<button
-				class="aan-transcript-btn"
-				type="button"
-				on:click={triggerFileDialog}
-				disabled={!attachmentsEnabled || isUploadingAttachments}
-			>
-				{isUploadingAttachments ? "Uploading…" : "Add files"}
-			</button>
-			<button
-				class="aan-attachments-toggle"
-				type="button"
-				on:click={() => (attachmentsCollapsed = !attachmentsCollapsed)}
-				aria-label={attachmentsCollapsed ? "Expand attachments" : "Collapse attachments"}
-				aria-expanded={!attachmentsCollapsed}
-			>
-				<svg viewBox="0 0 24 24" aria-hidden="true" class:expanded={!attachmentsCollapsed}>
-					<path
-						d="M6 9l6 6 6-6"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					/>
-				</svg>
-			</button>
-		</div>
+			<svg class="aan-attachments-chevron" class:expanded={!attachmentsCollapsed} viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<path d="M6 9l6 6 6-6" />
+			</svg>
+		</button>
+		<button
+			class="aan-attachments-add"
+			type="button"
+			on:click={triggerFileDialog}
+			disabled={!attachmentsEnabled || isUploadingAttachments}
+			title={isUploadingAttachments ? "Uploading…" : "Add files"}
+			aria-label={isUploadingAttachments ? "Uploading files" : "Add files"}
+		>
+			{#if isUploadingAttachments}
+				<span class="aan-transcript-spinner" aria-hidden="true"></span>
+			{:else}
+				<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+			{/if}
+		</button>
 	</header>
 
 	{#if !attachmentsCollapsed}
-		<div
-			class="aan-attachments-dropzone"
-			class:is-disabled={!attachmentsEnabled}
-			class:is-dragging={dragActive}
-			on:dragenter={handleDragEnter}
-			on:dragover={handleDragOver}
-			on:dragleave={handleDragLeave}
-			on:drop={handleDrop}
-			aria-disabled={!attachmentsEnabled}
-			aria-busy={isUploadingAttachments}
-		>
-			<p>{attachmentStatusText}</p>
-		</div>
+		{#if !attachments.length}
+			<p class="aan-attachments-empty">{attachmentStatusText}</p>
+		{/if}
 		{#if attachments.length}
 			<ul class="aan-attachments-list">
 				{#each attachments as attachment (attachment.path)}

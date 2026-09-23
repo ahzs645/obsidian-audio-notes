@@ -1,3 +1,4 @@
+import { modelOptions, effortOptions } from "../services/AiModelCatalog";
 import {
 	ItemView,
 	Notice,
@@ -5,6 +6,7 @@ import {
 	TFolder,
 	WorkspaceLeaf,
 } from "obsidian";
+import type { MeetingAiCodexEffort, MeetingAiClaudeEffort } from "../AudioNotesSettings";
 import TranscriptDisplay from "../transcript-view/TranscriptDisplay.svelte";
 import type {
 	TranscriptSegmentWithSpeaker,
@@ -12,6 +14,7 @@ import type {
 } from "../transcript-view/types";
 import type AutomaticAudioNotes from "../main";
 import { AudioNote } from "../AudioNotes";
+import type { AudioPlayerControls } from "../audio/AudioPlayerFactory";
 import type { Transcript } from "../Transcript";
 import { AttachmentManager } from "./transcript-sidebar/AttachmentManager";
 import {
@@ -60,7 +63,10 @@ export class TranscriptSidebarView extends ItemView {
 	private isUploadingMeetingAudio = false;
 	private isUploadingTranscript = false;
 	private isTranscribingMeeting = false;
-	private isGeneratingMeetingAi = false;
+	private get isGeneratingMeetingAi(): boolean {
+		return this.plugin.meetingAiService.isGenerating(this.currentMeetingFile);
+	}
+	private isSavingMeetingAiOptions = false;
 	private isDeletingMeeting = false;
 	private currentAudioPath: string | null = null;
 	private currentHasAudioReference = false;
@@ -78,6 +84,9 @@ export class TranscriptSidebarView extends ItemView {
 	private currentAttendees: string[] = [];
 	private speakerLabelOverrides: Record<string, string> = {};
 	private currentScheduleInfo: MeetingScheduleInfo | null = null;
+	private currentPlayer: AudioPlayerControls | null = null;
+	/** Bumped on every meeting switch so slow loads for a previous meeting are dropped. */
+	private loadGeneration = 0;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -179,6 +188,9 @@ export class TranscriptSidebarView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
+		this.register(this.plugin.meetingAiService.models.subscribe(() => this.updateAiProps()));
+		this.register(this.plugin.meetingAiService.subscribeGeneration(() => this.updateAiProps()));
+		void this.plugin.meetingAiService.refreshModels();
 		this.renderBase();
 		// @ts-ignore custom workspace signal
 		this.registerEvent(
@@ -194,6 +206,8 @@ export class TranscriptSidebarView extends ItemView {
 	}
 
 	onClose(): Promise<void> {
+		this.loadGeneration++;
+		this.releasePlayer();
 		if (this.transcriptComponent) {
 			this.transcriptComponent.$destroy();
 			this.transcriptComponent = null;
@@ -225,7 +239,10 @@ export class TranscriptSidebarView extends ItemView {
 	}
 
 	public async showMeetingFile(file: TFile): Promise<void> {
+		const generation = ++this.loadGeneration;
+		const isStale = () => generation !== this.loadGeneration;
 		let activeFile = file;
+		this.releasePlayer();
 		this.setMode("meeting");
 		this.resetAttachments();
 		this.currentFilePath = activeFile.path;
@@ -260,6 +277,20 @@ export class TranscriptSidebarView extends ItemView {
 			}
 			const transcriptPath = (frontmatter["transcript_uri"] ??
 				frontmatter["transcript"]) as string | undefined;
+			// Clear the previous meeting right away; the rest of this load can be
+			// slow when files are still syncing down from Google Drive.
+			this.transcriptComponent?.$set({
+				playerContainer: null,
+				currentTime: null,
+				segments: [],
+				transcriptText: "",
+				metadataDuration: null,
+				hasTranscript: typeof transcriptPath === "string",
+				isLoadingTranscript: typeof transcriptPath === "string",
+				needsAudioUpload: false,
+				isTranscribing: this.isTranscribingMeeting,
+			});
+			this.updateAiProps();
 			const archivedRecording =
 				this.meetingFiles.resolveArchivedRecording(frontmatter);
 			if (
@@ -269,6 +300,7 @@ export class TranscriptSidebarView extends ItemView {
 			) {
 				audioPath = archivedRecording.localAudioPath;
 			}
+			if (isStale()) return;
 
 			this.currentTranscriptPath =
 				typeof transcriptPath === "string"
@@ -319,6 +351,7 @@ export class TranscriptSidebarView extends ItemView {
 				noteTitle,
 				preferredDateParts ?? undefined
 			);
+			if (isStale()) return;
 			if (meetingFolderResult) {
 				audioPath = meetingFolderResult.audioPath;
 				if (meetingFolderResult.meetingFolder) {
@@ -330,6 +363,7 @@ export class TranscriptSidebarView extends ItemView {
 						meetingFolderResult.dateParts,
 						this.meetingFiles.getMeetingNoteRoot()
 					);
+					if (isStale()) return;
 					if (relocated) {
 						activeFile = relocated;
 						this.currentMeetingFile = relocated;
@@ -356,6 +390,7 @@ export class TranscriptSidebarView extends ItemView {
 			this.attachments.setAudioPath(null);
 			await this.attachments.setAttachmentFolder(noteFolderPath);
 		}
+		if (isStale()) return;
 
 			this.updateSpeakerLabelOverrides(
 				SpeakerLabelManager.extractOverrides(frontmatter)
@@ -368,6 +403,7 @@ export class TranscriptSidebarView extends ItemView {
 						activeFile,
 						frontmatter
 					);
+				if (isStale()) return;
 				if (recordingUrl) {
 					archivedRecording.recordingUrl = recordingUrl;
 				}
@@ -389,12 +425,15 @@ export class TranscriptSidebarView extends ItemView {
 			this.attachments.setAudioPath(null);
 		}
 		await this.syncAttachments();
+		if (isStale()) return;
 
 		const setTranscriptProps = (props: Record<string, unknown>) => {
+			if (isStale()) return;
 			this.transcriptComponent?.$set(props);
 		};
 
 		let playerEl: HTMLElement | undefined;
+		let playerControls: AudioPlayerControls | undefined;
 		if (hasAudio && audioPath) {
 			const audioNote = new AudioNote(
 				noteTitle,
@@ -411,14 +450,15 @@ export class TranscriptSidebarView extends ItemView {
 				false
 			);
 
-			[, playerEl] = this.plugin.createAudioPlayerElements(
+			[, playerEl, playerControls] = this.plugin.createAudioPlayerElements(
 				audioNote,
 				setTranscriptProps
 			);
+			this.currentPlayer = playerControls ?? null;
 		}
 
 		setTranscriptProps({
-			title: "Live Transcript",
+			...this.getAiOptionProps(),
 				playerContainer: playerEl ?? null,
 				isTranscribing: this.isTranscribingMeeting,
 				needsAudioUpload: !hasAudio,
@@ -445,30 +485,43 @@ export class TranscriptSidebarView extends ItemView {
 		});
 
 		if (this.currentTranscriptPath) {
-			await this.loadTranscript(this.currentTranscriptPath);
+			await this.loadTranscript(this.currentTranscriptPath, generation);
 		} else {
 			this.currentTranscriptText = "";
 			setTranscriptProps({
 				segments: [],
 				transcriptText: "",
 				metadataDuration: null,
+				isLoadingTranscript: false,
 			});
 			this.updateAiProps();
 		}
 	}
 
-	private async loadTranscript(path: string): Promise<void> {
+	private releasePlayer(): void {
+		this.currentPlayer?.release();
+		this.currentPlayer = null;
+	}
+
+	private async loadTranscript(
+		path: string,
+		generation = this.loadGeneration
+	): Promise<void> {
+		const isStale = () => generation !== this.loadGeneration;
+		this.transcriptComponent?.$set({ isLoadingTranscript: true });
 		try {
 			const transcript: Transcript | undefined =
 				await this.plugin.transcriptDatastore.getTranscript(
 					path
 				);
+			if (isStale()) return;
 			if (!transcript) {
 				this.currentTranscriptText = "";
 				this.transcriptComponent?.$set({
 					segments: [],
 					transcriptText: "",
 					metadataDuration: null,
+					isLoadingTranscript: false,
 				});
 				this.updateAiProps();
 				return;
@@ -484,14 +537,19 @@ export class TranscriptSidebarView extends ItemView {
 					  )
 					: null;
 			this.currentTranscriptText = transcript.getEntireTranscript();
+			// Lets the unloaded player show a length without touching the audio.
+			this.currentPlayer?.setDurationHint(duration);
 			this.transcriptComponent?.$set({
 				segments,
 				transcriptText: this.currentTranscriptText,
 				metadataDuration: duration,
+				isLoadingTranscript: false,
 			});
 			this.updateAiProps();
 		} catch (error) {
+			if (isStale()) return;
 			console.error(error);
+			this.transcriptComponent?.$set({ isLoadingTranscript: false });
 			new Notice("Could not load transcript.", 4000);
 		}
 	}
@@ -615,6 +673,9 @@ export class TranscriptSidebarView extends ItemView {
 	}
 
 	public async showDashboard(): Promise<void> {
+		this.loadGeneration++;
+		this.releasePlayer();
+		this.transcriptComponent?.$set({ playerContainer: null });
 		this.currentFilePath = null;
 		this.currentTranscriptPath = null;
 		this.currentAudioPath = null;
@@ -918,6 +979,7 @@ export class TranscriptSidebarView extends ItemView {
 	}
 
 	private async handleGenerateMeetingAiNotes(): Promise<void> {
+		if (this.isGeneratingMeetingAi || this.isSavingMeetingAiOptions) return;
 		if (!this.currentMeetingFile) {
 			new Notice("Open a meeting note before generating AI notes.", 4000);
 			return;
@@ -927,14 +989,14 @@ export class TranscriptSidebarView extends ItemView {
 			return;
 		}
 
-		this.isGeneratingMeetingAi = true;
-		this.updateAiProps();
+		const file = this.currentMeetingFile;
+		const transcript = this.currentTranscriptText;
 		try {
 			await this.plugin.meetingAiService.generateMeetingNotes(
-				this.currentMeetingFile,
-				this.currentTranscriptText
+				file,
+				transcript
 			);
-			new Notice("AI notes added to the meeting note.", 4000);
+			new Notice(`AI notes added to “${file.basename}”.`, 4000);
 		} catch (error) {
 			console.error("Audio Notes: Could not generate AI notes.", error);
 			const message =
@@ -943,13 +1005,89 @@ export class TranscriptSidebarView extends ItemView {
 					: "Could not generate AI notes.";
 			new Notice(message, 7000);
 		} finally {
-			this.isGeneratingMeetingAi = false;
+			this.updateAiProps();
+		}
+	}
+
+	private getAiOptionProps() {
+		const settings = this.plugin.settings;
+		const claude = settings.meetingAiProvider === "claude";
+		const enabled = settings.meetingAiProvider !== "disabled";
+		const model = claude ? settings.meetingAiClaudeModel : settings.meetingAiCodexModel;
+		const provider = claude ? "claude" : "codex";
+		const binary = claude ? settings.meetingAiClaudeBinaryPath : settings.meetingAiCodexBinaryPath;
+		const catalog = this.plugin.meetingAiService.models;
+		const models = catalog.get(provider, binary)?.models || [];
+		const effort = claude ? settings.meetingAiClaudeEffort : settings.meetingAiCodexEffort;
+		const efforts = effortOptions(models, model, effort);
+		return {
+			aiProvider: settings.meetingAiProvider,
+			aiModel: model,
+			aiEffort: efforts.some(o => o.value === effort) ? effort : "",
+			aiModelOptions: enabled ? modelOptions(models, model) : [],
+			aiEffortOptions: efforts,
+			aiCatalogStatus: catalog.status(provider, binary),
+			onRefreshAiModels: (force = false) => this.plugin.meetingAiService.refreshModels(force),
+			isSavingAiOptions: this.isSavingMeetingAiOptions,
+			onAiOptionsChange: (field: "provider" | "model" | "effort", value: string) => this.changeAiOptions(field, value),
+		};
+	}
+
+	private async changeAiOptions(field: "provider" | "model" | "effort", value: string): Promise<void> {
+		if (this.isGeneratingMeetingAi || this.isSavingMeetingAiOptions) return;
+		if (field === "provider") {
+			if (value !== "claude" && value !== "codex") return;
+			const settings = this.plugin.settings, previous = settings.meetingAiProvider;
+			this.isSavingMeetingAiOptions = true;
+			settings.meetingAiProvider = value;
+			this.updateAiProps();
+			try { await this.plugin.saveSettings(); }
+			catch {
+				settings.meetingAiProvider = previous;
+				new Notice("Could not save AI provider. Please try again.", 5000);
+			} finally {
+				this.isSavingMeetingAiOptions = false;
+				this.updateAiProps();
+			}
+			void this.plugin.meetingAiService.refreshModels();
+			return;
+		}
+		const options = this.getAiOptionProps();
+		if (!(field === "model" ? options.aiModelOptions : options.aiEffortOptions).some(option => option.value === value)) return;
+		const settings = this.plugin.settings;
+		const claude = settings.meetingAiProvider === "claude";
+		const previousEffort = claude ? settings.meetingAiClaudeEffort : settings.meetingAiCodexEffort;
+		const previous = field === "model" ? options.aiModel : previousEffort;
+		const setValue = (next: string) => {
+			if (field === "model") {
+				if (claude) settings.meetingAiClaudeModel = next;
+				else settings.meetingAiCodexModel = next;
+			} else {
+				if (claude) settings.meetingAiClaudeEffort = next as MeetingAiClaudeEffort;
+				else settings.meetingAiCodexEffort = next as MeetingAiCodexEffort;
+			}
+		};
+		this.isSavingMeetingAiOptions = true;
+		setValue(value);
+		if (field === "model" && !this.getAiOptionProps().aiEffortOptions.some(o => o.value === previousEffort)) {
+			if (claude) settings.meetingAiClaudeEffort = ""; else settings.meetingAiCodexEffort = "";
+		}
+		this.updateAiProps();
+		try { await this.plugin.saveSettings(); }
+		catch (error) {
+			setValue(previous);
+			if (claude) settings.meetingAiClaudeEffort = previousEffort; else settings.meetingAiCodexEffort = previousEffort;
+			new Notice("Could not save AI options. Please try again.", 5000);
+			console.error("Audio Notes: Could not save AI options", error);
+		} finally {
+			this.isSavingMeetingAiOptions = false;
 			this.updateAiProps();
 		}
 	}
 
 	private updateAiProps(): void {
 		this.transcriptComponent?.$set({
+			...this.getAiOptionProps(),
 			canGenerateAiNotes: this.plugin.meetingAiService.canGenerateNotes(
 				this.currentTranscriptText
 			),

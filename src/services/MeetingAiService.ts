@@ -9,6 +9,8 @@ import type {
 } from "../AudioNotesSettings";
 import type AutomaticAudioNotes from "../main";
 
+import { AiModelCatalog, effortOptions } from "./AiModelCatalog";
+
 const AI_SECTION_START = "<!-- AUDIO-NOTES-AI:START -->";
 const AI_SECTION_END = "<!-- AUDIO-NOTES-AI:END -->";
 const AI_NOTES_HEADING = "## AI Meeting Notes";
@@ -68,6 +70,13 @@ export interface MeetingLabelSuggestionInput {
 	candidateTags: string[];
 }
 
+/** The model and effort actually sent to the CLI, already reconciled with the
+ *  discovered catalog. Providers send this verbatim and never re-read settings. */
+export interface MeetingAiModelChoice {
+	model: string;
+	effort: string;
+}
+
 interface MeetingAiProvider {
 	readonly kind: Exclude<MeetingAiProviderKind, "disabled">;
 	readonly label: string;
@@ -75,7 +84,8 @@ interface MeetingAiProvider {
 	generateJson(
 		settings: AudioNotesSettings,
 		prompt: string,
-		schemaJson: string
+		schemaJson: string,
+		choice: MeetingAiModelChoice
 	): Promise<Record<string, unknown>>;
 }
 
@@ -130,7 +140,8 @@ class ClaudeCodeMeetingAiProvider implements MeetingAiProvider {
 	async generateJson(
 		settings: AudioNotesSettings,
 		prompt: string,
-		schemaJson: string
+		schemaJson: string,
+		choice: MeetingAiModelChoice
 	): Promise<Record<string, unknown>> {
 		const args = [
 			"-p",
@@ -140,12 +151,8 @@ class ClaudeCodeMeetingAiProvider implements MeetingAiProvider {
 			schemaJson,
 			"--tools",
 			"",
-			...(settings.meetingAiClaudeModel
-				? ["--model", settings.meetingAiClaudeModel]
-				: []),
-			...(settings.meetingAiClaudeEffort
-				? ["--effort", settings.meetingAiClaudeEffort]
-				: []),
+			...(choice.model ? ["--model", choice.model] : []),
+			...(choice.effort ? ["--effort", choice.effort] : []),
 		];
 		const result = await runCommand(
 			settings.meetingAiClaudeBinaryPath,
@@ -197,7 +204,8 @@ class CodexMeetingAiProvider implements MeetingAiProvider {
 	async generateJson(
 		settings: AudioNotesSettings,
 		prompt: string,
-		schemaJson: string
+		schemaJson: string,
+		choice: MeetingAiModelChoice
 	): Promise<Record<string, unknown>> {
 		const tempDir = await mkdtemp(join(tmpdir(), "audio-notes-codex-"));
 		const schemaPath = join(tempDir, "meeting-notes.schema.json");
@@ -210,13 +218,11 @@ class CodexMeetingAiProvider implements MeetingAiProvider {
 				"--skip-git-repo-check",
 				"-s",
 				"read-only",
-				...(settings.meetingAiCodexModel
-					? ["--model", settings.meetingAiCodexModel]
-					: []),
-				...(settings.meetingAiCodexEffort
+				...(choice.model ? ["--model", choice.model] : []),
+				...(choice.effort
 					? [
 							"--config",
-							`model_reasoning_effort="${settings.meetingAiCodexEffort}"`,
+							`model_reasoning_effort="${choice.effort}"`,
 					  ]
 					: []),
 				"--output-schema",
@@ -242,7 +248,39 @@ class CodexMeetingAiProvider implements MeetingAiProvider {
 }
 
 export class MeetingAiService {
-	constructor(private readonly plugin: AutomaticAudioNotes) {}
+	readonly models: AiModelCatalog;
+	private readonly generatingFiles = new Set<TFile>();
+	private readonly generationListeners = new Set<() => void>();
+
+	isGenerating(file: TFile | null): boolean {
+		return Boolean(file && [...this.generatingFiles].some(active => active === file || active.path === file.path));
+	}
+
+	subscribeGeneration(listener: () => void): () => void {
+		this.generationListeners.add(listener);
+		return () => { this.generationListeners.delete(listener); };
+	}
+
+	private notifyGeneration(): void {
+		for (const listener of this.generationListeners) {
+			try { listener(); } catch (error) { console.error("Audio Notes: generation listener failed", error); }
+		}
+	}
+	constructor(private readonly plugin: AutomaticAudioNotes) {
+		const adapter = plugin.app.vault.adapter;
+		const path = `${plugin.manifest.dir}/ai-models.json`;
+		this.models = new AiModelCatalog({
+			load: async () => await adapter.exists(path) ? adapter.read(path) : null,
+			save: data => adapter.write(path, data),
+		});
+		plugin.register(() => this.models.dispose());
+	}
+
+	refreshModels(force = false): Promise<void> {
+		const s = this.plugin.settings, provider = s.meetingAiProvider;
+		if (!this.isDesktopSupported() || provider === "disabled") return Promise.resolve();
+		return this.models.refresh(provider, provider === "claude" ? s.meetingAiClaudeBinaryPath : s.meetingAiCodexBinaryPath, force);
+	}
 
 	isDesktopSupported(): boolean {
 		return Platform.isDesktop || Platform.isDesktopApp || Platform.isMacOS;
@@ -285,6 +323,22 @@ export class MeetingAiService {
 		file: TFile,
 		transcriptText: string
 	): Promise<MeetingAiDraft> {
+		if (this.isGenerating(file)) throw new Error("AI notes are already being generated for this meeting.");
+		this.generatingFiles.add(file);
+		this.notifyGeneration();
+		try {
+			return await this.generateMeetingNotesJob(file, transcriptText);
+		} finally {
+			this.generatingFiles.delete(file);
+			this.notifyGeneration();
+		}
+	}
+
+	private async generateMeetingNotesJob(file: TFile, transcriptText: string): Promise<MeetingAiDraft> {
+		// Preserve the settings class getters while copying its backing values.
+		const settings: AudioNotesSettings = Object.assign(
+			Object.create(Object.getPrototypeOf(this.plugin.settings)), this.plugin.settings
+		);
 		if (!this.isDesktopSupported()) {
 			throw new Error("Local AI meeting notes are only available on desktop.");
 		}
@@ -292,20 +346,21 @@ export class MeetingAiService {
 		if (!provider) {
 			throw new Error("No local AI provider is enabled in settings.");
 		}
-		const health = await provider.checkHealth(this.plugin.settings);
+		const health = await provider.checkHealth(settings);
 		if (!health.available) {
 			throw new Error(health.message);
 		}
 
-		const prompt = buildMeetingPrompt(this.plugin.settings, {
+		const prompt = buildMeetingPrompt(settings, {
 			title: file.basename,
 			transcriptText,
 			notePath: file.path,
 		});
 		const structured = await provider.generateJson(
-			this.plugin.settings,
+			settings,
 			prompt,
-			CLAUDE_OUTPUT_SCHEMA
+			CLAUDE_OUTPUT_SCHEMA,
+			this.effectiveModelChoice(settings)
 		);
 		const draft: MeetingAiDraft = {
 			title:
@@ -347,7 +402,8 @@ export class MeetingAiService {
 		const structured = await provider.generateJson(
 			this.plugin.settings,
 			prompt,
-			LABEL_OUTPUT_SCHEMA
+			LABEL_OUTPUT_SCHEMA,
+			this.effectiveModelChoice(this.plugin.settings)
 		);
 		const label =
 			typeof structured.label === "string"
@@ -366,6 +422,29 @@ export class MeetingAiService {
 			return;
 		}
 		await this.plugin.app.vault.rename(file, nextPath);
+	}
+
+	/**
+	 * Reconcile the saved model and effort with what the CLI actually offers.
+	 * A model the catalog no longer lists — renamed, withdrawn, or hand-typed —
+	 * falls back to the first available one at its provider-default effort, so a
+	 * stale setting degrades instead of failing every call at the CLI.
+	 */
+	private effectiveModelChoice(settings: AudioNotesSettings): MeetingAiModelChoice {
+		const claude = settings.meetingAiProvider === "claude";
+		const models = this.models.get(claude ? "claude" : "codex", claude ? settings.meetingAiClaudeBinaryPath : settings.meetingAiCodexBinaryPath)?.models || [];
+		const model = claude ? settings.meetingAiClaudeModel : settings.meetingAiCodexModel;
+		const effort = claude ? settings.meetingAiClaudeEffort : settings.meetingAiCodexEffort;
+		const keptEffort = effortOptions(models, model, effort).some(o => o.value === effort) ? effort : "";
+		// Nothing discovered yet (offline, or never refreshed): the saved values are all we know.
+		if (!model || !models.length || models.some(m => m.value === model || m.resolvedModel === model)) {
+			return { model, effort: keptEffort };
+		}
+		const fallback = models[0];
+		console.warn(
+			`Audio Notes: ${claude ? "Claude Code" : "Codex"} no longer offers "${model}"; using "${fallback.value}" at its default effort.`
+		);
+		return { model: fallback.value, effort: "" };
 	}
 
 	private resolveProvider(): MeetingAiProvider | null {

@@ -1,4 +1,5 @@
 import { App, Modal, Setting } from "obsidian";
+import { localDateKey } from "../meeting-events";
 
 export interface MeetingScheduleUpdate {
 	startDate: string;
@@ -24,7 +25,7 @@ export class EditMeetingScheduleModal extends Modal {
 	constructor(app: App, private options: EditMeetingScheduleModalOptions) {
 		super(app);
 		const now = new Date();
-		const defaultDate = now.toISOString().slice(0, 10);
+		const defaultDate = localDateKey(now);
 		const defaultStartTime = `${now
 			.getHours()
 			.toString()

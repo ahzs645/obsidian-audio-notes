@@ -65,6 +65,7 @@ export default class AutomaticAudioNotes extends Plugin {
 	audioNoteService: AudioNoteService;
 	meetingAiService: MeetingAiService;
 	knownCurrentTimes: Map<string, number> = new Map();
+	knownDurations: Map<string, number> = new Map();
 	knownAudioPlayers: AudioElementCache = new AudioElementCache(30);
 	currentlyPlayingAudioFakeUuid: string | null = null;
 	private lastMeetingFolder: string | null = null;
@@ -333,6 +334,8 @@ export default class AutomaticAudioNotes extends Plugin {
 		// Load Settings
 		await this.loadSettings();
 		this.meetingAiService = new MeetingAiService(this);
+		void this.meetingAiService.refreshModels();
+		this.registerInterval(window.setInterval(() => { void this.meetingAiService.refreshModels(); }, 30 * 60_000));
 		this.addSettingTab(new AudioNotesSettingsTab(this.app, this));
 		this.registerView(AUDIO_NOTES_CALENDAR_VIEW, (leaf) => new MeetingCalendarView(leaf, this));
 		this.registerView(AUDIO_NOTES_TRANSCRIPT_VIEW, (leaf) => new TranscriptSidebarView(leaf, this));
@@ -479,7 +482,7 @@ export default class AutomaticAudioNotes extends Plugin {
 	public createAudioPlayerElements(
 		audioNote: AudioNote,
 		updateTranscript?: (props: Record<string, unknown>) => void
-	): [HTMLMediaElement | undefined, HTMLElement | undefined] {
+	): ReturnType<typeof createAudioPlayer> {
 		const env: AudioPlayerEnvironment = {
 			settings: this.settings,
 			getSavedCurrentTime: (src) => this.knownCurrentTimes.get(src),
@@ -492,6 +495,8 @@ export default class AutomaticAudioNotes extends Plugin {
 			setCurrentPlayerId: (id) => {
 				this.currentlyPlayingAudioFakeUuid = id;
 			},
+			getKnownDuration: (src) => this.knownDurations.get(src),
+			setKnownDuration: (src, value) => this.knownDurations.set(src, value),
 			renderTimeDisplay: (el, current, duration) =>
 				this._renderTimeDisplay(el, current, duration),
 			resolveAudioSrc: (note) => this.audioNoteService.getFullAudioSrcPath(note),

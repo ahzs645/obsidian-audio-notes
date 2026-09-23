@@ -29,8 +29,9 @@ export class AttendeePickerModal extends SuggestModal<AttendeeSuggestion> {
 	}
 
 	onOpen() {
-		super.onOpen();
+		// SuggestModal.onOpen() renders the list right away, so load attendees first.
 		this.knownAttendees = this.computeAvailableAttendees();
+		super.onOpen();
 		this.renderSelectedAttendees();
 	}
 

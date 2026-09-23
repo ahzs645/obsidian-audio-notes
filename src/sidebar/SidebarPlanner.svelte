@@ -26,7 +26,7 @@
 
 	$: filteredEvents = filterEvents(events, filterValue);
 	$: eventsByDate = buildEventsByDate(filteredEvents);
-	$: weeks = buildCalendar(monthCursor, eventsByDate);
+	$: weeks = buildCalendar(monthCursor, eventsByDate, selectedDate);
 	$: selectedDayEvents = (filteredEvents || [])
 		.filter((event) => getDisplayDate(event) === selectedDate)
 		.sort((a, b) => a.start.getTime() - b.start.getTime());
@@ -67,7 +67,8 @@
 
 	function buildCalendar(
 		month: Date,
-		map: Map<string, MeetingEvent[]>
+		map: Map<string, MeetingEvent[]>,
+		selected: string
 	) {
 		const first = new Date(month);
 		const startOffset = first.getDay();
@@ -97,7 +98,7 @@
 						current.getMonth() === month.getMonth() &&
 						current.getFullYear() === month.getFullYear(),
 					isToday: iso === todayKey,
-					isSelected: iso === selectedDate,
+					isSelected: iso === selected,
 					meetingCount: map.get(iso)?.length || 0,
 				});
 			}
@@ -109,6 +110,7 @@
 	}
 
 	function selectDay(iso: string) {
+		monthCursor = firstDayOfMonth(iso);
 		onSelectDate?.(iso);
 	}
 
@@ -138,9 +140,18 @@
 
 	const formatTimeLabel = (date: Date) =>
 		date.toLocaleTimeString([], {
-			hour: "2-digit",
+			hour: "numeric",
 			minute: "2-digit",
 		});
+
+	function formatDuration(start: Date, end: Date): string {
+		const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
+		if (!Number.isFinite(minutes) || minutes <= 0) return "";
+		if (minutes < 60) return `${minutes}m`;
+		const hours = Math.floor(minutes / 60);
+		const rest = minutes % 60;
+		return rest ? `${hours}h ${rest}m` : `${hours}h`;
+	}
 
 	const formatTagForLabel = (tag?: string) => {
 		if (!tag) return "";
@@ -216,12 +227,19 @@
 
 <div class="aan-sidebar-calendar">
 	<header class="aan-sidebar-calendar__toolbar">
+		<h3 class="aan-sidebar-calendar__label" aria-live="polite" title={monthLabel(monthCursor)}>
+			<span class="aan-sidebar-calendar__month">{monthCursor.toLocaleDateString(undefined, { month: "short" })}</span>
+			<span class="aan-sidebar-calendar__year">{monthCursor.getFullYear()}</span>
+		</h3>
 		<div class="aan-sidebar-calendar__btn-group">
-			<button on:click={gotoPrevMonth}>Prev</button>
-			<button on:click={gotoToday}>Today</button>
-			<button on:click={gotoNextMonth}>Next</button>
+			<button type="button" class="aan-sidebar-calendar__arrow" on:click={gotoPrevMonth} aria-label="Previous month" title="Previous month">
+				<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+			</button>
+			<button type="button" on:click={gotoToday}>Today</button>
+			<button type="button" class="aan-sidebar-calendar__arrow" on:click={gotoNextMonth} aria-label="Next month" title="Next month">
+				<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+			</button>
 		</div>
-		<div class="aan-sidebar-calendar__label">{monthLabel(monthCursor)}</div>
 	</header>
 	<div class="aan-sidebar-calendar__filter">
 		<label for="aan-calendar-filter">Filter</label>
@@ -261,7 +279,10 @@
 	</div>
 	<div class="aan-sidebar-calendar__weekdays">
 		{#each weekdays as day}
-			<div>{day}</div>
+			<div title={day}>
+				<span class="aan-sidebar-calendar__weekday-long">{day}</span>
+				<span class="aan-sidebar-calendar__weekday-short" aria-hidden="true">{day.charAt(0)}</span>
+			</div>
 		{/each}
 	</div>
 	<div class="aan-sidebar-calendar__grid">
@@ -269,8 +290,10 @@
 			{#each week.days as day}
 				<button
 					class={`aan-sidebar-calendar__cell ${day.isCurrentMonth ? "" : "is-outside"} ${day.isToday ? "is-today" : ""} ${day.isSelected ? "is-selected" : ""}`}
-					on:click={() => day.isCurrentMonth && selectDay(day.iso)}
-					disabled={!day.isCurrentMonth}
+					on:click={() => selectDay(day.iso)}
+					type="button"
+					aria-label={parseISODate(day.iso).toLocaleDateString(undefined, { dateStyle: "full" })}
+					aria-pressed={day.isSelected}
 				>
 					<span>{day.label}</span>
 					{#if day.meetingCount > 0}
@@ -286,11 +309,20 @@
 			<div class="aan-sidebar-agenda__heading">
 				{#if selectedDayDate instanceof Date && !Number.isNaN(selectedDayDate.getTime())}
 					<div class="aan-calendar-day-label">
-						{selectedDayDate.toLocaleDateString(undefined, {
-							weekday: "long",
-							month: "long",
-							day: "numeric",
-						})}
+						<span class="aan-calendar-day-label-long">
+							{selectedDayDate.toLocaleDateString(undefined, {
+								weekday: "long",
+								month: "long",
+								day: "numeric",
+							})}
+						</span>
+						<span class="aan-calendar-day-label-short">
+							{selectedDayDate.toLocaleDateString(undefined, {
+								weekday: "short",
+								month: "short",
+								day: "numeric",
+							})}
+						</span>
 					</div>
 				{/if}
 				<div class="aan-calendar-day-count">
@@ -327,48 +359,48 @@
 			<p class="aan-calendar-empty">No meetings scheduled.</p>
 		{:else}
 			<ul class="aan-calendar-day-list">
-			{#each selectedDayEvents as event}
-				<li class="aan-calendar-day-row">
-					<div class="aan-calendar-day-card">
-						<div class="aan-calendar-day-card-top">
-							<div class="aan-calendar-day-time">
-								<span>
-									{formatTimeLabel(event.start)} — {formatTimeLabel(event.end)}
+				{#each selectedDayEvents as event}
+					<li class="aan-calendar-day-row">
+						<div class="aan-calendar-day-card">
+							<div class="aan-calendar-day-card-top">
+								<span class="aan-calendar-day-time">
+									<span>{formatTimeLabel(event.start)} –</span>
+									<span>{formatTimeLabel(event.end)}</span>
 								</span>
+								{#if formatDuration(event.start, event.end)}
+									<span class="aan-calendar-day-duration">
+										{formatDuration(event.start, event.end)}
+									</span>
+								{/if}
+								{#if event.label}
+									<span class="aan-calendar-day-badge">
+										{event.label.name ?? formatTagForLabel(event.label.tag)}
+									</span>
+								{/if}
 							</div>
-							{#if event.label}
-								<span class="aan-calendar-day-badge">
-									{event.label.name ?? formatTagForLabel(event.label.tag)}
-								</span>
-							{/if}
-						</div>
-						<div class="aan-calendar-day-content">
 							<div class="aan-calendar-day-title-row">
 								<span
 									class="aan-calendar-day-dot"
-										style={`background:${event.color || "var(--interactive-accent)"}`}
-									></span>
-									<span class="aan-calendar-day-title-text">{event.title}</span>
-								</div>
-							<!-- Tags hidden per request -->
-							<div class="aan-calendar-day-actions">
-									<button
-										class="aan-calendar-action-btn"
-										title="Open note"
-										on:click={() => openEvent(event.path, false)}
-									>
-										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide-icon lucide lucide-file-text "><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
-										<span>Notes</span>
-									</button>
-									<button
-										class="aan-calendar-action-btn"
-										title="Open in new pane"
-										on:click={() => openEvent(event.path, true)}
-									>
-										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide-icon lucide lucide-external-link "><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-										<span>Open</span>
-									</button>
-								</div>
+									style={`background:${event.color || "var(--interactive-accent)"}`}
+								></span>
+								<!-- The title button stretches over the whole card, so clicking anywhere opens the note. -->
+								<button
+									type="button"
+									class="aan-calendar-day-title-text"
+									title={`Open ${event.title}`}
+									on:click={() => openEvent(event.path, false)}
+								>
+									{event.title}
+								</button>
+								<button
+									type="button"
+									class="aan-calendar-action-btn"
+									title="Open in new pane"
+									aria-label={`Open ${event.title} in new pane`}
+									on:click={() => openEvent(event.path, true)}
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+								</button>
 							</div>
 						</div>
 					</li>

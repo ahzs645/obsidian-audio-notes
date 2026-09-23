@@ -78,7 +78,7 @@ export class IncrementalIndex<T> {
 		const eligible = (r: RecordState<T>) => !this.active.has(r.file.path);
 		const row = rows.find(r => eligible(r) && r.state === "pending") ??
 			rows.find(r => eligible(r) && r.state === "unresolved" && (r.retryAt || 0) <= Date.now());
-		if (!row) return;
+		if (!row) { if (this.saveError) await this.persist(); return; }
 		this.active.add(row.file.path);
 		let timer: ReturnType<typeof setTimeout>;
 		const reading = Promise.resolve().then(() => this.host.read(row.file));
@@ -122,7 +122,7 @@ export class IncrementalIndex<T> {
 		const contents = JSON.stringify({ version: 1, records: [...this.records.values()] });
 		this.writes = this.writes.then(async () => {
 			try { await this.host.save(contents); this.saveError = ""; }
-			catch { this.saveError = "Index progress could not be saved"; }
+			catch (error) { this.saveError = `Index progress could not be saved: ${error instanceof Error ? error.message : String(error)}`; }
 		});
 		return this.writes;
 	}

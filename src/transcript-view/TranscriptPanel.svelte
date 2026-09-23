@@ -1,5 +1,6 @@
 <script lang="ts">
 import { onMount } from "svelte";
+import AiNotesControls from "./AiNotesControls.svelte";
 import { tick } from "svelte";
 import type { Action } from "svelte/action";
 import type {
@@ -14,21 +15,28 @@ const defaultHighlightParts = (text: string): TranscriptHighlightPart[] => [
 ];
 const noopAction: Action<HTMLElement, number> = () => ({});
 
-export let title = "Live Transcript";
 export let isTranscribing = false;
+export let isLoadingTranscript = false;
 export let segments: TranscriptSegmentWithSpeaker[] = [];
 export let transcriptDuration: number | null = null;
 export let progressMessage: string | null = null;
 export let hasSegments = false;
 export let collapsed = false;
-export let toggleAutoScroll: () => void = () => {};
-export let autoScroll = false;
-export let isSearching = false;
+
 export let copyTranscript: () => void = () => {};
 export let showTranscriptionCta = false;
 export let canTranscribeDeepgram = false;
 export let canTranscribeScriberr = false;
 export let requestTranscription: (provider: "deepgram" | "scriberr") => void = () => {};
+export let aiCatalogStatus = "";
+export let onRefreshAiModels: (force?: boolean) => Promise<void> = async () => {};
+export let aiProvider = "codex";
+export let aiModel = "";
+export let aiEffort = "medium";
+export let aiModelOptions: { value: string; label: string }[] = [];
+export let aiEffortOptions: { value: string; label: string }[] = [];
+export let isSavingAiOptions = false;
+export let onAiOptionsChange: (field: "provider" | "model" | "effort", value: string) => Promise<void> = async () => {};
 export let canGenerateAiNotes = false;
 export let isGeneratingAiNotes = false;
 export let onGenerateAiNotes: () => Promise<void> = async () =>
@@ -64,6 +72,12 @@ export let onRenameSpeaker: (
 export let showAudioUploadButton = false;
 export let triggerAudioPicker: () => void = () => {};
 export let audioUploadInProgress = false;
+/** The player already shows the recording length, so only repeat it when there is none. */
+export let hasPlayer = false;
+
+let headerWidth = 0;
+// Below this width the AI buttons merge into one menu button and labels drop to icons.
+$: compactHeader = headerWidth > 0 && headerWidth < 340;
 
 $: canTranscribe = canTranscribeDeepgram || canTranscribeScriberr;
 
@@ -227,51 +241,56 @@ onMount(() => {
 		</div>
 	{:else}
 		<div class="audio-note-transcript-card">
-			<header class="audio-note-transcript-header">
-				<div>
-					<div class="audio-note-transcript-title">
-						<span>{title}</span>
-						{#if isTranscribing}
-							<span class="audio-note-transcript-pill">Transcribing…</span>
-						{/if}
-					</div>
-					<p class="audio-note-transcript-meta">
-						{#if hasSegments}
-							{segments.length} segments · {formatDurationLabel(transcriptDuration)}
-						{:else if (isTranscribing)}
-							{progressMessage ?? "Waiting for transcript…"}
-						{:else}
-							Ready for transcript
-						{/if}
-					</p>
-				</div>
+			<header class="audio-note-transcript-header" bind:clientWidth={headerWidth}>
+				<p class="audio-note-transcript-meta">
+					{#if isTranscribing}
+						<span class="audio-note-transcript-pill">Transcribing…</span>
+					{/if}
+					{#if isLoadingTranscript && !hasSegments}
+						Loading transcript…
+					{:else if hasSegments}
+						{segments.length} segments{#if !hasPlayer}&nbsp;· {formatDurationLabel(transcriptDuration)}{/if}
+					{:else if isTranscribing}
+						{progressMessage ?? "Waiting for transcript…"}
+					{:else}
+						Ready for transcript
+					{/if}
+				</p>
 				<div class="audio-note-transcript-actions">
 					{#if showAudioUploadButton}
 						<button
 							class="aan-transcript-btn aan-upload-audio-btn"
+							class:icon-only={compactHeader}
 							type="button"
 							on:click={triggerAudioPicker}
 							disabled={audioUploadInProgress}
 							title="Upload meeting audio"
+							aria-label="Upload meeting audio"
 						>
-							<svg
-								aria-hidden="true"
-								viewBox="0 0 24 24"
-								focusable="false"
-								class="aan-transcript-icon"
-							>
-								<path
-									d="M12 3v12M12 3l-4 4M12 3l4 4M4 15v2a2 2 0 002 2h12a2 2 0 002-2v-2"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2"
-									stroke-linecap="round"
-									stroke-linejoin="round"
-								/>
-							</svg>
-							{audioUploadInProgress ? "Uploading…" : "Add audio"}
+							<svg aria-hidden="true" viewBox="0 0 24 24" focusable="false" class="aan-transcript-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M12 3l-4 4M12 3l4 4M4 15v2a2 2 0 002 2h12a2 2 0 002-2v-2" /></svg>
+							{#if !compactHeader}{audioUploadInProgress ? "Uploading…" : "Add audio"}{/if}
 						</button>
 					{/if}
+					<button
+						class="aan-transcript-btn icon-only"
+						type="button"
+						on:click={toggleSearch}
+						aria-pressed={showSearch}
+						title="Search transcript (Ctrl/Cmd + F)"
+						aria-label="Search transcript"
+					>
+						<svg aria-hidden="true" viewBox="0 0 24 24" focusable="false" class="aan-transcript-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+					</button>
+					<button
+						class="aan-transcript-btn icon-only"
+						on:click={copyTranscript}
+						type="button"
+						disabled={!transcriptText}
+						title="Copy transcript"
+						aria-label="Copy transcript"
+					>
+						<svg aria-hidden="true" viewBox="0 0 24 24" focusable="false" class="aan-transcript-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></svg>
+					</button>
 					<button
 						class="aan-transcript-btn icon-only collapse-toggle"
 						type="button"
@@ -281,73 +300,11 @@ onMount(() => {
 						aria-label={collapsed ? "Expand transcript" : "Collapse transcript"}
 						class:collapsed={collapsed}
 					>
-						<svg
-							aria-hidden="true"
-							viewBox="0 0 24 24"
-							focusable="false"
-							class="aan-transcript-icon"
-						>
-							<path
-								d="M7 10l5 5 5-5"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							/>
-						</svg>
+						<svg aria-hidden="true" viewBox="0 0 24 24" focusable="false" class="aan-transcript-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5 5 5-5" /></svg>
 					</button>
-					<button
-						class="aan-transcript-btn"
-						type="button"
-						on:click={toggleSearch}
-						aria-pressed={showSearch}
-					>
-						Search
-					</button>
-					<button
-						class="aan-transcript-btn icon-only"
-						class:auto-scroll-active={autoScroll}
-						on:click={toggleAutoScroll}
-						disabled={isSearching}
-						type="button"
-						title={autoScroll ? "Disable auto-scroll" : "Enable auto-scroll"}
-						aria-label={autoScroll ? "Disable auto-scroll" : "Enable auto-scroll"}
-						aria-pressed={autoScroll}
-					>
-						<svg
-							aria-hidden="true"
-							viewBox="0 0 24 24"
-							focusable="false"
-							class="aan-transcript-icon"
-						>
-							<path
-								d="M7 5l5 5 5-5M7 19l5-5 5 5"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							/>
-						</svg>
-					</button>
-					<button
-						class="aan-transcript-btn"
-						on:click={copyTranscript}
-						type="button"
-						disabled={!transcriptText}
-					>
-						Copy all
-					</button>
-					{#if canGenerateAiNotes || isGeneratingAiNotes}
-						<button
-							class="aan-transcript-btn primary"
-							type="button"
-							on:click={() => void onGenerateAiNotes()}
-							disabled={!canGenerateAiNotes || isGeneratingAiNotes}
-						>
-							{isGeneratingAiNotes ? "Generating AI…" : "Generate AI notes"}
-						</button>
+					{#if aiModelOptions.length || canGenerateAiNotes || isGeneratingAiNotes}
+						<AiNotesControls compact={compactHeader} {canGenerateAiNotes} {isGeneratingAiNotes} {onGenerateAiNotes}
+							{aiProvider} {aiCatalogStatus} {onRefreshAiModels} {aiModel} {aiEffort} {aiModelOptions} {aiEffortOptions} {isSavingAiOptions} {onAiOptionsChange} />
 					{/if}
 				</div>
 			</header>
@@ -391,7 +348,17 @@ onMount(() => {
 					bind:this={scrollContainer}
 					aria-live="polite"
 				>
-					{#if !hasSegments}
+					{#if isLoadingTranscript && !hasSegments && !transcriptText}
+						<div class="aan-transcript-loading" role="status">
+							<span class="aan-transcript-spinner" aria-hidden="true"></span>
+							<div>
+								<p class="aan-transcript-loading-title">Loading transcript…</p>
+								<p class="aan-transcript-loading-hint">
+									This can take a moment if the file is still downloading from Google Drive.
+								</p>
+							</div>
+						</div>
+					{:else if !hasSegments}
 						{#if transcriptText}
 							<div class="audio-note-transcript-plain-text">
 								{#each highlightParts(transcriptText, searchQuery) as part, idx}
@@ -499,7 +466,7 @@ onMount(() => {
 											aria-label={`Jump to ${formatTime(group.startTime)}`}
 										>
 											<span>{formatTime(group.startTime)}</span>
-											{#if group.endTime !== undefined && group.endTime !== null}
+											{#if group.endTime !== undefined && group.endTime !== null && formatTime(group.endTime) !== formatTime(group.startTime)}
 												<span class="aan-transcript-time-arrow">→</span>
 												<span>{formatTime(group.endTime)}</span>
 											{/if}

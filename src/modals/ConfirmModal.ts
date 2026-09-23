@@ -18,6 +18,8 @@ export function confirmWithModal(
 }
 
 class ConfirmModal extends Modal {
+	private settled = false;
+
 	constructor(
 		app: App,
 		private readonly options: ConfirmModalOptions,
@@ -51,10 +53,18 @@ class ConfirmModal extends Modal {
 
 	onClose(): void {
 		this.contentEl.empty();
+		// Esc, the close button and clicking outside all count as cancel.
+		this.settle(false);
 	}
 
 	private closeWith(result: boolean) {
+		this.settle(result);
 		this.close();
+	}
+
+	private settle(result: boolean) {
+		if (this.settled) return;
+		this.settled = true;
 		this.resolve(result);
 	}
 }

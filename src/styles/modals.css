@@ -497,27 +497,148 @@ input.title-input {
 /* END Export Modal */
 
 /* Label triage modal */
-.aan-label-triage-summary {
-	color: var(--text-muted);
+.aan-label-triage-modal {
+	width: min(760px, 92vw);
 }
 
+.aan-label-triage {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	max-height: min(78vh, 760px);
+	overflow: hidden;
+}
+
+.aan-label-triage h2 {
+	margin: 0;
+}
+
+.aan-label-triage-summary {
+	margin: -4px 0 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+/* One quiet panel holds every control, so the list starts near the top. */
+.aan-label-triage-toolbar {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px 12px;
+	background: var(--background-secondary);
+	border-radius: var(--radius-m);
+}
+
+.aan-label-triage-active,
+.aan-label-triage-options,
 .aan-label-triage-controls {
 	display: flex;
-	gap: 8px;
-	margin-bottom: 4px;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px 12px;
+}
+
+.aan-label-triage-caption {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+.aan-label-triage-active-choice {
+	height: auto;
+	min-height: 28px;
+	max-width: 100%;
+	padding: 3px 10px;
+	background: var(--background-primary);
+	border: 1px dashed var(--background-modifier-border-hover);
+	box-shadow: none;
+	font-size: var(--font-ui-small);
+	text-align: left;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+.aan-label-triage-active-choice.has-label {
+	border-style: solid;
+	border-color: var(--interactive-accent);
+	color: var(--text-normal);
+	font-weight: var(--font-medium);
+}
+
+.aan-label-triage-hint {
+	flex: 1 1 200px;
+	min-width: 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.aan-label-triage-filter {
+	flex: 1 1 220px;
+	min-width: 150px;
+	height: 28px;
+	font-size: var(--font-ui-small);
+}
+
+.aan-label-triage-toggle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+}
+
+.aan-label-triage-toggle input {
+	margin: 0;
 }
 
 .aan-label-triage-ai-status {
+	flex: 1 1 180px;
+	min-width: 0;
+	margin: 0;
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
-	margin-top: 4px;
+	cursor: pointer;
 }
 
+.aan-label-triage-ai-status:hover {
+	color: var(--text-normal);
+	text-decoration: underline dotted;
+}
+
+.aan-label-triage-ai-status:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+	border-radius: var(--radius-s);
+}
+
+.aan-label-triage-result {
+	margin: 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	overflow-wrap: anywhere;
+}
+
+.aan-label-triage-result:empty {
+	display: none;
+}
+
+/* The list is the only scroller; the modal itself never gains a second bar. */
 .aan-label-triage-list {
-	max-height: 50vh;
+	flex: 1 1 auto;
+	min-height: 0;
 	overflow-y: auto;
 	border-top: 1px solid var(--background-modifier-border);
-	margin-top: 8px;
+}
+
+.aan-label-triage-empty {
+	padding: 24px 4px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	text-align: center;
 }
 
 .aan-label-triage-row {
@@ -525,8 +646,13 @@ input.title-input {
 	align-items: center;
 	justify-content: space-between;
 	gap: 12px;
-	padding: 8px 4px;
+	padding: 6px 6px;
 	border-bottom: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+}
+
+.aan-label-triage-row:hover {
+	background: var(--background-modifier-hover);
 }
 
 .aan-label-triage-info {
@@ -535,14 +661,23 @@ input.title-input {
 }
 
 .aan-label-triage-title {
-	cursor: pointer;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
 	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	font-size: var(--font-ui-small);
+	line-height: 1.35;
+	cursor: pointer;
 }
 
 .aan-label-triage-title:hover {
 	color: var(--text-accent);
+}
+
+.aan-label-triage-title:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+	border-radius: var(--radius-s);
 }
 
 .aan-label-triage-meta {
@@ -560,34 +695,60 @@ input.title-input {
 	flex-shrink: 0;
 }
 
+/* Rendered only in individual mode, where it also reserves a fixed gutter
+   so every dropdown and Apply button lines up down the list. */
 .aan-label-triage-label {
+	flex: 0 0 auto;
+	min-width: 24px;
+	padding: 1px 5px;
+	border-radius: var(--radius-s);
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
-	max-width: 180px;
+	text-align: center;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
 .aan-label-triage-label.has-label {
-	color: var(--text-normal);
-}
-
-.aan-label-triage-label:empty {
-	display: none;
+	background: var(--background-modifier-active-hover);
+	color: var(--text-accent);
 }
 
 .aan-label-triage-select {
-	max-width: 200px;
+	flex: 0 0 auto;
+	width: 190px;
+	max-width: 40vw;
+	height: 28px;
+	font-size: var(--font-ui-small);
 }
 
-.aan-label-triage-toggle {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	margin: 4px 0;
+/* Ghost per-row buttons: 87 accent buttons would out-shout the note titles. */
+.aan-label-triage-apply {
+	height: 26px;
+	padding: 0 10px;
+	background: transparent;
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: none;
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
-	cursor: pointer;
+	white-space: nowrap;
+}
+
+.aan-label-triage-row:hover .aan-label-triage-apply:not(:disabled) {
+	border-color: var(--background-modifier-border-hover);
+	color: var(--text-normal);
+}
+
+.aan-label-triage-apply:not(:disabled):hover,
+.aan-label-triage-apply:not(:disabled):focus-visible {
+	background: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.aan-label-triage-apply:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
 }
 /* END Label triage modal */

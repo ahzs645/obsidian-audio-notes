@@ -20,7 +20,6 @@
 	export let currentTime: number | null = null;
 	export let syncWithAudio = false;
 	export let onSeekToTime: (time: number) => void = () => {};
-	export let title = "Live Transcript";
 	export let playerContainer: HTMLElement | null = null;
 	export let attachments: SidebarAttachment[] = [];
 	export let attachmentsEnabled = false;
@@ -40,6 +39,16 @@ export let onUploadTranscript: (files: File[]) => Promise<void> = async () =>
 export let canTranscribeDeepgram = false;
 export let canTranscribeScriberr = false;
 export let hasTranscript = false;
+export let isLoadingTranscript = false;
+export let aiCatalogStatus = "";
+export let onRefreshAiModels: (force?: boolean) => Promise<void> = async () => {};
+export let aiProvider = "codex";
+export let aiModel = "";
+export let aiEffort = "medium";
+export let aiModelOptions: { value: string; label: string }[] = [];
+export let aiEffortOptions: { value: string; label: string }[] = [];
+export let isSavingAiOptions = false;
+export let onAiOptionsChange: (field: "provider" | "model" | "effort", value: string) => Promise<void> = async () => {};
 export let canGenerateAiNotes = false;
 export let isGeneratingAiNotes = false;
 export let onTranscribeMeeting: (
@@ -73,6 +82,11 @@ let showSearch = false;
 	let lastAutoScrollIndex: number | null = null;
 let collapsed = false;
 	let playerHost: HTMLDivElement | null = null;
+	function mountPlayerControl(node: HTMLButtonElement, player: HTMLElement) {
+		const move = (target: HTMLElement) => (target.querySelector(".aan-player-compact-buttons") || target).appendChild(node);
+		move(player);
+		return { update: move, destroy() { node.remove(); } };
+	}
 	let mountedPlayerEl: HTMLElement | null = null;
 let dragActive = false;
 let dragCounter = 0;
@@ -126,7 +140,7 @@ let transcriptUploadInput: HTMLInputElement | null = null;
 	$: attachmentStatusText = attachmentsEnabled
 		? dragActive
 			? "Release to upload"
-			: "Drag files here or click Add files"
+			: "No attachments yet. Drop files here or use + to add them."
 		: "Add a recording to enable attachments";
 
 	$: showTranscriptionCta =
@@ -612,24 +626,6 @@ let transcriptUploadInput: HTMLInputElement | null = null;
 </script>
 
 <div class="aan-transcript-stack">
-	<AttachmentsPanel
-		{attachments}
-		{attachmentsEnabled}
-		{isUploadingAttachments}
-		bind:attachmentsCollapsed={attachmentsCollapsed}
-		{dragActive}
-		{attachmentStatusText}
-		{triggerFileDialog}
-		{handleDragEnter}
-		{handleDragOver}
-		{handleDragLeave}
-		{handleDrop}
-		{handleFileInput}
-		{formatAttachmentType}
-		bind:filePicker={filePicker}
-		{onOpenAttachment}
-		{onDeleteAttachment}
-	/>
 	{#if needsAudioUpload && !hasTranscript}
 		<AudioUploadPanel
 			{audioUploadInProgress}
@@ -650,17 +646,44 @@ let transcriptUploadInput: HTMLInputElement | null = null;
 			class:has-player={Boolean(playerContainer)}
 			bind:this={playerHost}
 		></div>
+		{#if playerContainer}
+					<button
+						class="aan-transcript-btn icon-only aan-player-follow"
+						use:mountPlayerControl={playerContainer}
+						class:auto-scroll-active={autoScroll}
+						on:click={toggleAutoScroll}
+						disabled={isSearching}
+						type="button"
+						title={autoScroll ? "Auto-scroll on: follows playback. Click to turn off." : "Auto-scroll off: click to follow playback."}
+						aria-label={autoScroll ? "Disable auto-scroll" : "Enable auto-scroll"}
+						aria-pressed={autoScroll}
+					>
+						<svg
+							aria-hidden="true"
+							viewBox="0 0 24 24"
+							focusable="false"
+							class="aan-transcript-icon"
+						>
+							<path
+								d="M7 5l5 5 5-5M7 19l5-5 5 5"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/>
+						</svg>
+					</button>
+		{/if}
 		<TranscriptPanel
-			{title}
+			hasPlayer={Boolean(playerContainer)}
 			{isTranscribing}
+			{isLoadingTranscript}
 			{segments}
 			{transcriptDuration}
 			{progressMessage}
 			{hasSegments}
 			bind:collapsed={collapsed}
-			{toggleAutoScroll}
-			{autoScroll}
-			{isSearching}
 			{copyTranscript}
 			showTranscriptionCta={showTranscriptionCta}
 			{canTranscribeDeepgram}
@@ -669,6 +692,7 @@ let transcriptUploadInput: HTMLInputElement | null = null;
 			{canGenerateAiNotes}
 			{isGeneratingAiNotes}
 			{onGenerateAiNotes}
+			{aiProvider} {aiCatalogStatus} {onRefreshAiModels} {aiModel} {aiEffort} {aiModelOptions} {aiEffortOptions} {isSavingAiOptions} {onAiOptionsChange}
 			{formatDurationLabel}
 			{toggleSearch}
 			{searchMatches}
@@ -694,6 +718,27 @@ let transcriptUploadInput: HTMLInputElement | null = null;
 			showAudioUploadButton={needsAudioUpload && hasTranscript}
 			{triggerAudioPicker}
 			{audioUploadInProgress}
+		/>
+	{/if}
+	<!-- Attachments need the meeting folder that comes with a recording. -->
+	{#if attachmentsEnabled || attachments.length}
+		<AttachmentsPanel
+			{attachments}
+			{attachmentsEnabled}
+			{isUploadingAttachments}
+			bind:attachmentsCollapsed={attachmentsCollapsed}
+			{dragActive}
+			{attachmentStatusText}
+			{triggerFileDialog}
+			{handleDragEnter}
+			{handleDragOver}
+			{handleDragLeave}
+			{handleDrop}
+			{handleFileInput}
+			{formatAttachmentType}
+			bind:filePicker={filePicker}
+			{onOpenAttachment}
+			{onDeleteAttachment}
 		/>
 	{/if}
 	{#if needsAudioUpload && hasTranscript}

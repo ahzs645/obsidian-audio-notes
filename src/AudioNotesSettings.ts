@@ -1,3 +1,4 @@
+import { modelOptions, effortOptions, type AiProvider } from "./services/AiModelCatalog";
 import type AutomaticAudioNotes from "./main";
 import {
 	PluginSettingTab,
@@ -29,24 +30,9 @@ export class ApiKeyInfo {
 }
 
 export type MeetingAiProviderKind = "disabled" | "claude" | "codex";
-export type MeetingAiClaudeEffort = "low" | "medium" | "high" | "max";
-export type MeetingAiCodexEffort = "low" | "medium" | "high" | "xhigh";
-
-const CUSTOM_AI_MODEL_VALUE = "__custom__";
-const CLAUDE_MODEL_OPTIONS = [
-	{ value: "", label: "Claude Code default" },
-	{ value: "claude-opus-4-6", label: "Claude Opus 4.6" },
-	{ value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-	{ value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
-];
-const CODEX_MODEL_OPTIONS = [
-	{ value: "gpt-5.4", label: "GPT-5.4" },
-	{ value: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
-	{ value: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
-	{ value: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" },
-	{ value: "gpt-5-codex", label: "GPT-5 Codex" },
-	{ value: "", label: "Codex CLI default" },
-];
+// Provider-reported effort values evolve independently of plugin releases.
+export type MeetingAiClaudeEffort = string;
+export type MeetingAiCodexEffort = string;
 
 export class AudioNotesSettingsTab extends PluginSettingTab {
 	plugin: AutomaticAudioNotes;
@@ -54,6 +40,51 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 	constructor(app: App, plugin: AutomaticAudioNotes) {
 		super(app, plugin);
 		this.plugin = plugin;
+	}
+
+	private renderAiChoices(parent: HTMLElement, provider: AiProvider, disabled: boolean): void {
+		const container = parent.createDiv();
+		const settings = this.plugin.settings, service = this.plugin.meetingAiService;
+		const claude = provider === "claude";
+		const getBinary = () => claude ? settings.meetingAiClaudeBinaryPath : settings.meetingAiCodexBinaryPath;
+		const render = () => {
+			if (!container.isConnected) return;
+			container.empty();
+			const models = service.models.get(provider, getBinary())?.models || [];
+			const model = claude ? settings.meetingAiClaudeModel : settings.meetingAiCodexModel;
+			const effort = claude ? settings.meetingAiClaudeEffort : settings.meetingAiCodexEffort;
+			new Setting(container).setName(`${claude ? "Claude" : "Codex"} model`)
+				.setDesc(service.models.status(provider, getBinary()))
+				.addDropdown(dropdown => {
+					for (const option of modelOptions(models, model)) dropdown.addOption(option.value, option.label);
+					dropdown.setValue(model).setDisabled(disabled).onChange(async value => {
+						if (claude) settings.meetingAiClaudeModel = value; else settings.meetingAiCodexModel = value;
+						if (!effortOptions(models, value, effort).some(o => o.value === effort)) {
+							if (claude) settings.meetingAiClaudeEffort = ""; else settings.meetingAiCodexEffort = "";
+						}
+						await this.plugin.saveSettings(); render();
+					});
+				}).addButton(button => button.setButtonText("Refresh").setDisabled(disabled).onClick(async () => {
+					button.setDisabled(true); await service.models.refresh(provider, getBinary(), true); render();
+				}));
+			new Setting(container).setName("Custom model (optional)").setDesc("Enter a model ID if it is absent from the retrieved list; leave blank for the provider default.")
+				.addText(text => text.setValue(model).setDisabled(disabled).onChange(async value => {
+					if (claude) settings.meetingAiClaudeModel = value; else settings.meetingAiCodexModel = value;
+					if (claude) settings.meetingAiClaudeEffort = ""; else settings.meetingAiCodexEffort = "";
+					await this.plugin.saveSettings();
+				}).inputEl.addEventListener("blur", render));
+			new Setting(container).setName(`${claude ? "Claude" : "Codex"} effort`).setDesc("Options reported for the selected model. Provider default omits the effort override.")
+				.addDropdown(dropdown => {
+					const options = effortOptions(models, model, effort);
+					for (const option of options) dropdown.addOption(option.value, option.label);
+					dropdown.setValue(options.some(o => o.value === effort) ? effort : "").setDisabled(disabled).onChange(async value => {
+						if (claude) settings.meetingAiClaudeEffort = value; else settings.meetingAiCodexEffort = value;
+						await this.plugin.saveSettings();
+					});
+				});
+		};
+		render();
+		if (!disabled) void service.models.refresh(provider, getBinary()).then(render);
 	}
 
 	display(): void {
@@ -385,71 +416,7 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					})
 			);
 
-			new Setting(containerEl)
-				.setName("Claude model")
-				.setDesc(
-					"Choose a common Claude model, or select Custom to type another model name."
-				)
-				.setDisabled(claudeDisabled)
-				.addDropdown((dropdown) => {
-					const current = this.plugin.settings.meetingAiClaudeModel;
-					for (const option of CLAUDE_MODEL_OPTIONS) {
-						dropdown.addOption(option.value, option.label);
-					}
-					dropdown
-						.addOption(CUSTOM_AI_MODEL_VALUE, "Custom...")
-						.setValue(getPresetModelValue(current, CLAUDE_MODEL_OPTIONS))
-						.setDisabled(claudeDisabled)
-						.onChange(async (value) => {
-							if (value === CUSTOM_AI_MODEL_VALUE) {
-								if (isPresetModelValue(
-									this.plugin.settings.meetingAiClaudeModel,
-									CLAUDE_MODEL_OPTIONS
-								)) {
-									this.plugin.settings.meetingAiClaudeModel = "";
-								}
-								await this.plugin.saveSettings();
-								this.display();
-								return;
-							}
-							this.plugin.settings.meetingAiClaudeModel = value;
-							await this.plugin.saveSettings();
-							this.display();
-						});
-				})
-				.addText((text) => {
-					const current = this.plugin.settings.meetingAiClaudeModel;
-					const customSelected =
-						getPresetModelValue(current, CLAUDE_MODEL_OPTIONS) ===
-						CUSTOM_AI_MODEL_VALUE;
-					text
-						.setPlaceholder("Custom Claude model")
-						.setValue(customSelected ? current : "")
-						.setDisabled(claudeDisabled || !customSelected)
-						.onChange(async (value) => {
-							this.plugin.settings.meetingAiClaudeModel = value;
-							await this.plugin.saveSettings();
-						});
-				});
-
-		new Setting(containerEl)
-			.setName("Claude effort")
-			.setDesc("Controls how much reasoning Claude Code uses for the note draft.")
-			.setDisabled(claudeDisabled)
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOption("low", "Low")
-					.addOption("medium", "Medium")
-					.addOption("high", "High")
-					.addOption("max", "Max")
-					.setValue(this.plugin.settings.meetingAiClaudeEffort)
-					.setDisabled(claudeDisabled)
-					.onChange(async (value) => {
-						this.plugin.settings.meetingAiClaudeEffort =
-							(value as MeetingAiClaudeEffort) || "medium";
-						await this.plugin.saveSettings();
-					})
-			);
+		this.renderAiChoices(containerEl, "claude", claudeDisabled);
 
 		new Setting(containerEl)
 			.setName("Codex binary path")
@@ -466,71 +433,7 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					})
 			);
 
-			new Setting(containerEl)
-				.setName("Codex model")
-				.setDesc(
-					"Choose a common Codex/OpenAI model, or select Custom to type another model name."
-				)
-				.setDisabled(codexDisabled)
-				.addDropdown((dropdown) => {
-					const current = this.plugin.settings.meetingAiCodexModel;
-					for (const option of CODEX_MODEL_OPTIONS) {
-						dropdown.addOption(option.value, option.label);
-					}
-					dropdown
-						.addOption(CUSTOM_AI_MODEL_VALUE, "Custom...")
-						.setValue(getPresetModelValue(current, CODEX_MODEL_OPTIONS))
-						.setDisabled(codexDisabled)
-						.onChange(async (value) => {
-							if (value === CUSTOM_AI_MODEL_VALUE) {
-								if (isPresetModelValue(
-									this.plugin.settings.meetingAiCodexModel,
-									CODEX_MODEL_OPTIONS
-								)) {
-									this.plugin.settings.meetingAiCodexModel = "";
-								}
-								await this.plugin.saveSettings();
-								this.display();
-								return;
-							}
-							this.plugin.settings.meetingAiCodexModel = value;
-							await this.plugin.saveSettings();
-							this.display();
-						});
-				})
-				.addText((text) => {
-					const current = this.plugin.settings.meetingAiCodexModel;
-					const customSelected =
-						getPresetModelValue(current, CODEX_MODEL_OPTIONS) ===
-						CUSTOM_AI_MODEL_VALUE;
-					text
-						.setPlaceholder("Custom Codex/OpenAI model")
-						.setValue(customSelected ? current : "")
-						.setDisabled(codexDisabled || !customSelected)
-						.onChange(async (value) => {
-							this.plugin.settings.meetingAiCodexModel = value;
-							await this.plugin.saveSettings();
-						});
-				});
-
-		new Setting(containerEl)
-			.setName("Codex reasoning")
-			.setDesc("Controls how much reasoning Codex uses for the note draft.")
-			.setDisabled(codexDisabled)
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOption("low", "Low")
-					.addOption("medium", "Medium")
-					.addOption("high", "High")
-					.addOption("xhigh", "Extra high")
-					.setValue(this.plugin.settings.meetingAiCodexEffort)
-					.setDisabled(codexDisabled)
-					.onChange(async (value) => {
-						this.plugin.settings.meetingAiCodexEffort =
-							(value as MeetingAiCodexEffort) || "medium";
-						await this.plugin.saveSettings();
-					})
-			);
+		this.renderAiChoices(containerEl, "codex", codexDisabled);
 
 		new Setting(containerEl)
 			.setName("AI prompt")
@@ -1140,20 +1043,6 @@ function parseColorMap(input: string): Record<string, string> {
 	return result;
 }
 
-function getPresetModelValue(
-	value: string,
-	options: { value: string; label: string }[]
-): string {
-	return isPresetModelValue(value, options) ? value : CUSTOM_AI_MODEL_VALUE;
-}
-
-function isPresetModelValue(
-	value: string,
-	options: { value: string; label: string }[]
-): boolean {
-	return options.some((option) => option.value === value);
-}
-
 export interface StringifiedAudioNotesSettings {
 	plusDuration: string;
 	minusDuration: string;
@@ -1224,10 +1113,10 @@ const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	meetingAiProvider: "disabled",
 	meetingAiClaudeBinaryPath: "claude",
 	meetingAiClaudeModel: "",
-	meetingAiClaudeEffort: "medium",
+	meetingAiClaudeEffort: "",
 	meetingAiCodexBinaryPath: "codex",
-	meetingAiCodexModel: "gpt-5.4",
-	meetingAiCodexEffort: "medium",
+	meetingAiCodexModel: "",
+	meetingAiCodexEffort: "",
 	meetingAiPrompt: DEFAULT_MEETING_AI_PROMPT,
 	meetingAiCustomInstructions: "",
 	storeAttachmentsWithMeeting: false,
@@ -1733,24 +1622,11 @@ export class AudioNotesSettings {
 	}
 
 	get meetingAiClaudeEffort(): MeetingAiClaudeEffort {
-		return (
-			this._meetingAiClaudeEffort ||
-			DEFAULT_SETTINGS.meetingAiClaudeEffort
-		);
+		return this._meetingAiClaudeEffort ?? DEFAULT_SETTINGS.meetingAiClaudeEffort;
 	}
 
 	set meetingAiClaudeEffort(value: MeetingAiClaudeEffort) {
-		switch (value) {
-			case "low":
-			case "medium":
-			case "high":
-			case "max":
-				this._meetingAiClaudeEffort = value;
-				return;
-			default:
-				this._meetingAiClaudeEffort =
-					DEFAULT_SETTINGS.meetingAiClaudeEffort;
-		}
+		this._meetingAiClaudeEffort = typeof value === "string" && /^(?:[a-z][a-z0-9_-]*)?$/.test(value) ? value : "";
 	}
 
 	get meetingAiCodexBinaryPath(): string {
@@ -1774,24 +1650,11 @@ export class AudioNotesSettings {
 	}
 
 	get meetingAiCodexEffort(): MeetingAiCodexEffort {
-		return (
-			this._meetingAiCodexEffort ||
-			DEFAULT_SETTINGS.meetingAiCodexEffort
-		);
+		return this._meetingAiCodexEffort ?? DEFAULT_SETTINGS.meetingAiCodexEffort;
 	}
 
 	set meetingAiCodexEffort(value: MeetingAiCodexEffort) {
-		switch (value) {
-			case "low":
-			case "medium":
-			case "high":
-			case "xhigh":
-				this._meetingAiCodexEffort = value;
-				return;
-			default:
-				this._meetingAiCodexEffort =
-					DEFAULT_SETTINGS.meetingAiCodexEffort;
-		}
+		this._meetingAiCodexEffort = typeof value === "string" && /^(?:[a-z][a-z0-9_-]*)?$/.test(value) ? value : "";
 	}
 
 	get meetingAiPrompt(): string {

@@ -18,9 +18,14 @@ import {
 	type NormalizedMeetingLabelCategory,
 } from "./meeting-labels";
 import { NOTES_PLACEHOLDER_LINE } from "./MeetingNoteTemplate";
+import { confirmWithModal } from "./modals/ConfirmModal";
 
 const AI_CONTEXT_MAX_CHARS = 4000;
 const CREATE_LABEL_OPTION = "__create-new-label__";
+/** Reads are cheap but plentiful; batch them so the UI keeps painting. */
+const CONTENT_SCAN_BATCH = 10;
+/** Each suggestion spawns its own CLI process, so a few can run at once. */
+const AI_SUGGEST_CONCURRENCY = 3;
 
 interface TriageItem {
 	file: TFile;
@@ -54,7 +59,19 @@ export class LabelTriageModal extends Modal {
 	private emptyToggleTextEl?: HTMLElement;
 	private showEmpty = false;
 	private suggesting = false;
+	private cancelSuggest = false;
+	private scanning = false;
+	private checkingAi = false;
 	private closed = false;
+	private activeTag = "";
+	private individualMode = false;
+	private activeButton?: HTMLButtonElement;
+	private activeHintEl?: HTMLElement;
+	private filterEl?: HTMLInputElement;
+	private filterQuery = "";
+	private individualCheckbox?: HTMLInputElement;
+	private applying = new Set<TriageItem>();
+	private resultEl?: HTMLElement;
 
 	constructor(private plugin: AutomaticAudioNotes) {
 		super(plugin.app);
@@ -66,6 +83,7 @@ export class LabelTriageModal extends Modal {
 			this.plugin.settings.meetingLabelCategories
 		);
 
+		this.modalEl.addClass("aan-label-triage-modal");
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.addClass("aan-label-triage");
@@ -75,26 +93,60 @@ export class LabelTriageModal extends Modal {
 			text: "Scanning meeting notes…",
 		});
 
-		const controls = contentEl.createDiv({
-			cls: "aan-label-triage-controls",
+		const toolbar = contentEl.createDiv({ cls: "aan-label-triage-toolbar" });
+
+		const active = toolbar.createDiv({ cls: "aan-label-triage-active" });
+		active.createSpan({
+			cls: "aan-label-triage-caption",
+			text: "Active label",
 		});
-		this.suggestButton = controls.createEl("button", {
-			text: "Suggest labels with AI",
+		this.activeButton = active.createEl("button", {
+			text: "Choose label…",
+			cls: "aan-label-triage-active-choice",
 		});
-		this.suggestButton.disabled = true;
-		this.suggestButton.addEventListener("click", () => {
-			void this.suggestAll();
+		this.activeButton.addEventListener("click", () => {
+			new MeetingLabelPickerModal(this.plugin.app, this.plugin, selection => {
+				this.activeTag = selection.tag;
+				this.activeButton!.setText(formatLabelOptionText(selection.label));
+				this.activeButton!.addClass("has-label");
+				setHoverLabel(this.activeButton!, `${selection.label.displayName}\n#${selection.tag}`);
+				const wasIndividual = this.individualMode;
+				this.individualMode = false;
+				if (this.individualCheckbox) this.individualCheckbox.checked = false;
+				this.activeHintEl?.setText("Click Apply beside each meeting that belongs to it.");
+				// Only a mode switch changes row markup; otherwise keep the scroll position.
+				if (wasIndividual) this.renderList();
+				else for (const item of this.items) this.updateRowLabel(item);
+			}).open();
 		});
-		this.applyAllButton = controls.createEl("button", {
-			text: "Apply all chosen labels",
-			cls: "mod-cta",
-		});
-		this.applyAllButton.disabled = true;
-		this.applyAllButton.addEventListener("click", () => {
-			void this.applyAll();
+		setHoverLabel(this.activeButton, "Choose one label, then apply it to any number of meetings below.");
+		this.activeHintEl = active.createSpan({
+			cls: "aan-label-triage-hint",
+			text: "Choose once, then click Apply beside each matching meeting.",
 		});
 
-		this.emptyToggleEl = contentEl.createEl("label", {
+		const options = toolbar.createDiv({ cls: "aan-label-triage-options" });
+		this.filterEl = options.createEl("input", {
+			cls: "aan-label-triage-filter",
+			type: "search",
+			attr: {
+				placeholder: "Filter by title, folder, date or attendee…",
+				"aria-label": "Filter meeting notes",
+			},
+		});
+		this.filterEl.addEventListener("input", () => {
+			this.filterQuery = this.filterEl!.value.trim().toLowerCase();
+			this.renderList();
+		});
+		const mode = options.createEl("label", { cls: "aan-label-triage-toggle" });
+		this.individualCheckbox = mode.createEl("input", { type: "checkbox" });
+		mode.createSpan({ text: "Choose labels individually / review AI suggestions" });
+		this.individualCheckbox.addEventListener("change", () => {
+			this.individualMode = this.individualCheckbox!.checked;
+			this.renderList();
+		});
+
+		this.emptyToggleEl = options.createEl("label", {
 			cls: "aan-label-triage-toggle",
 		});
 		this.emptyToggleEl.hide();
@@ -107,10 +159,49 @@ export class LabelTriageModal extends Modal {
 		});
 		this.emptyToggleTextEl = this.emptyToggleEl.createSpan();
 
-		this.aiStatusEl = contentEl.createEl("p", {
-			cls: "aan-label-triage-ai-status",
+		const controls = toolbar.createDiv({
+			cls: "aan-label-triage-controls",
 		});
+		this.suggestButton = controls.createEl("button", {
+			text: "Suggest labels with AI",
+		});
+		this.suggestButton.disabled = true;
+		this.suggestButton.addEventListener("click", () => {
+			if (this.suggesting) {
+				// A run over a whole vault can take minutes; keep what it found so far.
+				this.cancelSuggest = true;
+				this.suggestButton!.setText("Stopping…");
+				this.suggestButton!.disabled = true;
+				return;
+			}
+			void this.suggestAll();
+		});
+		this.applyAllButton = controls.createEl("button", {
+			text: "Apply all chosen labels",
+			cls: "mod-cta",
+		});
+		this.applyAllButton.disabled = true;
+		this.applyAllButton.addEventListener("click", () => {
+			void this.applyAll();
+		});
+		this.aiStatusEl = controls.createEl("span", {
+			cls: "aan-label-triage-ai-status",
+			attr: { role: "button", tabindex: "0" },
+		});
+		this.aiStatusEl.addEventListener("click", () =>
+			this.recheckAiStatus()
+		);
+		this.aiStatusEl.addEventListener("keydown", (event) => {
+			if (event.key === "Enter" || event.key === " ") {
+				event.preventDefault();
+				this.recheckAiStatus();
+			}
+		});
+		// The provider can be enabled or logged into while this modal is open.
+		window.addEventListener("focus", this.handleWindowFocus);
 		void this.refreshAiStatus();
+
+		this.resultEl = contentEl.createDiv({ cls: "aan-label-triage-result", attr: { "role": "status" } });
 
 		this.listEl = contentEl.createDiv({ cls: "aan-label-triage-list" });
 		void this.loadItems();
@@ -118,39 +209,100 @@ export class LabelTriageModal extends Modal {
 
 	onClose() {
 		this.closed = true;
+		window.removeEventListener("focus", this.handleWindowFocus);
 		this.contentEl.empty();
 	}
 
+	private handleWindowFocus = () => {
+		if (!this.suggesting) void this.refreshAiStatus();
+	};
+
+	private recheckAiStatus() {
+		if (this.suggesting || this.checkingAi) return;
+		void this.refreshAiStatus();
+	}
+
 	private async loadItems() {
-		const items = this.collectUnlabeledMeetings();
-		for (const item of items) {
-			if (this.closed) return;
-			try {
-				const content = await this.plugin.app.vault.cachedRead(
-					item.file
-				);
-				item.hasContent = hasMeaningfulContent(content);
-			} catch {
-				item.hasContent = true;
-			}
-		}
-		if (this.closed) return;
-		this.items = items;
+		this.items = this.collectUnlabeledMeetings();
 		this.labelOptions = this.collectCandidateTags().map((tag) => ({
 			tag,
 			info: buildMeetingLabelInfo(tag, this.categories),
 		}));
+		// Show and let the user label straight away; template-only notes drop
+		// out of the list as their reads land rather than gating the render.
+		this.scanning = this.items.length > 0;
 		this.renderList();
+		await this.scanForContent();
+	}
+
+	private async scanForContent() {
+		const items = this.items.slice();
+		for (let start = 0; start < items.length; start += CONTENT_SCAN_BATCH) {
+			if (this.closed) return;
+			const batch = items.slice(start, start + CONTENT_SCAN_BATCH);
+			await Promise.all(
+				batch.map(async (item) => {
+					try {
+						const content =
+							await this.plugin.app.vault.cachedRead(item.file);
+						item.hasContent = hasMeaningfulContent(content);
+					} catch {
+						item.hasContent = true;
+					}
+				})
+			);
+			if (this.closed) return;
+			let hidden = false;
+			for (const item of batch) {
+				if (item.hasContent || this.showEmpty) continue;
+				// Drop just this row so the scroll position and any open
+				// dropdown elsewhere in the list survive the scan.
+				item.rowEl?.remove();
+				item.rowEl = undefined;
+				hidden = true;
+			}
+			if (hidden) this.updateSummary();
+		}
+		if (this.closed) return;
+		this.scanning = false;
+		this.updateSummary();
 	}
 
 	private visibleItems(): TriageItem[] {
-		return this.items.filter((item) => this.showEmpty || item.hasContent);
+		return this.items.filter(
+			(item) =>
+				(this.showEmpty || item.hasContent) && this.matchesFilter(item)
+		);
+	}
+
+	private matchesFilter(item: TriageItem): boolean {
+		if (!this.filterQuery) return true;
+		const haystack = [
+			item.title,
+			item.date,
+			item.file.parent?.path ?? "",
+			item.attendees.join(" "),
+		]
+			.join(" ")
+			.toLowerCase();
+		return this.filterQuery
+			.split(/\s+/)
+			.every((term) => haystack.includes(term));
 	}
 
 	private renderList() {
 		if (!this.listEl) return;
 		this.listEl.empty();
-		for (const item of this.visibleItems()) {
+		const visible = this.visibleItems();
+		if (!visible.length && this.items.length) {
+			this.listEl.createDiv({
+				cls: "aan-label-triage-empty",
+				text: this.filterQuery
+					? "No unlabeled meetings match this filter."
+					: "Nothing left to label here.",
+			});
+		}
+		for (const item of visible) {
 			this.renderRow(item);
 		}
 		this.updateSummary();
@@ -228,6 +380,10 @@ export class LabelTriageModal extends Modal {
 			"title",
 			folder ? `${item.title}\n${item.file.path}` : item.title
 		);
+		setHoverLabel(titleEl, `${item.title}\n${item.file.path}`);
+		titleEl.setAttribute("tabindex", "0");
+		titleEl.setAttribute("role", "link");
+		titleEl.addEventListener("keydown", event => { if (event.key === "Enter") titleEl.click(); });
 		titleEl.addEventListener("click", () => {
 			void this.plugin.app.workspace
 				.getLeaf(true)
@@ -248,13 +404,13 @@ export class LabelTriageModal extends Modal {
 		}
 
 		const actions = row.createDiv({ cls: "aan-label-triage-actions" });
-		item.labelEl = actions.createDiv({
-			cls: "aan-label-triage-label",
-		});
-		item.selectEl = this.buildLabelSelect(item, actions);
+		item.labelEl = this.individualMode
+			? actions.createDiv({ cls: "aan-label-triage-label" })
+			: undefined;
+		item.selectEl = this.individualMode ? this.buildLabelSelect(item, actions) : undefined;
 		item.applyButton = actions.createEl("button", {
 			text: "Apply",
-			cls: "mod-cta",
+			cls: "aan-label-triage-apply",
 		});
 		item.applyButton.addEventListener("click", () => {
 			void this.applyItem(item);
@@ -286,6 +442,7 @@ export class LabelTriageModal extends Modal {
 				groupEl.createEl("option", {
 					text: formatLabelOptionText(option.info),
 					value: option.tag,
+					attr: { title: `${option.info.displayName} — #${option.tag}` },
 				});
 			}
 		}
@@ -349,14 +506,23 @@ export class LabelTriageModal extends Modal {
 			);
 		}
 		if (item.applyButton) {
-			item.applyButton.disabled = !item.chosenTag;
+			const tag = this.individualMode ? item.chosenTag : this.activeTag;
+			item.applyButton.disabled = !tag || this.applying.has(item);
+			item.applyButton.setText(this.applying.has(item) ? "Applying…" : this.individualMode ? "Apply" : "Apply label");
+			setHoverLabel(item.applyButton, tag ? `Apply ${buildMeetingLabelInfo(tag, this.categories).displayName} (#${tag}) to ${item.title}` : "Choose an active label above first.");
 		}
 		if (item.labelEl) {
-			if (item.source === "ai" && item.chosenTag) {
-				item.labelEl.setText("AI suggestion");
+			if (this.individualMode && item.source === "ai" && item.chosenTag) {
+				const info = buildMeetingLabelInfo(item.chosenTag, this.categories);
+				item.labelEl.setText("AI");
+				setHoverLabel(
+					item.labelEl,
+					`AI suggested ${info.displayName} (#${item.chosenTag})`
+				);
 				item.labelEl.addClass("has-label");
 			} else {
 				item.labelEl.setText("");
+				item.labelEl.removeAttribute("title");
 				item.labelEl.removeClass("has-label");
 			}
 		}
@@ -369,20 +535,25 @@ export class LabelTriageModal extends Modal {
 		this.applyAllButton.textContent = count
 			? `Apply all chosen labels (${count})`
 			: "Apply all chosen labels";
-		this.applyAllButton.disabled = !count;
+		this.applyAllButton.disabled = !count || this.applying.size > 0;
+		this.applyAllButton.style.display = this.individualMode ? "" : "none";
 	}
 
 	private updateSummary() {
 		if (!this.summaryEl) return;
 		const visible = this.visibleItems();
+		const total = this.items.length;
+		const scanning = this.scanning ? " Checking for empty notes…" : "";
 		this.summaryEl.setText(
-			visible.length
+			(!total
+				? "All meeting notes have labels. Nice and tidy."
+				: this.filterQuery
+				? `${visible.length} of ${total} unlabeled meeting notes match the filter.`
+				: visible.length
 				? `${visible.length} meeting note${
 						visible.length === 1 ? "" : "s"
 				  } without a label.`
-				: this.items.length
-				? "All meeting notes with content have labels."
-				: "All meeting notes have labels. Nice and tidy."
+				: "All meeting notes with content have labels.") + scanning
 		);
 		if (this.emptyToggleEl && this.emptyToggleTextEl) {
 			const emptyCount = this.items.filter(
@@ -402,24 +573,33 @@ export class LabelTriageModal extends Modal {
 	}
 
 	private async refreshAiStatus() {
-		if (!this.aiStatusEl || !this.suggestButton) return;
+		if (!this.aiStatusEl || !this.suggestButton || this.checkingAi) return;
+		setHoverLabel(this.aiStatusEl, "Click to re-check the AI provider.");
 		if (!this.plugin.meetingAiService.isConfigured()) {
 			this.aiStatusEl.setText(
 				"AI suggestions are disabled. Enable a local AI provider (Claude Code or Codex) in Audio Notes settings to use them."
 			);
+			this.suggestButton.disabled = true;
 			return;
 		}
+		this.checkingAi = true;
 		this.aiStatusEl.setText("Checking AI provider…");
 		try {
 			const health = await this.plugin.meetingAiService.checkHealth();
+			if (this.closed) return;
 			this.aiStatusEl?.setText(health.message);
-			if (health.available && this.suggestButton) {
-				this.suggestButton.disabled = false;
+			// A provider that went away has to disable the button again.
+			if (this.suggestButton) {
+				this.suggestButton.disabled = !health.available;
 			}
 		} catch (error) {
+			if (this.closed) return;
 			this.aiStatusEl?.setText(
 				`Could not check AI provider: ${(error as Error)?.message ?? error}`
 			);
+			if (this.suggestButton) this.suggestButton.disabled = true;
+		} finally {
+			this.checkingAi = false;
 		}
 	}
 
@@ -438,15 +618,28 @@ export class LabelTriageModal extends Modal {
 			);
 			return;
 		}
+		this.individualMode = true;
+		if (this.individualCheckbox) this.individualCheckbox.checked = true;
+		this.renderList();
 		this.suggesting = true;
-		this.suggestButton.disabled = true;
+		this.cancelSuggest = false;
+		const total = pending.length;
+		let next = 0;
 		let done = 0;
 		let suggested = 0;
 		let failed = 0;
-		try {
-			for (const item of pending) {
-				if (this.closed) return;
-				this.suggestButton.textContent = `Suggesting ${done + 1}/${pending.length}…`;
+		const showProgress = () => {
+			// Leave the "Stopping…" text alone once the user has asked to stop.
+			if (this.suggestButton && !this.cancelSuggest) {
+				this.suggestButton.textContent = `Stop (${done}/${total})`;
+			}
+		};
+		// Each call spawns its own provider process, so run a few at a time;
+		// `next++` is safe to share because nothing awaits between the two steps.
+		const worker = async () => {
+			while (!this.closed && !this.cancelSuggest) {
+				const item = pending[next++];
+				if (!item) return;
 				try {
 					const context = await this.buildAiContext(item.file);
 					const tag =
@@ -455,7 +648,7 @@ export class LabelTriageModal extends Modal {
 							context,
 							candidateTags,
 						});
-					if (tag && !this.closed) {
+					if (tag && !this.closed && this.items.includes(item) && !item.chosenTag && !this.applying.has(item)) {
 						item.chosenTag = tag;
 						item.source = "ai";
 						this.updateRowLabel(item);
@@ -470,15 +663,30 @@ export class LabelTriageModal extends Modal {
 					);
 				}
 				done += 1;
+				showProgress();
 			}
+		};
+		showProgress();
+		try {
+			await Promise.all(
+				Array.from(
+					{ length: Math.min(AI_SUGGEST_CONCURRENCY, total) },
+					worker
+				)
+			);
+			if (this.closed) return;
+			const stopped = this.cancelSuggest;
 			new Notice(
-				`AI suggested labels for ${suggested} of ${pending.length} notes.${
+				`AI suggested labels for ${suggested} of ${
+					stopped ? done : total
+				} notes${stopped ? " before you stopped it" : ""}.${
 					failed ? ` ${failed} failed (see console).` : ""
 				}`,
 				6000
 			);
 		} finally {
 			this.suggesting = false;
+			this.cancelSuggest = false;
 			if (this.suggestButton) {
 				this.suggestButton.textContent = "Suggest labels with AI";
 				this.suggestButton.disabled = false;
@@ -497,27 +705,30 @@ export class LabelTriageModal extends Modal {
 		item.rowEl?.remove();
 	}
 
-	private async applyItem(item: TriageItem) {
-		if (!item.chosenTag) {
-			new Notice("Choose a label for this note first.");
-			return;
-		}
+	private async applyItem(item: TriageItem, tag = this.individualMode ? item.chosenTag : this.activeTag): Promise<boolean> {
+		if (!tag || this.applying.has(item) || !this.items.includes(item)) return false;
+		// Capture the label before awaiting: changing the active label affects only later clicks.
+		this.applying.add(item);
+		this.updateRowLabel(item);
+		const visible = this.visibleItems(), index = visible.indexOf(item);
+		const next = visible[index + 1] ?? visible[index - 1];
 		try {
-			await applyMeetingLabelToFile(
-				this.plugin.app,
-				item.file,
-				item.chosenTag
-			);
+			await applyMeetingLabelToFile(this.plugin.app, item.file, tag);
 			this.removeItem(item);
-			this.updateSummary();
-			this.updateApplyAllButton();
+			if (!this.closed) {
+				this.resultEl?.setText(`Labeled “${item.title}” · ${buildMeetingLabelInfo(tag, this.categories).displayName}`);
+				this.updateSummary();
+				// Keep keyboard users on the next row without stealing focus from a new selection.
+				if (this.contentEl.ownerDocument.activeElement === this.contentEl.ownerDocument.body) next?.applyButton?.focus();
+			}
+			return true;
 		} catch (error) {
-			console.error(
-				"Audio Notes: could not apply meeting label",
-				item.file.path,
-				error
-			);
-			new Notice(`Could not label ${item.title}.`, 6000);
+			console.error("Audio Notes: could not apply meeting label", item.file.path, error);
+			new Notice(`Could not label ${item.title}. Please try again.`, 6000);
+			return false;
+		} finally {
+			this.applying.delete(item);
+			if (!this.closed) { this.updateRowLabel(item); this.updateApplyAllButton(); }
 		}
 	}
 
@@ -529,27 +740,34 @@ export class LabelTriageModal extends Modal {
 			);
 			return;
 		}
+		const plural = ready.length === 1 ? "" : "s";
+		const aiCount = ready.filter((item) => item.source === "ai").length;
+		const confirmed = await confirmWithModal(this.plugin.app, {
+			title: "Apply chosen labels?",
+			message: `This writes a label into the frontmatter of ${
+				ready.length
+			} meeting note${plural}${
+				aiCount
+					? `, ${aiCount} of them suggested by the AI`
+					: ""
+			}. There is no undo from this modal.`,
+			confirmText: `Apply ${ready.length} label${plural}`,
+		});
+		if (!confirmed || this.closed) return;
 		let applied = 0;
 		for (const item of ready) {
-			try {
-				await applyMeetingLabelToFile(
-					this.plugin.app,
-					item.file,
-					item.chosenTag
-				);
-				this.removeItem(item);
-				applied += 1;
-			} catch (error) {
-				console.error(
-					"Audio Notes: could not apply meeting label",
-					item.file.path,
-					error
-				);
-			}
+			if (this.closed) break;
+			if (await this.applyItem(item, item.chosenTag)) applied += 1;
 		}
+		if (this.closed) return;
 		this.updateSummary();
 		this.updateApplyAllButton();
-		new Notice(`Applied labels to ${applied} meeting notes.`);
+		const failedCount = ready.length - applied;
+		new Notice(
+			`Applied labels to ${applied} meeting note${
+				applied === 1 ? "" : "s"
+			}.${failedCount ? ` ${failedCount} could not be saved.` : ""}`
+		);
 	}
 }
 
@@ -572,4 +790,8 @@ function hasMeaningfulContent(content: string): boolean {
 		return true;
 	}
 	return false;
+}
+
+function setHoverLabel(element: HTMLElement, text: string) {
+	element.setAttribute("title", text);
 }

@@ -82,9 +82,9 @@ function importerHarness() {
     create: async (p, data) => { if (disk.has(p)) throw Error('exists'); disk.set(p, data); files.push({ path: p, extension: 'json', stat: { mtime: 2, size: data.length } }); },
     adapter: { writeBinary: async (p, data) => disk.set(p, data), stat: async p => files.find(f => f.path === p)?.stat, exists: async p => disk.has(p) || p === files[0].path,
       read: async p => { if (disk.has(p)) return disk.get(p); reads++; return JSON.stringify({ source: 'whisper', audioSha1: 'audio-hash', segmentsSha1: 'segments-hash', whisperFingerprint: 'fingerprint', durationMs: 1 }); },
-      write: async (p, data) => disk.set(p, data), rename: async (a, b) => { disk.set(b, disk.get(a)); disk.delete(a); } },
+      write: async (p, data) => disk.set(p, data), rename: async (a, b) => { if (disk.has(b)) throw Error("Destination file already exists!"); disk.set(b, disk.get(a)); disk.delete(a); } },
   } } });
-  return { api: ctx.exports, plugin, reads: () => reads, files };
+  return { api: ctx.exports, plugin, reads: () => reads, files, disk };
 }
 test('unmatched lookups proceed without reading historical transcripts; restart keeps known hashes', async () => {
   const h = importerHarness(), p = h.plugin();
@@ -153,4 +153,29 @@ test('a failed import does not wedge the per-vault queue', async () => {
   const h = importerHarness(), p = h.plugin();
   await assert.rejects(h.api.serializeImport(p, async () => { throw Error('bad archive'); }), /bad archive/);
   assert.equal(await h.api.serializeImport(p, async () => 'next import'), 'next import');
+});
+
+
+test('checkpoint overwrites existing destination and recovers newer legacy temporary copy', async () => {
+  const h = importerHarness(), p = h.plugin(), c = await h.api.getCatalog(p, 'transcripts');
+  await c.step();
+  const path = [...h.disk.keys()].find(p => p.endsWith('.json.tmp'));
+  await c.record({path: 'transcripts/a.json', mtime: 1, size: 10}, {audioSha1: 'updated'});
+  assert.equal(c.saveError, '');
+  assert.equal(JSON.parse(h.disk.get(path.slice(0,-4))).records[0].entry.audioSha1, 'updated');
+  h.disk.set(path.slice(0,-4), JSON.stringify({version:1, records:[]}));
+  const reboot = await h.api.getCatalog(h.plugin(), 'transcripts');
+  assert.equal(reboot.progress.complete, 1);
+  assert.equal(reboot.entries[0].audioSha1, 'updated');
+  h.disk.set(path, '{interrupted');
+  h.disk.set(path.slice(0,-4), JSON.stringify({version:1, records:[{file:{path:'transcripts/a.json',mtime:1,size:10},state:'complete',entry:{audioSha1:'backup'}}]}));
+  const fallback = await h.api.getCatalog(h.plugin(), 'transcripts');
+  assert.equal(fallback.entries[0].audioSha1, 'backup');
+});
+test('failed final save retries on idle tick without rereading transcripts', async () => {
+  const f = fixture(1), a = new IncrementalIndex(f.host); let fail = true;
+  f.host.save = async data => { if(fail) throw Error('disk full'); f.saved=data; };
+  await a.initialize(); await a.step(); assert.match(a.saveError, /disk full/);
+  fail=false; await a.step(); assert.equal(a.saveError,''); assert.equal(f.reads.length,1);
+  const b = new IncrementalIndex(f.host); await b.initialize(); assert.equal(b.progress.complete,1);
 });

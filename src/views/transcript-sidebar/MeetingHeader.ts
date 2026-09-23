@@ -33,10 +33,25 @@ export class MeetingHeader {
 		this.headerEl = container.createDiv({
 			cls: "aan-transcript-sidebar-header",
 		});
-		this.titleEl = this.headerEl.createEl("h2", {
+		const titleRow = this.headerEl.createDiv({
+			cls: "aan-transcript-title-row",
+		});
+		this.titleEl = titleRow.createEl("h2", {
 			text: "Transcript",
 		});
 		this.titleEl.classList.add("aan-transcript-title");
+		this.deleteButtonEl = titleRow.createEl("button", {
+			cls: "aan-transcript-delete-btn clickable-icon",
+			attr: {
+				type: "button",
+				title: "Delete meeting",
+				"aria-label": "Delete meeting",
+			},
+		});
+		setIcon(this.deleteButtonEl, "trash-2");
+		this.deleteButtonEl.addEventListener("click", () => {
+			this.callbacks.onDelete();
+		});
 		this.scheduleSummaryEl = this.headerEl.createDiv({
 			cls: "aan-transcript-schedule is-placeholder",
 		});
@@ -47,6 +62,18 @@ export class MeetingHeader {
 		this.scheduleTimeEl = this.scheduleSummaryEl.createDiv({
 			cls: "aan-transcript-schedule-time",
 			text: "",
+		});
+		this.scheduleEditButtonEl = this.scheduleSummaryEl.createEl("button", {
+			cls: "aan-transcript-schedule-edit clickable-icon",
+			attr: {
+				type: "button",
+				title: "Edit meeting date & time",
+				"aria-label": "Edit meeting date and time",
+			},
+		});
+		setIcon(this.scheduleEditButtonEl, "calendar-clock");
+		this.scheduleEditButtonEl.addEventListener("click", () => {
+			this.callbacks.onScheduleEdit();
 		});
 		const actionsEl = this.headerEl.createDiv({
 			cls: "aan-transcript-sidebar-actions",
@@ -91,30 +118,6 @@ export class MeetingHeader {
 				this.callbacks.onAttendeeClick();
 			}
 		});
-		this.scheduleEditButtonEl = actionsEl.createEl("button", {
-			cls: "aan-transcript-btn icon-only",
-			attr: {
-				type: "button",
-				title: "Edit meeting date & time",
-				"aria-label": "Edit meeting date and time",
-			},
-		});
-		setIcon(this.scheduleEditButtonEl, "calendar-clock");
-		this.scheduleEditButtonEl.addEventListener("click", () => {
-			this.callbacks.onScheduleEdit();
-		});
-		this.deleteButtonEl = actionsEl.createEl("button", {
-			cls: "aan-transcript-btn icon-only danger",
-			attr: {
-				type: "button",
-				title: "Delete meeting",
-				"aria-label": "Delete meeting",
-			},
-		});
-		setIcon(this.deleteButtonEl, "trash");
-		this.deleteButtonEl.addEventListener("click", () => {
-			this.callbacks.onDelete();
-		});
 	}
 
 	public setTitle(title: string): void {
@@ -136,20 +139,36 @@ export class MeetingHeader {
 		if (!canEdit) {
 			this.scheduleSummaryEl.classList.add("is-placeholder");
 			this.scheduleDateEl.setText("Open a meeting note to view schedule");
+			this.scheduleDateEl.removeAttribute("title");
 			this.scheduleTimeEl.setText("");
+			this.scheduleTimeEl.removeAttribute("title");
 			return;
 		}
 		if (!info) {
 			this.scheduleSummaryEl.classList.add("is-placeholder");
 			this.scheduleDateEl.setText("Set meeting date");
+			this.scheduleDateEl.removeAttribute("title");
 			this.scheduleTimeEl.setText(
 				"Use the calendar button to pick a time"
 			);
+			this.scheduleTimeEl.removeAttribute("title");
 			return;
 		}
 		this.scheduleSummaryEl.classList.remove("is-placeholder");
-		this.scheduleDateEl.setText(info.dateLabel);
-		this.scheduleTimeEl.setText(info.timeLabel);
+		this.scheduleDateEl.setText(formatShortDateRange(info.start, info.end));
+		this.scheduleDateEl.setAttribute("title", info.dateLabel);
+		// Keep each time whole so narrow panes wrap after the dash, not inside "8:58 AM".
+		this.scheduleTimeEl.empty();
+		this.scheduleTimeEl.createSpan({
+			text: `${formatShortTime(info.start)} –`,
+			cls: "aan-nowrap",
+		});
+		this.scheduleTimeEl.append(" ");
+		this.scheduleTimeEl.createSpan({
+			text: formatShortTime(info.end),
+			cls: "aan-nowrap",
+		});
+		this.scheduleTimeEl.setAttribute("title", info.timeLabel);
 	}
 
 	public setAttendees(attendees: string[], canEdit: boolean): void {
@@ -185,3 +204,23 @@ export class MeetingHeader {
 	}
 }
 
+/** "Tue, Sep 22" (year only when it isn't this year); spans days as "Sep 22 – Sep 23". */
+function formatShortDateRange(start: Date, end: Date): string {
+	const thisYear = new Date().getFullYear();
+	const format = (date: Date, weekday: boolean) =>
+		date.toLocaleDateString(undefined, {
+			weekday: weekday ? "short" : undefined,
+			month: "short",
+			day: "numeric",
+			year: date.getFullYear() === thisYear ? undefined : "numeric",
+		});
+	if (start.toDateString() === end.toDateString()) {
+		return format(start, true);
+	}
+	return `${format(start, false)} – ${format(end, false)}`;
+}
+
+/** "8:06 AM" — matches the sidebar agenda cards. */
+function formatShortTime(date: Date): string {
+	return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
