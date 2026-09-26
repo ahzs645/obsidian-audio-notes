@@ -496,6 +496,65 @@ input.title-input {
 }
 /* END Export Modal */
 
+/* Recording repair modal */
+.aan-audio-repair-modal {
+	width: min(720px, 92vw);
+}
+
+.aan-audio-repair {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	max-height: min(78vh, 760px);
+	overflow: hidden;
+}
+
+.aan-audio-repair h2 {
+	margin: 0;
+}
+
+.aan-audio-repair-intro,
+.aan-audio-repair-status {
+	margin: 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	white-space: pre-line;
+}
+
+.aan-audio-repair-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+}
+
+.aan-audio-repair-section h3 {
+	margin: 12px 0 4px;
+	font-size: var(--font-ui-medium);
+}
+
+.aan-audio-repair-row {
+	padding: 6px 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.aan-audio-repair-row.is-current {
+	background: var(--background-modifier-hover);
+	border-radius: var(--radius-s);
+}
+
+.aan-audio-repair-title {
+	font-size: var(--font-ui-small);
+	font-weight: 500;
+}
+
+.aan-audio-repair-path {
+	color: var(--text-muted);
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	overflow-wrap: anywhere;
+}
+/* END Recording repair modal */
+
 /* Label triage modal */
 .aan-label-triage-modal {
 	width: min(760px, 92vw);

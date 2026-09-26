@@ -31,6 +31,8 @@ export interface SidebarAttachment {
 	name: string;
 	extension: string;
 	size: string;
+	/** A recording in the meeting folder that this meeting does not link to. */
+	isAudio?: boolean;
 }
 
 export interface GroupedTranscript {

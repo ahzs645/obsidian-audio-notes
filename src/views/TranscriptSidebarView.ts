@@ -42,6 +42,7 @@ import { MeetingScheduleManager } from "./transcript-sidebar/MeetingScheduleMana
 import { SpeakerLabelManager } from "./transcript-sidebar/SpeakerLabelManager";
 import { MeetingDeletionManager } from "./transcript-sidebar/MeetingDeletionManager";
 import { MeetingAttendeeManager } from "./transcript-sidebar/MeetingAttendeeManager";
+import { AudioLinkRepairModal } from "../AudioLinkRepairModal";
 
 export const AUDIO_NOTES_TRANSCRIPT_VIEW = "audio-notes-transcript-view";
 interface TranscriptSidebarState {
@@ -593,6 +594,11 @@ export class TranscriptSidebarView extends ItemView {
 					this.openAttachment(path),
 				onDeleteAttachment: (path: string) =>
 					this.deleteAttachment(path),
+				onRepairRecordings: () =>
+					new AudioLinkRepairModal(
+						this.plugin,
+						this.currentMeetingFile
+					).open(),
 				speakerLabelOverrides: this.speakerLabelOverrides,
 				canGenerateAiNotes: false,
 				isGeneratingAiNotes: false,

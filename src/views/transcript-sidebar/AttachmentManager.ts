@@ -2,6 +2,7 @@ import { Notice, TFile, TFolder } from "obsidian";
 import type AutomaticAudioNotes from "../../main";
 import type { SidebarAttachment } from "../../transcript-view/types";
 import type { MeetingFileService } from "./MeetingFileService";
+import { isAudioPath } from "../../AudioLinkRepair";
 
 export class AttachmentManager {
 	private attachmentFolderPath: string | null = null;
@@ -75,6 +76,7 @@ export class AttachmentManager {
 						name: file.name,
 						extension: file.extension ?? "",
 						size: this.formatFileSize(file.stat?.size ?? 0),
+						isAudio: isAudioPath(file.path),
 					}))
 					.sort((a, b) => a.name.localeCompare(b.name));
 			}
@@ -243,6 +245,10 @@ export class AttachmentManager {
 				continue;
 			}
 			if (child.path === this.meetingFilePath) {
+				continue;
+			}
+			// Recordings belong to whichever note links them, not to this folder.
+			if (isAudioPath(child.path)) {
 				continue;
 			}
 			const targetPath =

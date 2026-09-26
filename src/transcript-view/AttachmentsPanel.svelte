@@ -19,7 +19,10 @@
 		Promise.resolve();
 	export let onDeleteAttachment: (path: string) => Promise<void> = async () =>
 		Promise.resolve();
+	export let onRepairRecordings: () => void = () => {};
 	export let filePicker: HTMLInputElement | null = null;
+
+	$: strayRecordings = attachments.filter((attachment) => attachment.isAudio);
 </script>
 
 <!-- The whole row is a drop target so files can be dropped without expanding it first. -->
@@ -68,6 +71,21 @@
 		</button>
 	</header>
 
+	<!-- Shown even when collapsed: a second recording here usually means this
+	     meeting links to another meeting's audio. -->
+	{#if strayRecordings.length}
+		<div class="aan-attachments-warning" role="status">
+			<span>
+				{strayRecordings.length === 1
+					? "A recording here isn't linked to this meeting."
+					: `${strayRecordings.length} recordings here aren't linked to this meeting.`}
+			</span>
+			<button type="button" class="aan-attachments-fix" on:click={onRepairRecordings}>
+				Check recordings…
+			</button>
+		</div>
+	{/if}
+
 	{#if !attachmentsCollapsed}
 		{#if !attachments.length}
 			<p class="aan-attachments-empty">{attachmentStatusText}</p>
@@ -75,14 +93,16 @@
 		{#if attachments.length}
 			<ul class="aan-attachments-list">
 				{#each attachments as attachment (attachment.path)}
-					<li class="aan-attachment-item">
+					<li class="aan-attachment-item" class:is-recording={attachment.isAudio}>
 						<div class="aan-attachment-details">
 							<span class="aan-attachment-type" aria-hidden="true">
 								{formatAttachmentType(attachment.extension)}
 							</span>
 							<div class="aan-attachment-meta">
 								<span class="aan-attachment-name">{attachment.name}</span>
-								<span class="aan-attachment-size">{attachment.size}</span>
+								<span class="aan-attachment-size">
+									{attachment.isAudio ? `Unlinked recording · ${attachment.size}` : attachment.size}
+								</span>
 							</div>
 						</div>
 						<div class="aan-attachment-actions">

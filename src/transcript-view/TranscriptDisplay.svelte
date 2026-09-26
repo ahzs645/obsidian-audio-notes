@@ -29,6 +29,7 @@ export let onOpenAttachment: (path: string) => Promise<void> = async () =>
 	Promise.resolve();
 export let onDeleteAttachment: (path: string) => Promise<void> = async () =>
 	Promise.resolve();
+export let onRepairRecordings: () => void = () => {};
 export let needsAudioUpload = false;
 export let audioUploadInProgress = false;
 export let onUploadMeetingAudio: (files: File[]) => Promise<void> = async () =>
@@ -739,6 +740,7 @@ let transcriptUploadInput: HTMLInputElement | null = null;
 			bind:filePicker={filePicker}
 			{onOpenAttachment}
 			{onDeleteAttachment}
+			{onRepairRecordings}
 		/>
 	{/if}
 	{#if needsAudioUpload && hasTranscript}

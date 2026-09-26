@@ -17,6 +17,9 @@ import {
 	type GoogleDriveArchiveReference,
 } from "../../googleDriveArchive";
 
+/** Frontmatter keys that may hold a meeting's recording path, in priority order. */
+export const MEDIA_FIELD_KEYS = ["media_uri", "audio", "media"] as const;
+
 export type MeetingDateParts = {
 	year?: string;
 	month?: string;
@@ -55,10 +58,11 @@ export class MeetingFileService {
 		) {
 			return { audioPath, meetingFolder: null, dateParts: {} };
 		}
+		const otherReferences = this.collectMediaReferences(meetingFile.path);
 		let audioFile =
 			this.plugin.app.vault.getAbstractFileByPath(audioPath);
 		if (!(audioFile instanceof TFile)) {
-			audioFile = this.findAudioFileByName(audioPath);
+			audioFile = this.findAudioFileByName(audioPath, otherReferences);
 		}
 		if (!(audioFile instanceof TFile)) {
 			return { audioPath, meetingFolder: null, dateParts: {} };
@@ -68,8 +72,25 @@ export class MeetingFileService {
 			preferredDateParts,
 			this.extractDateParts(audioFile.basename, audioFile)
 		);
-		let parentFolder = this.findHashedAncestor(audioFile) ?? audioFile.parent;
+		const hashedParent = this.findHashedAncestor(audioFile);
+		let parentFolder = hashedParent ?? audioFile.parent;
 		let currentParentPath = parentFolder?.path ?? audioFile.parent?.path ?? "";
+
+		// Moving a file or folder another note links to would break that note,
+		// since media_uri is a plain string Obsidian does not rewrite.
+		const sharedWithOtherNotes =
+			otherReferences.has(audioFile.path) ||
+			(hashedParent !== null &&
+				[...otherReferences.keys()].some((path) =>
+					path.startsWith(`${hashedParent.path}/`)
+				));
+		if (sharedWithOtherNotes) {
+			return {
+				audioPath: audioFile.path,
+				meetingFolder: hashedParent?.path ?? null,
+				dateParts,
+			};
+		}
 		const configuredRoot = this.getAudioLibraryRoot();
 		const baseParentPath = this.buildDatedBasePath(
 			configuredRoot,
@@ -620,7 +641,7 @@ export class MeetingFileService {
 		};
 	}
 
-	private buildDatedBasePath(
+	buildDatedBasePath(
 		rootPath: string,
 		dateParts: MeetingDateParts
 	): string {
@@ -648,7 +669,7 @@ export class MeetingFileService {
 		return segments.join("/");
 	}
 
-	private buildMeetingFolderPath(
+	buildMeetingFolderPath(
 		baseParentPath: string,
 		meetingTitle: string,
 		fallback: string
@@ -694,54 +715,47 @@ export class MeetingFileService {
 		return { year, month, day };
 	}
 
-	private findAudioFileByName(audioPath: string): TFile | null {
+	/** Audio paths linked from notes other than `excludeNotePath`. */
+	private collectMediaReferences(excludeNotePath?: string): Map<string, string[]> {
+		const references = new Map<string, string[]>();
+		const { vault, metadataCache } = this.plugin.app;
+		for (const note of vault.getMarkdownFiles()) {
+			if (note.path === excludeNotePath) continue;
+			const frontmatter = metadataCache.getFileCache(note)?.frontmatter;
+			if (!frontmatter) continue;
+			for (const key of MEDIA_FIELD_KEYS) {
+				const value = frontmatter[key];
+				if (typeof value !== "string" || !value.trim()) continue;
+				const path = value.trim();
+				const notes = references.get(path) ?? [];
+				notes.push(note.path);
+				references.set(path, notes);
+				break;
+			}
+		}
+		return references;
+	}
+
+	/**
+	 * Recovers a moved recording by filename. Recorder exports reuse names like
+	 * `system-audio-13.m4a`, so a match is only trusted when it is the single
+	 * file with that name and no other note already links to it.
+	 */
+	private findAudioFileByName(
+		audioPath: string,
+		otherReferences: Map<string, string[]>
+	): TFile | null {
 		const filename = audioPath.split("/").pop();
 		if (!filename) {
 			return null;
 		}
-		const searchQueue = [];
-		const parentPath = audioPath.split("/").slice(0, -1).join("/");
-		if (parentPath) {
-			searchQueue.push(parentPath);
-			const grandParent = parentPath.split("/").slice(0, -1).join("/");
-			if (grandParent && grandParent !== parentPath) {
-				searchQueue.push(grandParent);
-			}
-		}
-		const root = this.getAudioLibraryRoot();
-		if (root) {
-			searchQueue.push(root);
-		}
-		for (const folderPath of searchQueue) {
-			const found = this.searchFolderForFile(folderPath, filename);
-			if (found) {
-				return found;
-			}
-		}
-		return null;
-	}
-
-	private searchFolderForFile(
-		folderPath: string,
-		filename: string
-	): TFile | null {
-		const folder =
-			this.plugin.app.vault.getAbstractFileByPath(folderPath);
-		if (!(folder instanceof TFolder)) {
+		const matches = this.plugin.app.vault
+			.getFiles()
+			.filter((file) => file.name === filename);
+		if (matches.length !== 1 || otherReferences.has(matches[0].path)) {
 			return null;
 		}
-		for (const child of folder.children) {
-			if (child instanceof TFile && child.name === filename) {
-				return child;
-			}
-			if (child instanceof TFolder) {
-				const found = this.searchFolderForFile(child.path, filename);
-				if (found) {
-					return found;
-				}
-			}
-		}
-		return null;
+		return matches[0];
 	}
 
 	private findHashedAncestor(file: TFile): TFolder | null {

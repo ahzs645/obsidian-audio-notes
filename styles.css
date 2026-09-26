@@ -1064,6 +1064,27 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+.aan-attachments-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 4px 0 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(var(--color-orange-rgb), 0.12);
+  color: var(--text-normal);
+  font-size: 0.85em;
+}
+.audio-note-attachments-panel .aan-attachments-fix {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  height: auto;
+  font-size: 0.95em;
+}
+.aan-attachment-item.is-recording {
+  border-color: rgba(var(--color-orange-rgb), 0.5);
+}
 .aan-attachments-input {
   display: none;
 }
@@ -2419,6 +2440,53 @@ input.title-input {
   border-radius: var(--radius-s);
   cursor: pointer;
   white-space: nowrap;
+}
+.aan-audio-repair-modal {
+  width: min(720px, 92vw);
+}
+.aan-audio-repair {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(78vh, 760px);
+  overflow: hidden;
+}
+.aan-audio-repair h2 {
+  margin: 0;
+}
+.aan-audio-repair-intro,
+.aan-audio-repair-status {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  white-space: pre-line;
+}
+.aan-audio-repair-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.aan-audio-repair-section h3 {
+  margin: 12px 0 4px;
+  font-size: var(--font-ui-medium);
+}
+.aan-audio-repair-row {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.aan-audio-repair-row.is-current {
+  background: var(--background-modifier-hover);
+  border-radius: var(--radius-s);
+}
+.aan-audio-repair-title {
+  font-size: var(--font-ui-small);
+  font-weight: 500;
+}
+.aan-audio-repair-path {
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
 }
 .aan-label-triage-modal {
   width: min(760px, 92vw);

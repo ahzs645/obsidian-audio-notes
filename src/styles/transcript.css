@@ -386,6 +386,30 @@
 	cursor: not-allowed;
 }
 
+.aan-attachments-warning {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin: 6px 4px 0 6px;
+	padding: 6px 8px;
+	border-radius: 8px;
+	background: rgba(var(--color-orange-rgb), 0.12);
+	color: var(--text-normal);
+	font-size: 0.85em;
+}
+
+.audio-note-attachments-panel .aan-attachments-fix {
+	flex-shrink: 0;
+	padding: 2px 8px;
+	height: auto;
+	font-size: 0.95em;
+}
+
+.aan-attachment-item.is-recording {
+	border-color: rgba(var(--color-orange-rgb), 0.5);
+}
+
 
 .aan-attachments-input {
 	display: none;

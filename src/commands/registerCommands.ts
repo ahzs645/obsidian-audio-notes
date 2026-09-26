@@ -19,6 +19,7 @@ import {
 import { applyMeetingLabelToFile } from "../meeting-label-manager";
 import { MeetingLabelCategoryModal } from "../settings/MeetingLabelCategoryModal";
 import { LabelTriageModal } from "../LabelTriageModal";
+import { AudioLinkRepairModal } from "../AudioLinkRepairModal";
 import { normalizeTagPrefix, slugifyTagSegment } from "../meeting-labels";
 
 export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
@@ -220,6 +221,14 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 		name: "Open transcript sidebar",
 		callback: async () => {
 			await plugin.openTranscriptSidebar();
+		},
+	});
+
+	plugin.addCommand({
+		id: "repair-meeting-recordings",
+		name: "Repair meeting recording links…",
+		callback: () => {
+			new AudioLinkRepairModal(plugin).open();
 		},
 	});
 

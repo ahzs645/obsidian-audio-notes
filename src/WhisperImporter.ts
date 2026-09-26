@@ -345,9 +345,16 @@ async function ensureFolderExists(vault: Vault, folderPath: string) {
 	}
 }
 
-async function getAvailablePath(vault: Vault, targetPath: string) {
+async function getAvailablePath(
+	vault: Vault,
+	targetPath: string,
+	isNameTaken: (filename: string) => boolean = () => false
+) {
 	const normalized = normalizePath(targetPath);
-	if (!(await vault.adapter.exists(normalized))) {
+	const isFree = async (candidate: string) =>
+		!isNameTaken(candidate.substring(candidate.lastIndexOf("/") + 1)) &&
+		!(await vault.adapter.exists(candidate));
+	if (await isFree(normalized)) {
 		return normalized;
 	}
 	const lastSlash = normalized.lastIndexOf("/");
@@ -363,7 +370,7 @@ async function getAvailablePath(vault: Vault, targetPath: string) {
 			dir === ""
 				? `${baseName}-${counter}${extension}`
 				: `${dir}/${baseName}-${counter}${extension}`;
-		if (!(await vault.adapter.exists(candidate))) {
+		if (await isFree(candidate)) {
 			return candidate;
 		}
 		counter += 1;
@@ -1056,9 +1063,20 @@ async function importWhisperArchiveInternal(
 		recordingUrl = await deriveGoogleDriveUrlWithRetries(localAudioPath);
 	} else {
 		await ensureFolderExists(plugin.app.vault, audioFolder);
+		// The sidebar later moves recordings into per-meeting folders, which
+		// frees their name here; checking the whole library keeps a reused
+		// recorder name like system-audio-13 from being handed out twice.
+		const libraryRoot = normalizePath(options.audioFolder);
+		const namesInLibrary = new Set(
+			plugin.app.vault
+				.getFiles()
+				.filter((file) => file.path.startsWith(`${libraryRoot}/`))
+				.map((file) => file.name)
+		);
 		audioPath = await getAvailablePath(
 			plugin.app.vault,
-			`${audioFolder}/${baseName}.${audioExt}`
+			`${audioFolder}/${baseName}.${audioExt}`,
+			(filename) => namesInLibrary.has(filename)
 		);
 	}
 	const transcriptPath = await getAvailablePath(
