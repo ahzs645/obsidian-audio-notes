@@ -190,7 +190,7 @@ onMount(() => {
 });
 </script>
 
-<div class="audio-note-transcript-panel">
+<div class="audio-note-transcript-panel" class:is-collapsed={collapsed && !showTranscriptionCta}>
 	{#if showTranscriptionCta}
 		<div class="audio-note-transcript-card aan-transcription-card">
 			<div class="aan-transcription-cta">
@@ -250,7 +250,7 @@ onMount(() => {
 					class:collapsed={collapsed}
 					on:click={() => (collapsed = !collapsed)}
 					aria-expanded={!collapsed}
-					title={`${collapsed ? "Show" : "Hide"} transcript${hasSegments ? ` · ${segments.length.toLocaleString()} lines` : ""}`}
+					title={`${collapsed ? "Show" : "Hide"} transcript${hasSegments ? ` · ${segments.length.toLocaleString()} lines` : ""}${hasSegments && transcriptDuration ? ` · ${formatDurationLabel(transcriptDuration)}` : ""}`}
 				>
 					<svg aria-hidden="true" viewBox="0 0 24 24" focusable="false" class="aan-transcript-icon aan-transcript-meta-chevron" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5 5 5-5" /></svg>
 					{#if isTranscribing}
@@ -260,7 +260,7 @@ onMount(() => {
 						{#if isLoadingTranscript && !hasSegments}
 							Loading transcript…
 						{:else if hasSegments}
-							{segments.length.toLocaleString()} lines{#if !hasPlayer}&nbsp;· {formatDurationLabel(transcriptDuration)}{/if}
+							{segments.length.toLocaleString()} lines{#if !hasPlayer && !compactHeader}&nbsp;· {formatDurationLabel(transcriptDuration)}{/if}
 						{:else if isTranscribing}
 							{progressMessage ?? "Waiting for transcript…"}
 						{:else}

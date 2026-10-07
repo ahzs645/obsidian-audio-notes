@@ -53,6 +53,12 @@ If your plugin does not need CSS, delete this file.
 	box-sizing: border-box;
 }
 
+/* Obsidian's status bar floats over the bottom of the right sidebar; keep
+   the last row (Attachments) clear of it. */
+body:not(.is-mobile) .mod-right-split .audio-notes-transcript-view {
+	padding-bottom: calc(12px + 28px);
+}
+
 .aan-transcript-meeting.is-hidden,
 .aan-transcript-dashboard.is-hidden {
 	display: none;

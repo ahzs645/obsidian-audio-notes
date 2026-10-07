@@ -36,6 +36,9 @@
   height: 100%;
   box-sizing: border-box;
 }
+body:not(.is-mobile) .mod-right-split .audio-notes-transcript-view {
+  padding-bottom: calc(12px + 28px);
+}
 .aan-transcript-meeting.is-hidden,
 .aan-transcript-dashboard.is-hidden {
   display: none;
@@ -852,6 +855,14 @@
   flex-direction: column;
   min-height: 240px;
 }
+.audio-note-transcript-panel.is-collapsed {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+.audio-note-transcript-panel.is-collapsed .audio-note-transcript-card {
+  flex: 0 0 auto;
+  padding-block: 10px;
+}
 .audio-note-transcript-card {
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
@@ -1345,8 +1356,11 @@
   font-size: 0.8em;
   color: var(--interactive-accent);
 }
-.audio-note-transcript-meta {
+.audio-note-transcript-header button.audio-note-transcript-meta {
   all: unset;
+  box-shadow: none;
+  background: transparent;
+  border: none;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1360,11 +1374,14 @@
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
-.audio-note-transcript-meta:hover {
+.audio-note-transcript-header button.audio-note-transcript-meta:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
-.audio-note-transcript-meta:focus-visible {
+.audio-note-transcript-header button.audio-note-transcript-meta:focus {
+  box-shadow: none;
+}
+.audio-note-transcript-header button.audio-note-transcript-meta:focus-visible {
   outline: 2px solid var(--interactive-accent);
   outline-offset: 1px;
 }

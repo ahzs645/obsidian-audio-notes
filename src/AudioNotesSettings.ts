@@ -1930,6 +1930,11 @@ export class AudioNotesSettings {
 				name: category.name || "",
 				icon: category.icon || "",
 				tagPrefix: category.tagPrefix || "",
+				// Friendly label names live on their category; dropping them
+				// here lost every rename on the next reload.
+				...(category.labelNames && Object.keys(category.labelNames).length
+					? { labelNames: { ...category.labelNames } }
+					: {}),
 			})
 		);
 	}

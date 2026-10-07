@@ -20,6 +20,17 @@
 	min-height: 240px;
 }
 
+/* Collapsed: shrink to the header so Attachments moves up under it. */
+.audio-note-transcript-panel.is-collapsed {
+	flex: 0 0 auto;
+	min-height: 0;
+}
+
+.audio-note-transcript-panel.is-collapsed .audio-note-transcript-card {
+	flex: 0 0 auto;
+	padding-block: 10px;
+}
+
 .audio-note-transcript-card {
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
@@ -601,9 +612,13 @@
 	color: var(--interactive-accent);
 }
 
-.audio-note-transcript-meta {
-	/* Reset button chrome: it reads as the card's header text. */
+.audio-note-transcript-header button.audio-note-transcript-meta {
+	/* Reset Obsidian's button chrome (its button:not(.clickable-icon) rule
+	   outranks a single class): this reads as the card's header text. */
 	all: unset;
+	box-shadow: none;
+	background: transparent;
+	border: none;
 	display: flex;
 	align-items: center;
 	gap: 4px;
@@ -618,12 +633,16 @@
 	cursor: pointer;
 }
 
-.audio-note-transcript-meta:hover {
+.audio-note-transcript-header button.audio-note-transcript-meta:hover {
 	background: var(--background-modifier-hover);
 	color: var(--text-normal);
 }
 
-.audio-note-transcript-meta:focus-visible {
+.audio-note-transcript-header button.audio-note-transcript-meta:focus {
+	box-shadow: none;
+}
+
+.audio-note-transcript-header button.audio-note-transcript-meta:focus-visible {
 	outline: 2px solid var(--interactive-accent);
 	outline-offset: 1px;
 }
