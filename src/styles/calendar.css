@@ -260,24 +260,102 @@
 
 .aan-label-picker-item {
 	display: flex;
-	flex-direction: column;
-	padding: 4px 0;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 10px;
+	position: relative;
+}
+
+/* Category heading above the first label of each group, outside the row
+   so the selection highlight doesn't cover it. */
+.aan-label-picker-item.has-group-heading {
+	margin-top: 26px;
+}
+
+.aan-label-picker-item.has-group-heading:first-child {
+	margin-top: 22px;
+}
+
+.aan-label-picker-item.has-group-heading::before {
+	content: attr(data-group);
+	position: absolute;
+	left: 10px;
+	top: -20px;
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--text-faint);
+	pointer-events: none;
+}
+
+.aan-label-picker-marker {
+	flex-shrink: 0;
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.aan-label-picker-marker.is-dot {
+	background: var(--aan-label-color, var(--interactive-accent));
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--aan-label-color, var(--interactive-accent)) 20%, transparent);
+}
+
+.aan-label-picker-marker.is-plus {
+	width: 18px;
+	height: 18px;
+	margin: 0 -3px;
+	border: 1.5px dashed var(--aan-label-color, var(--text-faint));
+	color: var(--aan-label-color, var(--text-muted));
+	font-size: 0.85rem;
+	font-weight: 600;
+	line-height: 1;
+}
+
+.aan-label-picker-body {
+	flex: 1;
+	min-width: 0;
 }
 
 .aan-label-picker-title {
-	display: flex;
-	align-items: center;
-	gap: var(--size-2-1);
 	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
-.aan-label-picker-icon {
-	font-size: 1rem;
+.aan-label-picker-parent {
+	font-weight: 400;
+	color: var(--text-muted);
 }
 
 .aan-label-picker-meta {
 	font-size: var(--font-ui-smaller);
-	color: var(--text-muted);
+	color: var(--text-faint);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.aan-label-picker-badge {
+	flex-shrink: 0;
+	padding: 1px 8px;
+	border-radius: 999px;
+	font-size: var(--font-ui-smaller);
+	color: var(--aan-label-color, var(--interactive-accent));
+	background: color-mix(in srgb, var(--aan-label-color, var(--interactive-accent)) 14%, transparent);
+}
+
+.aan-label-picker-count {
+	flex-shrink: 0;
+	min-width: 2.5em;
+	text-align: right;
+	font-size: var(--font-ui-smaller);
+	font-variant-numeric: tabular-nums;
+	color: var(--text-faint);
 }
 
 .aan-calendar-day-actions {

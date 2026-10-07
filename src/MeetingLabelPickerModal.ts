@@ -13,6 +13,7 @@ import {
 	getEffectiveMeetingLabelCategories,
 	getParentTag,
 	normalizeTagName,
+	resolveLabelColor,
 } from "./meeting-labels";
 import { collectTags } from "./meeting-events";
 export interface MeetingLabelSelection {
@@ -28,6 +29,8 @@ type MeetingLabelSuggestion =
 			label: MeetingLabelInfo;
 			category?: NormalizedMeetingLabelCategory;
 			childCount?: number;
+			/** Set on the first label of each category when browsing. */
+			groupHeading?: string;
 	  }
 	| {
 			kind: "create";
@@ -57,6 +60,8 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 	private categories: NormalizedMeetingLabelCategory[];
 	private availableLabels: MeetingLabelInfo[] = [];
 	private childrenMap: Map<string, string[]> = new Map();
+	/** How many notes use each tag, for ordering and the count badge. */
+	private usage: Map<string, number> = new Map();
 	private options: MeetingLabelPickerOptions;
 	private lastQuery = "";
 	private initialQuery = "";
@@ -127,6 +132,7 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 			const tagEl = tagsListDiv.createDiv({
 				cls: "aan-selected-tag-item",
 			});
+			tagEl.style.setProperty("--aan-label-color", this.colorFor(tag));
 
 			if (labelInfo.icon) {
 				tagEl.createSpan({
@@ -175,29 +181,51 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 		const suggestions: MeetingLabelSuggestion[] = [];
 		const matchedParentTags = new Set<string>();
 
-		for (const label of this.availableLabels) {
-			if (
+		const categoryOrder = (tag: string) => {
+			const category = findLabelCategoryForTag(tag, this.categories);
+			const index = category ? this.categories.indexOf(category) : -1;
+			return index === -1 ? this.categories.length : index;
+		};
+		const matches = this.availableLabels.filter(
+			(label) =>
 				!normalizedQuery ||
 				label.displayName.toLowerCase().includes(normalizedQuery) ||
+				label.fullName.toLowerCase().includes(normalizedQuery) ||
 				label.tag.includes(normalizedQuery)
-			) {
-				const category = findLabelCategoryForTag(
-					label.tag,
-					this.categories
-				);
-				const children = this.childrenMap.get(label.tag);
-				suggestions.push({
-					kind: "existing",
-					tag: label.tag,
-					label,
-					category,
-					childCount: children?.length ?? 0,
-				});
-				if (children?.length) {
-					matchedParentTags.add(label.tag);
-				}
+		);
+		// Browsing: grouped by category, most-used first. Searching: names
+		// that start with the query first, then by use.
+		const startsWith = (label: MeetingLabelInfo) =>
+			label.displayName.toLowerCase().startsWith(normalizedQuery) ? 0 : 1;
+		matches.sort(
+			(a, b) =>
+				(normalizedQuery ? startsWith(a) - startsWith(b) : categoryOrder(a.tag) - categoryOrder(b.tag)) ||
+				(this.usage.get(b.tag) ?? 0) - (this.usage.get(a.tag) ?? 0) ||
+				a.displayName.localeCompare(b.displayName)
+		);
+		let lastGroup: string | undefined;
+		for (const label of matches) {
+			const category = findLabelCategoryForTag(label.tag, this.categories);
+			const children = this.childrenMap.get(label.tag);
+			const group = category?.name ?? "Other";
+			suggestions.push({
+				kind: "existing",
+				tag: label.tag,
+				label,
+				category,
+				childCount: children?.length ?? 0,
+				groupHeading: !normalizedQuery && group !== lastGroup ? group : undefined,
+			});
+			lastGroup = group;
+			if (children?.length) {
+				matchedParentTags.add(label.tag);
 			}
 		}
+
+		// Typing an existing label's exact name shouldn't offer to create it again.
+		const exactExisting = matches.some(
+			(label) => label.displayName.toLowerCase() === normalizedQuery
+		);
 
 		if (normalizedQuery) {
 			for (const parentTag of matchedParentTags) {
@@ -219,7 +247,7 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 				}
 			}
 
-			for (const category of this.categories) {
+			for (const category of exactExisting ? [] : this.categories) {
 				const tag = buildTagFromCategory(
 					category,
 					normalizedQuery || category.name || ""
@@ -271,81 +299,107 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 			});
 		}
 
-		return suggestions.slice(0, 20);
+		return suggestions.slice(0, 40);
 	}
 
 	renderSuggestion(suggestion: MeetingLabelSuggestion, el: HTMLElement) {
 		el.empty();
 		el.addClass("aan-label-picker-item");
-		if (suggestion.kind === "existing" || suggestion.kind === "create") {
-			setHoverLabel(el, `${suggestion.label.displayName}\n#${suggestion.tag}`);
-		} else if (suggestion.kind === "create-subtag") {
-			setHoverLabel(el, `${suggestion.parentLabel.displayName}\n#${suggestion.parentTag}`);
-		}
 
 		if (suggestion.kind === "create-category") {
-			const title = el.createDiv("aan-label-picker-title");
-			title
-				.createSpan("aan-label-picker-icon")
-				.setText("➕");
-			title
-				.createSpan()
-				.setText(
-					suggestion.query
-						? `Add category "${suggestion.query}"`
-						: "Add meeting label category"
-				);
-			el.createDiv("aan-label-picker-meta").setText(
-				"Create a new label prefix"
-			);
+			this.renderRow(el, {
+				marker: "plus",
+				title: suggestion.query ? `Add category “${suggestion.query}”` : "Add a label category",
+				meta: "A new group of labels, like Job or Research",
+			});
 			return;
 		}
 
 		if (suggestion.kind === "create-subtag") {
-			const title = el.createDiv("aan-label-picker-title");
-			title
-				.createSpan("aan-label-picker-icon")
-				.setText("＋");
-			title
-				.createSpan()
-				.setText(
-					`Create sub-label under ${suggestion.parentLabel.displayName}`
-				);
-			el.createDiv("aan-label-picker-meta").setText(
-				`Add a nested tag under #${suggestion.parentTag}`
-			);
+			this.renderRow(el, {
+				marker: "plus",
+				color: this.colorFor(suggestion.parentTag),
+				title: `New label under ${suggestion.parentLabel.displayName}`,
+				meta: this.categoryText(suggestion.category, `#${suggestion.parentTag}/…`),
+			});
 			return;
 		}
 
-		const title = el.createDiv("aan-label-picker-title");
-		if (suggestion.kind === "existing" && suggestion.label.icon) {
-			title
-				.createSpan("aan-label-picker-icon")
-				.setText(suggestion.label.icon);
-		} else if (suggestion.kind === "create") {
-			title
-				.createSpan("aan-label-picker-icon")
-				.setText("＋");
+		if (suggestion.kind === "create") {
+			this.renderRow(el, {
+				marker: "plus",
+				color: this.colorFor(suggestion.tag),
+				title: `Create “${(suggestion.rawInput || suggestion.label.displayName).split("/").pop()}”`,
+				meta: this.categoryText(suggestion.category, `#${suggestion.tag}`),
+			});
+			return;
 		}
-		const labelText =
-			suggestion.kind === "create"
-				? suggestion.rawInput || suggestion.label.displayName
-				: suggestion.label.displayName;
-		title.createSpan().setText(labelText);
 
-		const meta = el.createDiv("aan-label-picker-meta");
-		const categoryLabel =
-			suggestion.category?.name ||
-			suggestion.label.categoryName ||
-			"Label";
-		if (suggestion.kind === "existing") {
-			const childCount =
-				suggestion.childCount && suggestion.childCount > 0
-					? ` • ${suggestion.childCount} sub-label${suggestion.childCount > 1 ? "s" : ""}`
-					: "";
-			meta.setText(`${categoryLabel} • #${suggestion.tag}${childCount}`);
-		} else {
-			meta.setText(`Create under ${categoryLabel}`);
+		if (suggestion.groupHeading) {
+			el.addClass("has-group-heading");
+			el.setAttribute("data-group", suggestion.groupHeading);
+		}
+		const path = suggestion.label.displayName.split(" › ");
+		const name = path.pop() ?? suggestion.label.displayName;
+		const count = this.usage.get(suggestion.tag) ?? 0;
+		const isCurrent = (this.options.currentTags ?? []).includes(suggestion.tag);
+		const subLabels = suggestion.childCount
+			? ` · ${suggestion.childCount} sub-label${suggestion.childCount > 1 ? "s" : ""}`
+			: "";
+		this.renderRow(el, {
+			marker: "dot",
+			color: this.colorFor(suggestion.tag),
+			parent: path.length ? `${path.join(" › ")} › ` : undefined,
+			title: name,
+			meta: this.categoryText(suggestion.category, `#${suggestion.tag}${subLabels}`),
+			badge: isCurrent ? "Current" : undefined,
+			count: count || undefined,
+		});
+		if (isCurrent) el.addClass("is-current");
+	}
+
+	private colorFor(tag: string): string {
+		return resolveLabelColor(tag, this.plugin.settings.calendarTagColors);
+	}
+
+	private categoryText(
+		category: NormalizedMeetingLabelCategory | undefined,
+		detail: string
+	): string {
+		const name = category ? `${category.icon ? `${category.icon} ` : ""}${category.name}` : "Label";
+		return `${name} · ${detail}`;
+	}
+
+	private renderRow(
+		el: HTMLElement,
+		row: {
+			marker: "dot" | "plus";
+			color?: string;
+			parent?: string;
+			title: string;
+			meta: string;
+			badge?: string;
+			count?: number;
+		}
+	) {
+		if (row.color) el.style.setProperty("--aan-label-color", row.color);
+		const marker = el.createSpan({
+			cls: `aan-label-picker-marker is-${row.marker}`,
+			attr: { "aria-hidden": "true" },
+		});
+		if (row.marker === "plus") marker.setText("+");
+		const body = el.createDiv({ cls: "aan-label-picker-body" });
+		const title = body.createDiv({ cls: "aan-label-picker-title" });
+		if (row.parent) title.createSpan({ cls: "aan-label-picker-parent", text: row.parent });
+		title.createSpan({ cls: "aan-label-picker-name", text: row.title });
+		body.createDiv({ cls: "aan-label-picker-meta", text: row.meta });
+		if (row.badge) el.createSpan({ cls: "aan-label-picker-badge", text: row.badge });
+		if (row.count) {
+			el.createSpan({
+				cls: "aan-label-picker-count",
+				text: row.count.toLocaleString(),
+				attr: { "aria-label": `${row.count} meeting${row.count === 1 ? "" : "s"}` },
+			});
 		}
 	}
 
@@ -407,7 +461,9 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 			const tags = collectTags(cache);
 			for (const tag of tags) {
 				const normalized = normalizeTagName(tag);
-				if (!normalized || results.has(normalized)) {
+				if (!normalized) continue;
+				this.usage.set(normalized, (this.usage.get(normalized) ?? 0) + 1);
+				if (results.has(normalized)) {
 					continue;
 				}
 				const category = findLabelCategoryForTag(
@@ -436,8 +492,4 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 
 		return Array.from(results.values());
 	}
-}
-
-function setHoverLabel(element: HTMLElement, text: string) {
-	element.setAttribute("title", text);
 }

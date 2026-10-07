@@ -281,8 +281,8 @@
 	align-items: center;
 	gap: 6px;
 	padding: 4px 8px 4px 10px;
-	background: var(--interactive-accent);
-	color: var(--text-on-accent);
+	background: var(--aan-label-color, var(--interactive-accent));
+	color: #fff;
 	border-radius: 999px;
 	font-size: 0.9em;
 	font-weight: 500;
@@ -299,7 +299,7 @@
 .aan-selected-tag-remove {
 	border: none;
 	background: rgba(0, 0, 0, 0.2);
-	color: var(--text-on-accent);
+	color: #fff;
 	width: 18px;
 	height: 18px;
 	border-radius: 50%;
