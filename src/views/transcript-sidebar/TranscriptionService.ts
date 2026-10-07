@@ -17,6 +17,33 @@ import {
 } from "../../googleDriveArchive";
 import type { MeetingFileService } from "./MeetingFileService";
 
+export type TranscriptionProgress = (message: string) => void;
+
+function formatBytes(bytes: number): string {
+	return bytes >= 1024 * 1024
+		? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+		: `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function formatElapsed(ms: number): string {
+	const seconds = Math.round(ms / 1000);
+	return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+}
+
+/** Reports a message with the time waited, every second, until stopped. */
+function startTicker(
+	message: (elapsed: string) => string,
+	onProgress: TranscriptionProgress
+): () => void {
+	const started = Date.now();
+	onProgress(message(formatElapsed(0)));
+	const timer = window.setInterval(
+		() => onProgress(message(formatElapsed(Date.now() - started))),
+		1000
+	);
+	return () => window.clearInterval(timer);
+}
+
 export class TranscriptionService {
 	constructor(
 		private readonly plugin: AutomaticAudioNotes,
@@ -36,46 +63,74 @@ export class TranscriptionService {
 
 	async requestTranscription(
 		provider: "deepgram" | "scriberr",
-		audioPath: string
+		audioPath: string,
+		onProgress: TranscriptionProgress = () => {}
 	): Promise<string> {
 		return provider === "deepgram"
-			? this.transcribeWithDeepgram(audioPath)
-			: this.transcribeWithScriberr(audioPath);
+			? this.transcribeWithDeepgram(audioPath, onProgress)
+			: this.transcribeWithScriberr(audioPath, onProgress);
 	}
 
-	private async transcribeWithDeepgram(audioPath: string): Promise<string> {
+	private async transcribeWithDeepgram(
+		audioPath: string,
+		onProgress: TranscriptionProgress
+	): Promise<string> {
 		const { deepgramPrerecorded } = await import(
 			"../../DeepgramPrerecorded"
 		);
+		onProgress("Reading the recording…");
 		const arrayBuffer = await this.readAudioBinary(audioPath);
 		const buffer = Buffer.from(new Uint8Array(arrayBuffer));
 		const params = createDeepgramQueryParams("en-US");
 		const mimeType = this.guessMimeTypeFromName(audioPath);
+		// One request covers upload and transcription, so time it instead.
+		const stopTicker = startTicker(
+			(elapsed) => `Deepgram is transcribing ${formatBytes(buffer.byteLength)}… ${elapsed}`,
+			onProgress
+		);
 		const response = await deepgramPrerecorded(
 			this.plugin.settings.DGApiKey,
 			buffer,
 			params,
 			mimeType
-		);
+		).finally(stopTicker);
+		onProgress("Saving the transcript…");
 		const transcript = getTranscriptFromDGResponse(response);
 		return this.saveTranscriptFile(audioPath, transcript);
 	}
 
-	private async transcribeWithScriberr(audioPath: string): Promise<string> {
+	private async transcribeWithScriberr(
+		audioPath: string,
+		onProgress: TranscriptionProgress
+	): Promise<string> {
 		const { ScriberrClient } = await import("../../ScriberrClient");
+		onProgress("Reading the recording…");
 		const arrayBuffer = await this.readAudioBinary(audioPath);
 		const client = new ScriberrClient({
 			baseUrl: this.plugin.settings.scriberrBaseUrl,
 			apiKey: this.plugin.settings.scriberrApiKey,
 			profileName: this.plugin.settings.scriberrProfileName,
 		});
+		onProgress(`Uploading ${formatBytes(arrayBuffer.byteLength)} to Scriberr…`);
 		const job = await client.submitQuickJob({
 			audio: arrayBuffer,
 			filename: audioPath.split("/").pop() ?? "meeting.m4a",
 			mimeType: this.guessMimeTypeFromName(audioPath),
 		});
-		const completed = await client.waitForQuickJob(job.id);
+		const completed = await client.waitForQuickJob(job.id, {
+			onStatus: (current, elapsedMs) => {
+				const state =
+					current.status === "processing"
+						? "transcribing"
+						: current.status === "pending" || current.status === "uploaded"
+							? "queued"
+							: current.status;
+				onProgress(`Scriberr: ${state} · ${formatElapsed(elapsedMs)}`);
+			},
+		});
+		onProgress("Downloading the transcript…");
 		const transcriptResponse = await client.fetchTranscript(completed.id);
+		onProgress("Saving the transcript…");
 		const transcript = getTranscriptFromScriberrResponse(
 			transcriptResponse
 		);

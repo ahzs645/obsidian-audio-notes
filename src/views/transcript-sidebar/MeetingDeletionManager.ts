@@ -1,4 +1,5 @@
-import { Notice, TFile } from "obsidian";
+import { Notice, TFile, normalizePath } from "obsidian";
+import { collectLinkedPaths } from "../../services/MeetingSplitService";
 import type AutomaticAudioNotes from "../../main";
 import type { SidebarAttachment } from "../../transcript-view/types";
 import { confirmWithModal } from "../../modals/ConfirmModal";
@@ -32,7 +33,7 @@ export class MeetingDeletionManager {
 		const confirmed = await confirmWithModal(this.plugin.app, {
 			title: "Delete meeting?",
 			message:
-				"This will permanently delete the note, linked transcript, audio file, and attachments.",
+				"This moves the note, its transcript, recording and attachments to your system trash. Files another note also links to are kept.",
 			confirmText: "Delete meeting",
 			cancelText: "Cancel",
 		});
@@ -49,10 +50,18 @@ export class MeetingDeletionManager {
 		}
 		this.context.setDeleting(true);
 		const failures: string[] = [];
+		const kept: string[] = [];
+		// A recording or transcript another note links to (a split meeting,
+		// or a mislinked one) must survive deleting this note.
+		const linkedElsewhere = collectLinkedPaths(this.plugin.app, meetingFile.path);
 		const deleteFileIfExists = async (
 			path: string | null | undefined
 		): Promise<void> => {
 			if (!path || path === meetingFile.path) {
+				return;
+			}
+			if (linkedElsewhere.has(normalizePath(path))) {
+				kept.push(path);
 				return;
 			}
 			const file = this.plugin.app.vault.getAbstractFileByPath(path);
@@ -60,7 +69,8 @@ export class MeetingDeletionManager {
 				return;
 			}
 			try {
-				await this.plugin.app.vault.delete(file);
+				// System trash, so a mistaken delete can be undone.
+				await this.plugin.app.vault.trash(file, true);
 			} catch (error) {
 				console.error("Audio Notes: Failed to delete file", path, error);
 				failures.push(path);
@@ -85,7 +95,7 @@ export class MeetingDeletionManager {
 			if (transcriptPath) {
 				this.context.clearTranscriptCache(transcriptPath);
 			}
-			await this.plugin.app.vault.delete(meetingFile);
+			await this.plugin.app.vault.trash(meetingFile, true);
 			await this.context.showDashboard();
 			this.context.scheduleDashboardRefresh();
 			if (failures.length) {
@@ -95,8 +105,13 @@ export class MeetingDeletionManager {
 					)}`,
 					6000
 				);
+			} else if (kept.length) {
+				new Notice(
+					`Meeting moved to the trash. Kept ${kept.length} file${kept.length === 1 ? "" : "s"} another note still uses.`,
+					6000
+				);
 			} else {
-				new Notice("Meeting deleted.", 4000);
+				new Notice("Meeting moved to the trash.", 4000);
 			}
 		} catch (error) {
 			console.error("Audio Notes: Could not delete meeting", error);

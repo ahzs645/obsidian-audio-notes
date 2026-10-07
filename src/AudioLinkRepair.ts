@@ -218,25 +218,31 @@ export async function planAudioLinkRepair(
 				(value): value is string => Boolean(value)
 			);
 			const folder = parentOf(note.mediaUri);
-			// Recordings are filed under their meeting's month, and recorder
-			// names repeat across months, so the search stays in that month.
+			// Recordings are filed under their meeting's month and recorder
+			// names repeat across months, so that month is searched first.
+			// Stale links can also leave a folder under another month, so
+			// same-name files nobody else owns are tried everywhere after.
 			const monthPrefix = dateMonthSegment(note.dateParts);
+			const inMonth = (file: string) =>
+				!monthPrefix || `/${file}`.includes(monthPrefix);
 			const exactNames = new Set(families.map(baseName));
+			const family = audioFiles
+				.filter((file) =>
+					families.some((name) => isSameFileFamily(file, name))
+				)
+				.sort(
+					(a, b) =>
+						Number(exactNames.has(baseName(b))) -
+						Number(exactNames.has(baseName(a)))
+				);
+			const siblings = isHashedFolderPath(folder)
+				? audioByFolder.get(folder) ?? []
+				: [];
+			const candidates = [...siblings, ...family.filter(inMonth)];
 			const ordered = uniq([
-				...(isHashedFolderPath(folder)
-					? audioByFolder.get(folder) ?? []
-					: []),
-				...audioFiles
-					.filter(
-						(file) =>
-							(!monthPrefix || `/${file}`.includes(monthPrefix)) &&
-							families.some((family) => isSameFileFamily(file, family))
-					)
-					.sort(
-						(a, b) =>
-							Number(exactNames.has(baseName(b))) -
-							Number(exactNames.has(baseName(a)))
-					),
+				...candidates.filter(isFreeFor),
+				...candidates.filter((file) => !isFreeFor(file)),
+				...family.filter((file) => !inMonth(file) && isFreeFor(file)),
 			]).filter(
 				(file) =>
 					file !== note.mediaUri &&
@@ -245,10 +251,7 @@ export async function planAudioLinkRepair(
 
 			// Unclaimed files first; files other meetings link to only if needed.
 			let found: string | null = null;
-			for (const file of [
-				...ordered.filter(isFreeFor),
-				...ordered.filter((file) => !isFreeFor(file)),
-			]) {
+			for (const file of ordered) {
 				if (io.isCancelled?.()) return;
 				if (await matches(file)) {
 					found = file;

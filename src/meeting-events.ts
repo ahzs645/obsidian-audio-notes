@@ -1,4 +1,4 @@
-import type { App, CachedMetadata } from "obsidian";
+import type { App, CachedMetadata, TFile } from "obsidian";
 import type {
 	MeetingLabelCategory,
 	MeetingLabelInfo,
@@ -8,6 +8,7 @@ import {
 	buildMeetingLabelInfo,
 	getEffectiveMeetingLabelCategories,
 	normalizeTagName,
+	resolveLabelColor,
 } from "./meeting-labels";
 
 export interface MeetingEvent {
@@ -31,21 +32,39 @@ export function collectMeetingEvents(
 	colorMap: Record<string, string>,
 	categories?: MeetingLabelCategory[]
 ): MeetingEvent[] {
-	const files = app.vault.getMarkdownFiles();
+	return collectMeetingEventsForFiles(
+		app,
+		app.vault.getMarkdownFiles(),
+		colorMap,
+		categories
+	);
+}
+
+/** Meeting events for just these notes (e.g. the results of a Bases query). */
+export function collectMeetingEventsForFiles(
+	app: App,
+	files: TFile[],
+	colorMap: Record<string, string>,
+	categories?: MeetingLabelCategory[]
+): MeetingEvent[] {
 	const normalizedColors = normalizeColorMap(colorMap);
 	const normalizedCategories = getEffectiveMeetingLabelCategories(
 		categories
 	);
 	const events: MeetingEvent[] = [];
+	const seen = new Set<string>();
 
 	for (const file of files) {
+		if (file.extension !== "md" || seen.has(file.path)) continue;
+		seen.add(file.path);
 		const cache = app.metadataCache.getFileCache(file);
 		const event = buildMeetingEvent(
 			cache,
 			file.path,
 			file.basename,
 			normalizedColors,
-			normalizedCategories
+			normalizedCategories,
+			colorMap
 		);
 		if (event) {
 			events.push(event);
@@ -67,7 +86,8 @@ function buildMeetingEvent(
 	path: string,
 	basename: string,
 	colorMap: Map<string, string>,
-	categories: NormalizedMeetingLabelCategory[]
+	categories: NormalizedMeetingLabelCategory[],
+	rawColorMap: Record<string, string>
 ): MeetingEvent | null {
 	if (!cache?.frontmatter) {
 		return null;
@@ -117,10 +137,13 @@ function buildMeetingEvent(
 		: undefined;
 	const orderedTags = prioritizeLabelTag(tags, label?.tag);
 
+	// A labelled meeting always takes its label's color (configured, inherited
+	// from a parent tag, or the label's stable default) so it reads the same
+	// everywhere; unlabelled meetings fall back to any colored tag.
 	const color =
-		(label?.tag && getColor(colorMap, label.tag)) ??
-		findColorForTags(colorMap, orderedTags) ??
-		getColor(colorMap, MEETING_TAG) ??
+		(label?.tag && resolveLabelColor(label.tag, rawColorMap)) ||
+		findColorForTags(colorMap, orderedTags) ||
+		getColor(colorMap, MEETING_TAG) ||
 		DEFAULT_EVENT_COLOR;
 
 	const fileTitle = typeof basename === "string" ? basename.trim() : "";

@@ -2,13 +2,9 @@ import type { QueryController } from "obsidian";
 import { BasesView, TFile } from "obsidian";
 import type AutomaticAudioNotes from "./main";
 import MeetingCalendar from "./MeetingCalendar.svelte";
-import { collectMeetingEvents, localDateKey } from "./meeting-events";
+import { collectMeetingEventsForFiles, localDateKey } from "./meeting-events";
 
 export const AUDIO_NOTES_BASES_CALENDAR_VIEW = "audio-notes-bases-calendar";
-
-function todayISO(): string {
-	return new Date().toISOString().slice(0, 10);
-}
 
 export class BasesCalendarView extends BasesView {
 	type = AUDIO_NOTES_BASES_CALENDAR_VIEW;
@@ -47,11 +43,11 @@ export class BasesCalendarView extends BasesView {
 	}
 
 	private registerListeners() {
+		// Bases reruns the query and calls onDataUpdated when files come and
+		// go; these cover edits to a matching note's times or label, which
+		// change the calendar without changing the result set.
 		const schedule = () => this.scheduleRefresh();
 		this.registerEvent(this.plugin.app.metadataCache.on("changed", schedule));
-		this.registerEvent(this.plugin.app.vault.on("create", schedule));
-		this.registerEvent(this.plugin.app.vault.on("delete", schedule));
-		this.registerEvent(this.plugin.app.vault.on("rename", schedule));
 		// @ts-ignore custom event emitted when settings change
 		this.registerEvent(
 			(this.plugin.app.workspace as any).on(
@@ -71,21 +67,22 @@ export class BasesCalendarView extends BasesView {
 		}, 200);
 	}
 
+	/** The notes the Base's filters matched; none until the first query runs. */
+	private queryFiles(): TFile[] {
+		return (this.data?.data ?? [])
+			.map((entry) => entry.file)
+			.filter((file): file is TFile => file instanceof TFile);
+	}
+
 	private renderCalendar() {
-		const events = collectMeetingEvents(
+		// Only the Base's results, still limited to notes that are meetings
+		// with a start time.
+		const events = collectMeetingEventsForFiles(
 			this.plugin.app,
+			this.queryFiles(),
 			this.plugin.settings.calendarTagColors,
 			this.plugin.settings.meetingLabelCategories
 		);
-		if (
-			events.length &&
-			!events.some(
-				(event) => event.displayDate === this.selectedDate
-			)
-		) {
-			this.selectedDate = events[0].displayDate;
-		}
-
 		if (!this.component) {
 			this.component = new MeetingCalendar({
 				target: this.containerEl,

@@ -21,6 +21,10 @@ import { MeetingLabelCategoryModal } from "../settings/MeetingLabelCategoryModal
 import { LabelTriageModal } from "../LabelTriageModal";
 import { AudioLinkRepairModal } from "../AudioLinkRepairModal";
 import { normalizeTagPrefix, slugifyTagSegment } from "../meeting-labels";
+import { isMeetingCache } from "../meeting-events";
+import { formatPeriodicName } from "../MeetingNoteTemplate";
+import { planMetadataRepair, summarizeRepair } from "../MeetingMetadataRepair";
+import { confirmWithModal } from "../modals/ConfirmModal";
 
 export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 	const { app, settings } = plugin;
@@ -233,6 +237,28 @@ export function registerAudioNoteCommands(plugin: AutomaticAudioNotes) {
 	});
 
 	plugin.addCommand({
+		id: "split-meeting",
+		name: "Split meeting into two…",
+		checkCallback: (checking) => {
+			const file = app.workspace.getActiveFile();
+			const cache = file ? app.metadataCache.getFileCache(file) : null;
+			if (!file || !cache || !isMeetingCache(cache)) return false;
+			if (!checking) {
+				void plugin.openSplitMeeting(file);
+			}
+			return true;
+		},
+	});
+
+	plugin.addCommand({
+		id: "repair-meeting-note-metadata",
+		name: "Repair meeting titles and periodic note references…",
+		callback: () => {
+			void repairMeetingMetadata(plugin);
+		},
+	});
+
+	plugin.addCommand({
 		id: "export-audio-notes",
 		name: "Export audio notes and transcripts",
 		callback: () => {
@@ -400,4 +426,60 @@ function formatCategoryPrefix(raw?: string): string {
 		normalizeTagPrefix(raw) ||
 		`${slugifyTagSegment(raw) || "category"}/`
 	);
+}
+
+async function repairMeetingMetadata(plugin: AutomaticAudioNotes): Promise<void> {
+	const { app, settings } = plugin;
+	const files = app.vault.getMarkdownFiles();
+	const notes = files.flatMap((file) => {
+		const cache = app.metadataCache.getFileCache(file);
+		if (!cache?.frontmatter || !isMeetingCache(cache)) return [];
+		return [{ path: file.path, basename: file.basename, frontmatter: cache.frontmatter as Record<string, unknown> }];
+	});
+	const changes = planMetadataRepair(notes, {
+		daily: settings.periodicDailyNoteEnabled
+			? (start) => formatPeriodicName(start, settings.periodicDailyNoteFormat)
+			: undefined,
+		weekly: settings.periodicWeeklyNoteEnabled
+			? (start) => formatPeriodicName(start, settings.periodicWeeklyNoteFormat)
+			: undefined,
+	});
+	if (!changes.length) {
+		new Notice(`All ${notes.length} meeting notes look consistent.`, 5000);
+		return;
+	}
+	const sample = changes
+		.filter((change) => change.updates.title)
+		.slice(0, 3)
+		.map((change) => {
+			const before = notes.find((note) => note.path === change.path)?.frontmatter.title;
+			return `• “${String(before)}” → “${change.updates.title}”`;
+		});
+	const confirmed = await confirmWithModal(app, {
+		title: "Repair meeting notes",
+		message: [
+			`${changes.length} of ${notes.length} meeting notes need fixing: ${summarizeRepair(changes)}.`,
+			...(sample.length ? ["", "For example:", ...sample] : []),
+			"",
+			"Only these frontmatter fields change; note bodies are untouched.",
+		].join("\n"),
+		confirmText: "Repair",
+	});
+	if (!confirmed) return;
+	let done = 0;
+	let failed = 0;
+	for (const change of changes) {
+		const file = app.vault.getAbstractFileByPath(change.path);
+		if (!(file instanceof TFile)) continue;
+		try {
+			await app.fileManager.processFrontMatter(file, (fm) => {
+				Object.assign(fm, change.updates);
+			});
+			done += 1;
+		} catch (error) {
+			failed += 1;
+			console.error("Audio Notes: metadata repair failed for", change.path, error);
+		}
+	}
+	new Notice(`Repaired ${done} meeting note${done === 1 ? "" : "s"}${failed ? `; ${failed} failed (see console)` : ""}.`, 8000);
 }

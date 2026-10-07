@@ -48,6 +48,38 @@ export async function trimAudioToWav(
 	}
 }
 
+/**
+ * Decodes once and returns both halves as WAV. The fallback for formats that
+ * can't be cut without re-encoding (MP3, OGG, WebM…).
+ */
+export async function splitAudioToWav(
+	audioData: ArrayBuffer,
+	splitSec: number
+): Promise<{ first: ArrayBuffer; second: ArrayBuffer; splitSec: number }> {
+	const audioCtx = new AudioContext();
+	try {
+		const decoded = await audioCtx.decodeAudioData(audioData.slice(0));
+		const cut = Math.round(splitSec * decoded.sampleRate);
+		if (cut <= 0 || cut >= decoded.length) {
+			throw new Error("The split point is outside the recording.");
+		}
+		const slice = (from: number, to: number) => {
+			const part = audioCtx.createBuffer(decoded.numberOfChannels, to - from, decoded.sampleRate);
+			for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
+				part.copyToChannel(decoded.getChannelData(ch).subarray(from, to), ch);
+			}
+			return encodeWav(part);
+		};
+		return {
+			first: slice(0, cut),
+			second: slice(cut, decoded.length),
+			splitSec: cut / decoded.sampleRate,
+		};
+	} finally {
+		await audioCtx.close();
+	}
+}
+
 /** Encode an AudioBuffer as a WAV file (PCM 16-bit). */
 function encodeWav(buffer: AudioBuffer): ArrayBuffer {
 	const numChannels = buffer.numberOfChannels;

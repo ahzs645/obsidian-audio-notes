@@ -57,10 +57,32 @@ let currentView: "dayGridMonth" | "timeGridWeek" | "timeGridDay" = "dayGridMonth
 			.filter((event) => (event.displayDate || localDateKey(event.start)) === selectedDate)
 			.sort((a, b) => a.start.getTime() - b.start.getTime());
 
-	const legendEntries = () =>
-		Object.entries(colorLegend || {}).filter(
-			([tag, color]) => tag && color && tag.trim() && color.trim()
-		);
+	// The label already has its chip; "meeting" is on every event.
+	const otherTags = (event: MeetingEvent) =>
+		(event.tags || []).filter((tag) => tag !== "meeting" && tag !== event.label?.tag);
+
+	// Legend lists the labels actually on the calendar by their friendly
+	// names; configured colors for plain (non-label) tags follow.
+	$: legend = buildLegend(events, colorLegend);
+
+	function buildLegend(list: MeetingEvent[], extra: Record<string, string>) {
+		const entries = new Map<string, { name: string; title: string; color: string }>();
+		for (const event of list) {
+			if (!event.label || entries.has(event.label.tag)) continue;
+			entries.set(event.label.tag, {
+				name: event.label.displayName,
+				title: event.label.fullName,
+				color: event.color,
+			});
+		}
+		for (const [tag, color] of Object.entries(extra || {})) {
+			const key = tag.trim().toLowerCase();
+			if (!key || !color?.trim() || entries.has(key)) continue;
+			if (!list.some((event) => event.tags.includes(key))) continue;
+			entries.set(key, { name: `#${key}`, title: `#${key}`, color: color.trim() });
+		}
+		return Array.from(entries.values()).sort((a, b) => a.name.localeCompare(b.name));
+	}
 
 	const scheduleSelectedDayHighlight = () => {
 		if (highlightFrame) {
@@ -90,15 +112,22 @@ let currentView: "dayGridMonth" | "timeGridWeek" | "timeGridDay" = "dayGridMonth
 		}
 	};
 
-	const syncCalendar = () => {
+	let syncedDate: string | null = null;
+
+	// Takes its inputs as arguments so the reactive call below re-runs
+	// whenever the events or selected date change.
+	const syncCalendar = (_events: MeetingEvent[] = events, date: string = selectedDate) => {
 		if (!calendar) return;
 		calendar.batchRendering(() => {
 			calendar.removeAllEvents();
 			calendar.addEventSource(toCalendarEvents());
-			if (selectedDate) {
-				calendar.gotoDate(parseDateString(selectedDate));
+			// Only jump when the selection moved, so a refresh doesn't pull
+			// the grid back from a month the user navigated to.
+			if (date && date !== syncedDate) {
+				calendar.gotoDate(parseDateString(date));
 			}
 		});
+		syncedDate = date;
 		currentLabel = calendar?.view?.title ?? "";
 		scheduleSelectedDayHighlight();
 		requestAnimationFrame(() => calendar?.updateSize());
@@ -175,7 +204,7 @@ let currentView: "dayGridMonth" | "timeGridWeek" | "timeGridDay" = "dayGridMonth
 		calendar = null;
 	});
 
-	$: syncCalendar();
+	$: if (calendar) syncCalendar(events, selectedDate);
 </script>
 
 <div class={`aan-calendar-panel ${condensed ? "aan-calendar-panel--condensed" : ""}`}>
@@ -212,12 +241,12 @@ let currentView: "dayGridMonth" | "timeGridWeek" | "timeGridDay" = "dayGridMonth
 						: "No meetings"}
 				</div>
 			</div>
-			{#if legendEntries().length}
+			{#if legend.length}
 				<div class="aan-calendar-legend">
-					{#each legendEntries() as [tag, color]}
-						<div class="aan-calendar-legend-item">
-							<span class="aan-calendar-legend-swatch" style={`background:${color}`}></span>
-							<span class="aan-calendar-legend-label">{tag}</span>
+					{#each legend as entry}
+						<div class="aan-calendar-legend-item" aria-label={entry.title}>
+							<span class="aan-calendar-legend-swatch" style={`background:${entry.color}`}></span>
+							<span class="aan-calendar-legend-label">{entry.name}</span>
 						</div>
 					{/each}
 				</div>
@@ -246,7 +275,7 @@ let currentView: "dayGridMonth" | "timeGridWeek" | "timeGridDay" = "dayGridMonth
 										</span>
 										<span
 											class="aan-calendar-chip aan-calendar-chip--label"
-											title={event.label.tag}
+											title={`${event.label.fullName}\n#${event.label.tag}`}
 										>
 											{#if event.label.icon}
 												<span
@@ -260,10 +289,10 @@ let currentView: "dayGridMonth" | "timeGridWeek" | "timeGridDay" = "dayGridMonth
 										</span>
 									</div>
 								{/if}
-								{#if event.tags?.length}
+								{#if otherTags(event).length}
 									<div class="aan-calendar-tag-row">
-										{#each event.tags as tag}
-											<span class="aan-calendar-chip--soft">{tag}</span>
+										{#each otherTags(event) as tag}
+											<span class="aan-calendar-chip--soft">#{tag}</span>
 										{/each}
 									</div>
 								{/if}

@@ -421,7 +421,8 @@ export class MeetingAiService {
 		if (!nextPath || nextPath === file.path) {
 			return;
 		}
-		await this.plugin.app.vault.rename(file, nextPath);
+		// fileManager updates links to the note; vault.rename would break them.
+		await this.plugin.app.fileManager.renameFile(file, nextPath);
 	}
 
 	/**

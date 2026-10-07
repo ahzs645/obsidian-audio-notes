@@ -8,6 +8,7 @@ import type {
 import {
 	buildMeetingLabelInfo,
 	buildTagFromCategory,
+	setLabelDisplayName,
 	findLabelCategoryForTag,
 	getEffectiveMeetingLabelCategories,
 	getParentTag,
@@ -370,11 +371,31 @@ export class MeetingLabelPickerModal extends SuggestModal<MeetingLabelSuggestion
 			reopened.open();
 			return;
 		}
+		let label = suggestion.label;
+		if (suggestion.kind === "create") {
+			label = this.rememberTypedName(suggestion.tag, suggestion.rawInput) ?? label;
+		}
 		this.onPick({
 			tag: suggestion.tag,
-			label: suggestion.label,
+			label,
 			isNew: suggestion.kind === "create",
 		});
+	}
+
+	/**
+	 * The tag is a slug ("projects/nhhr"), so keep what was typed ("NHHR")
+	 * as the label's display name instead of title-casing the slug later.
+	 */
+	private rememberTypedName(tag: string, rawInput?: string): MeetingLabelInfo | undefined {
+		const typed = (rawInput ?? "").split("/").pop()?.trim();
+		if (!typed) return undefined;
+		const generated = buildMeetingLabelInfo(tag, this.categories).displayName.split(" › ").pop();
+		// An all-lowercase entry is just how people type; only keep deliberate names.
+		if (typed === generated || typed === typed.toLowerCase()) return undefined;
+		if (!setLabelDisplayName(this.plugin.settings.meetingLabelCategories, tag, typed)) return undefined;
+		void this.plugin.saveSettings();
+		this.categories = getEffectiveMeetingLabelCategories(this.plugin.settings.meetingLabelCategories);
+		return buildMeetingLabelInfo(tag, this.categories);
 	}
 
 	private computeAvailableLabels(): MeetingLabelInfo[] {

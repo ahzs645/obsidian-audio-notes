@@ -5,6 +5,7 @@ interface MeetingHeaderCallbacks {
 	onLabelClick: () => void;
 	onAttendeeClick: () => void;
 	onScheduleEdit: () => void;
+	onSplit: () => void;
 	onDelete: () => void;
 }
 
@@ -25,6 +26,7 @@ export class MeetingHeader {
 	private labelInputEl: HTMLInputElement;
 	private attendeeInputEl: HTMLInputElement;
 	private deleteButtonEl: HTMLButtonElement;
+	private splitButtonEl: HTMLButtonElement;
 
 	constructor(
 		container: HTMLElement,
@@ -40,6 +42,18 @@ export class MeetingHeader {
 			text: "Transcript",
 		});
 		this.titleEl.classList.add("aan-transcript-title");
+		this.splitButtonEl = titleRow.createEl("button", {
+			cls: "aan-transcript-split-btn clickable-icon",
+			attr: {
+				type: "button",
+				title: "Split into two meetings",
+				"aria-label": "Split into two meetings",
+			},
+		});
+		setIcon(this.splitButtonEl, "scissors");
+		this.splitButtonEl.addEventListener("click", () => {
+			this.callbacks.onSplit();
+		});
 		this.deleteButtonEl = titleRow.createEl("button", {
 			cls: "aan-transcript-delete-btn clickable-icon",
 			attr: {
@@ -197,6 +211,7 @@ export class MeetingHeader {
 
 	public setDeleteEnabled(enabled: boolean): void {
 		this.deleteButtonEl.toggleAttribute("disabled", !enabled);
+		this.splitButtonEl.toggleAttribute("disabled", !enabled);
 	}
 
 	public getElement(): HTMLDivElement {

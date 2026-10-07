@@ -83,6 +83,7 @@
 				isToday: boolean;
 				isSelected: boolean;
 				meetingCount: number;
+				colors: string[];
 			}[];
 		}[] = [];
 		for (let w = 0; w < 6; w++) {
@@ -100,6 +101,7 @@
 					isToday: iso === todayKey,
 					isSelected: iso === selected,
 					meetingCount: map.get(iso)?.length || 0,
+					colors: dayColors(map.get(iso)),
 				});
 			}
 			weeks.push({ label: `week-${w}`, days });
@@ -107,6 +109,21 @@
 		return weeks.filter((week) =>
 			week.days.some((day) => day.isCurrentMonth)
 		);
+	}
+
+	/** Up to three distinct label colors for a day's dots. */
+	function dayColors(list: MeetingEvent[] | undefined): string[] {
+		const colors: string[] = [];
+		for (const event of list || []) {
+			const color = event.color || "var(--interactive-accent)";
+			if (!colors.includes(color)) colors.push(color);
+			if (colors.length === 3) break;
+		}
+		return colors;
+	}
+
+	function labelTooltip(event: MeetingEvent): string {
+		return event.label ? event.label.fullName : "No label";
 	}
 
 	function selectDay(iso: string) {
@@ -208,6 +225,36 @@
 	}
 
 	$: labelOptions = buildLabelOptions(events);
+	$: monthLegend = buildMonthLegend(events, monthCursor);
+
+	function buildMonthLegend(list: MeetingEvent[], month: Date) {
+		const prefix = localDateKey(month).slice(0, 7);
+		const map = new Map<
+			string,
+			{ tag: string; name: string; title: string; color: string; count: number }
+		>();
+		for (const event of list || []) {
+			if (!event.label || !getDisplayDate(event).startsWith(prefix)) continue;
+			const entry = map.get(event.label.tag);
+			if (entry) {
+				entry.count += 1;
+				continue;
+			}
+			map.set(event.label.tag, {
+				tag: event.label.tag,
+				name: event.label.displayName,
+				title: event.label.fullName,
+				color: event.color,
+				count: 1,
+			});
+		}
+		return Array.from(map.values()).sort((a, b) => b.count - a.count);
+	}
+
+	function toggleLegendFilter(tag: string) {
+		const value = `tag:${tag}`;
+		onFilterChange?.(filterValue === value ? "" : value);
+	}
 
 	function handleFilterSelectChange(event: Event) {
 		const target = event.currentTarget as HTMLSelectElement | null;
@@ -277,6 +324,24 @@
 			{/if}
 		</select>
 	</div>
+	{#if monthLegend.length}
+		<div class="aan-sidebar-legend" role="group" aria-label="Labels this month">
+			{#each monthLegend as entry (entry.tag)}
+				<button
+					type="button"
+					class="aan-sidebar-legend__chip"
+					class:is-active={filterValue === `tag:${entry.tag}`}
+					style={`--aan-label-color:${entry.color}`}
+					aria-label={`${entry.title} · ${entry.count} meeting${entry.count === 1 ? "" : "s"} this month`}
+					aria-pressed={filterValue === `tag:${entry.tag}`}
+					on:click={() => toggleLegendFilter(entry.tag)}
+				>
+					<span class="aan-sidebar-legend__swatch" aria-hidden="true"></span>
+					<span class="aan-sidebar-legend__name">{entry.name}</span>
+				</button>
+			{/each}
+		</div>
+	{/if}
 	<div class="aan-sidebar-calendar__weekdays">
 		{#each weekdays as day}
 			<div title={day}>
@@ -292,12 +357,16 @@
 					class={`aan-sidebar-calendar__cell ${day.isCurrentMonth ? "" : "is-outside"} ${day.isToday ? "is-today" : ""} ${day.isSelected ? "is-selected" : ""}`}
 					on:click={() => selectDay(day.iso)}
 					type="button"
-					aria-label={parseISODate(day.iso).toLocaleDateString(undefined, { dateStyle: "full" })}
+					aria-label={`${parseISODate(day.iso).toLocaleDateString(undefined, { dateStyle: "full" })}${day.meetingCount ? ` · ${day.meetingCount} meeting${day.meetingCount === 1 ? "" : "s"}` : ""}`}
 					aria-pressed={day.isSelected}
 				>
 					<span>{day.label}</span>
 					{#if day.meetingCount > 0}
-						<span class="aan-sidebar-calendar__dot"></span>
+						<span class="aan-sidebar-calendar__dots" aria-hidden="true">
+							{#each day.colors as color}
+								<span class="aan-sidebar-calendar__dot" style={`background:${color}`}></span>
+							{/each}
+						</span>
 					{/if}
 				</button>
 			{/each}
@@ -361,7 +430,11 @@
 			<ul class="aan-calendar-day-list">
 				{#each selectedDayEvents as event}
 					<li class="aan-calendar-day-row">
-						<div class="aan-calendar-day-card">
+						<div
+							class="aan-calendar-day-card"
+							class:has-label={Boolean(event.label)}
+							style={`--aan-label-color:${event.color || "var(--interactive-accent)"}`}
+						>
 							<div class="aan-calendar-day-card-top">
 								<span class="aan-calendar-day-time">
 									<span>{formatTimeLabel(event.start)} –</span>
@@ -372,22 +445,20 @@
 										{formatDuration(event.start, event.end)}
 									</span>
 								{/if}
-								{#if event.label}
-									<span class="aan-calendar-day-badge">
-										{event.label.name ?? formatTagForLabel(event.label.tag)}
-									</span>
-								{/if}
+								<span
+									class="aan-calendar-day-label-dot"
+									class:is-unlabeled={!event.label}
+									role="img"
+									aria-label={labelTooltip(event)}
+									data-tooltip-position="top"
+								></span>
 							</div>
 							<div class="aan-calendar-day-title-row">
-								<span
-									class="aan-calendar-day-dot"
-									style={`background:${event.color || "var(--interactive-accent)"}`}
-								></span>
 								<!-- The title button stretches over the whole card, so clicking anywhere opens the note. -->
 								<button
 									type="button"
 									class="aan-calendar-day-title-text"
-									title={`Open ${event.title}`}
+									title={event.label ? `${event.title}\n${event.label.fullName}` : event.title}
 									on:click={() => openEvent(event.path, false)}
 								>
 									{event.title}

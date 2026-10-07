@@ -35,7 +35,7 @@ class ConfirmModal extends Modal {
 		if (title) {
 			contentEl.createEl("h2", { text: title });
 		}
-		contentEl.createEl("p", { text: message });
+		contentEl.createEl("p", { text: message, cls: "aan-confirm-message" });
 
 		const buttons = contentEl.createDiv("modal-button-container");
 		const cancelButton = buttons.createEl("button", {

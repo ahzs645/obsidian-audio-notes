@@ -6,6 +6,10 @@ import {
 } from "../meeting-events";
 import type { Transcript } from "../Transcript";
 import type { MeetingLabelCategory, MeetingLabelInfo } from "../meeting-labels";
+import {
+	buildMeetingLabelInfo,
+	getEffectiveMeetingLabelCategories,
+} from "../meeting-labels";
 
 export type ExportFormat = "markdown" | "json" | "text";
 export type ExportStructure = "single" | "multiple";
@@ -67,7 +71,7 @@ export class ExportService {
 		const filtered = events.filter((event) => {
 			// Filter by category
 			if (options.categoryFilter !== null) {
-				if (!event.label?.tag?.startsWith(options.categoryFilter)) {
+				if (!matchesTagFilter(event.label?.tag, options.categoryFilter)) {
 					// Also check if category filter is "uncategorized" and event has no label
 					if (options.categoryFilter !== "uncategorized" || event.label) {
 						return false;
@@ -405,7 +409,7 @@ export class ExportService {
 		lines.push(`**Total Meetings:** ${meetings.length}`);
 
 		if (options.categoryFilter) {
-			lines.push(`**Category Filter:** ${options.categoryFilter}`);
+			lines.push(`**Category Filter:** ${this.describeCategoryFilter(options.categoryFilter)}`);
 		}
 
 		if (options.dateRange.start || options.dateRange.end) {
@@ -417,6 +421,17 @@ export class ExportService {
 		lines.push(`**Content:** ${options.content}`);
 
 		return lines.join("\n");
+	}
+
+	/** "Job › Northern Health" rather than the raw "job/northern-health". */
+	private describeCategoryFilter(filter: string): string {
+		if (filter === "uncategorized") return "No label";
+		const categories = getEffectiveMeetingLabelCategories(
+			this.plugin.settings.meetingLabelCategories
+		);
+		const category = categories.find((entry) => entry.tagPrefix === filter);
+		if (category) return category.name;
+		return buildMeetingLabelInfo(filter, categories).fullName;
 	}
 
 	private generateTextHeader(
@@ -431,7 +446,7 @@ export class ExportService {
 		lines.push(`Total Meetings: ${meetings.length}`);
 
 		if (options.categoryFilter) {
-			lines.push(`Category Filter: ${options.categoryFilter}`);
+			lines.push(`Category Filter: ${this.describeCategoryFilter(options.categoryFilter)}`);
 		}
 
 		if (options.dateRange.start || options.dateRange.end) {
@@ -566,4 +581,12 @@ export class ExportService {
 				return a.displayName.localeCompare(b.displayName);
 			});
 	}
+}
+
+/** A category prefix ("job/") or a label and its sub-labels, never a sibling
+ * that merely shares a prefix ("job/nh" must not match "job/nhhr"). */
+function matchesTagFilter(tag: string | undefined, filter: string): boolean {
+	if (!tag) return false;
+	if (filter.endsWith("/")) return tag.startsWith(filter);
+	return tag === filter || tag.startsWith(`${filter}/`);
 }

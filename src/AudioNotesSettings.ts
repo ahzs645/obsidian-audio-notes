@@ -17,7 +17,11 @@ import {
 	type MeetingLabelCategory,
 } from "./meeting-labels";
 import { collectTags } from "./meeting-events";
-import { normalizeTagPrefix } from "./meeting-labels";
+import {
+	normalizeTagPrefix,
+	resolveLabelColor,
+	setLabelDisplayName,
+} from "./meeting-labels";
 
 export class ApiKeyInfo {
 	constructor(
@@ -235,7 +239,7 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Daily note format")
-			.setDesc("Tokens: YYYY, MM, DD, WW (ISO week), gggg (ISO week-year).")
+			.setDesc("Moment.js format, as in Periodic Notes. Example: YYYY-MM-DD")
 			.setDisabled(
 				templateDisabled || !this.plugin.settings.periodicDailyNoteEnabled
 			)
@@ -272,13 +276,13 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Weekly note format")
-			.setDesc("Tokens: YYYY, MM, DD, WW, gggg. Example: gggg-'W'WW")
+			.setDesc("Moment.js format, as in Periodic Notes. Example: gggg-[W]ww")
 			.setDisabled(
 				templateDisabled || !this.plugin.settings.periodicWeeklyNoteEnabled
 			)
 			.addText((text) =>
 				text
-					.setPlaceholder("gggg-'W'WW")
+					.setPlaceholder("gggg-[W]ww")
 					.setValue(this.plugin.settings.periodicWeeklyNoteFormat)
 					.setDisabled(
 						templateDisabled ||
@@ -286,7 +290,7 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 					)
 					.onChange(async (value) => {
 						this.plugin.settings.periodicWeeklyNoteFormat =
-							value || "gggg-'W'WW";
+							value || "gggg-[W]ww";
 						await this.plugin.saveSettings();
 					})
 			);
@@ -989,32 +993,103 @@ export class AudioNotesSettingsTab extends PluginSettingTab {
 	) {
 		const ul = container.createEl("ul");
 		ul.addClass("aan-settings-label-tree-list");
+		const save = () => this.plugin.saveSettings();
 		const renderNode = (
 			parent: HTMLElement,
-			node: { name: string; children: Map<string, any>; fullTag?: string; count?: number }
+			node: { name: string; children: Map<string, any>; fullTag?: string; count?: number },
+			parentPath: string
 		) => {
 			const entries = Array.from(node.children.values()).sort((a, b) =>
 				a.name.localeCompare(b.name)
 			);
 			for (const child of entries) {
+				const tag = `${parentPath}${child.name}`;
 				const li = parent.createEl("li");
-				const labelText = this.formatLabelDisplay(child.name);
-				// Only show count if this is an actual used tag (has fullTag and count > 0)
-				const countText = child.fullTag && child.count ? `(${child.count}) ` : "";
-				li.createSpan({
-					text: countText + labelText,
-					title: child.fullTag ? `#${child.fullTag}` : undefined,
+				const row = li.createDiv({ cls: "aan-settings-label-row" });
+
+				// Color: explicit, inherited from a parent, or the label's default.
+				const colorInput = row.createEl("input", {
+					type: "color",
+					cls: "aan-settings-label-color",
+					attr: { "aria-label": `Color for #${tag}` },
+				});
+				const resetColor = row.createEl("button", {
+					text: "↺",
+					cls: "aan-settings-label-reset clickable-icon",
+					attr: { type: "button", "aria-label": "Use the default color" },
+				});
+				const syncColor = () => {
+					const colors = this.plugin.settings.calendarTagColors;
+					colorInput.value = toHexColor(resolveLabelColor(tag, colors));
+					resetColor.toggleClass("is-hidden", !colors[tag]);
+				};
+				colorInput.addEventListener("change", async () => {
+					this.plugin.settings.calendarTagColors = {
+						...this.plugin.settings.calendarTagColors,
+						[tag]: colorInput.value,
+					};
+					syncColor();
+					await save();
+				});
+				resetColor.addEventListener("click", async () => {
+					const next = { ...this.plugin.settings.calendarTagColors };
+					delete next[tag];
+					this.plugin.settings.calendarTagColors = next;
+					syncColor();
+					await save();
+				});
+				syncColor();
+
+				// Name: what the sidebar, calendar and pickers show for the tag.
+				const category = this.plugin.settings.meetingLabelCategories.find(
+					(entry) => normalizeTagPrefix(entry.tagPrefix || entry.id || entry.name) === prefix
+				);
+				const nameInput = row.createEl("input", {
+					type: "text",
+					cls: "aan-settings-label-name",
+					attr: {
+						placeholder: this.formatLabelDisplay(child.name),
+						"aria-label": `Display name for #${tag}`,
+						title: `#${tag}`,
+					},
+				});
+				nameInput.value = category?.labelNames?.[tag] ?? "";
+				nameInput.addEventListener("change", async () => {
+					setLabelDisplayName(
+						this.plugin.settings.meetingLabelCategories,
+						tag,
+						nameInput.value
+					);
+					await save();
+				});
+				row.createSpan({
+					text: child.fullTag && child.count ? `#${tag} · ${child.count}` : `#${tag}`,
 					cls: child.fullTag && child.count ? "aan-settings-label-with-count" : "aan-settings-label-branch",
 				});
 				if (child.children.size) {
 					const nested = li.createEl("ul");
 					nested.addClass("aan-settings-label-tree-list");
-					renderNode(nested, child);
+					renderNode(nested, child, `${tag}/`);
 				}
 			}
 		};
-		renderNode(ul, root);
+		renderNode(ul, root, prefix);
 	}
+}
+
+/** <input type=color> only accepts #rrggbb. */
+function toHexColor(color: string): string {
+	const value = color.trim();
+	if (/^#[0-9a-f]{6}$/i.test(value)) return value.toLowerCase();
+	const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(value);
+	if (short) return `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`.toLowerCase();
+	const probe = document.createElement("span");
+	probe.style.color = value;
+	document.body.appendChild(probe);
+	const rgb = getComputedStyle(probe).color.match(/\d+/g);
+	probe.remove();
+	if (!rgb || rgb.length < 3) return "#888888";
+	return `#${rgb.slice(0, 3).map((n) => Number(n).toString(16).padStart(2, "0")).join("")}`;
 }
 
 function formatColorMap(map: Record<string, string> = {}): string {
@@ -1136,7 +1211,7 @@ const DEFAULT_SETTINGS: StringifiedAudioNotesSettings = {
 	periodicDailyNoteEnabled: true,
 	periodicDailyNoteFormat: "YYYY-MM-DD",
 	periodicWeeklyNoteEnabled: true,
-	periodicWeeklyNoteFormat: "gggg-'W'WW",
+	periodicWeeklyNoteFormat: "gggg-[W]ww",
 	calendarSidebarPinned: false,
 	dashboardNotePath: "Audio Notes Dashboard.md",
 	meetingLabelCategories: DEFAULT_MEETING_LABEL_CATEGORIES.map((category) => ({
@@ -1818,7 +1893,7 @@ export class AudioNotesSettings {
 	}
 
 	set periodicWeeklyNoteFormat(value: string) {
-		this._periodicWeeklyNoteFormat = value || "gggg-'W'WW";
+		this._periodicWeeklyNoteFormat = value || "gggg-[W]ww";
 	}
 
 	get calendarSidebarPinned(): boolean {

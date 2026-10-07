@@ -329,7 +329,7 @@ function subfolderFromDate(
 	return `${year}/${month}`;
 }
 
-async function ensureFolderExists(vault: Vault, folderPath: string) {
+export async function ensureFolderExists(vault: Vault, folderPath: string) {
 	const normalized = normalizePath(folderPath);
 	if (await vault.adapter.exists(normalized)) {
 		return;
@@ -345,7 +345,7 @@ async function ensureFolderExists(vault: Vault, folderPath: string) {
 	}
 }
 
-async function getAvailablePath(
+export async function getAvailablePath(
 	vault: Vault,
 	targetPath: string,
 	isNameTaken: (filename: string) => boolean = () => false
@@ -784,13 +784,13 @@ async function findExistingWhisperImport(
 	return null;
 }
 
-function hashBuffer(buffer: Buffer): string {
+export function hashBuffer(buffer: Buffer): string {
 	const hash = createHash("sha1");
 	hash.update(buffer);
 	return hash.digest("hex");
 }
 
-function buildSegmentsSha1(segments: ProcessedSegment[]): string {
+export function buildSegmentsSha1(segments: ProcessedSegment[]): string {
 	const normalized = segments
 		.map((segment) => {
 			const startMs = Math.round((segment.start ?? 0) * 1000);

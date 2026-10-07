@@ -99,15 +99,8 @@ export class MeetingCalendarView extends ItemView {
 			this.plugin.settings.calendarTagColors,
 			this.plugin.settings.meetingLabelCategories
 		);
-		if (
-			this.events.length &&
-			!this.events.some(
-				(event) => event.displayDate === this.selectedDate
-			)
-		) {
-			this.selectedDate = this.events[0].displayDate;
-		}
-
+		// An empty day is a valid selection (today often is); don't jump to
+		// the oldest meeting in the vault.
 		this.component?.$set({
 			events: this.events,
 			selectedDate: this.selectedDate,

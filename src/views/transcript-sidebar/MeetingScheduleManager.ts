@@ -2,6 +2,7 @@ import { Notice, type App, type TFile } from "obsidian";
 import type AutomaticAudioNotes from "../../main";
 import {
 	buildScheduleCallout,
+	replaceScheduleCallout,
 	resolveMeetingContext,
 } from "../../MeetingNoteTemplate";
 import {
@@ -23,6 +24,7 @@ interface MeetingScheduleContext {
 	setCurrentScheduleInfo(info: MeetingScheduleInfo | null): void;
 	updateHeaderSchedule(info: MeetingScheduleInfo | null, canEdit: boolean): void;
 	refreshDashboardSchedule(): void;
+	getRecordingDurationSec?(): number | null;
 }
 
 export class MeetingScheduleManager {
@@ -69,6 +71,7 @@ export class MeetingScheduleManager {
 			initialStartTime: info?.startTime,
 			initialEndDate: info?.endDate,
 			initialEndTime: info?.endTime,
+			recordingLengthSec: this.context.getRecordingDurationSec?.() ?? null,
 			onSubmit: (update) => {
 				void this.applyScheduleUpdate(update);
 			},
@@ -103,6 +106,12 @@ export class MeetingScheduleManager {
 		const endDateStr = this.formatFrontmatterDate(end);
 		const startTimeStr = this.formatFrontmatterTime(start);
 		const endTimeStr = this.formatFrontmatterTime(end);
+		// Periodic-note references follow the meeting to its new day and week.
+		const periodic = resolveMeetingContext(this.plugin.settings, {
+			title: file.basename,
+			start,
+			end,
+		});
 		try {
 			await this.app.fileManager.processFrontMatter(file, (fm) => {
 				fm.start = start.toISOString();
@@ -112,6 +121,12 @@ export class MeetingScheduleManager {
 				fm.end_date = endDateStr;
 				fm.end_time = endTimeStr;
 				fm.date = startDateStr;
+				if (periodic.periodicDaily && "daily_note" in fm) {
+					fm.daily_note = periodic.periodicDaily;
+				}
+				if (periodic.periodicWeekly && "weekly_note" in fm) {
+					fm.weekly_note = periodic.periodicWeekly;
+				}
 			});
 			this.context.setCurrentMeetingDateParts({
 				year: startDateStr.slice(0, 4),
@@ -238,10 +253,12 @@ export class MeetingScheduleManager {
 		return `${year}-${month}-${day}`;
 	}
 
+	/** HH:mm:ss, the same shape new notes and imports write. */
 	private formatFrontmatterTime(date: Date): string {
 		const hours = date.getHours().toString().padStart(2, "0");
 		const minutes = date.getMinutes().toString().padStart(2, "0");
-		return `${hours}:${minutes}`;
+		const seconds = date.getSeconds().toString().padStart(2, "0");
+		return `${hours}:${minutes}:${seconds}`;
 	}
 
 	private async refreshScheduleCallout(
@@ -253,21 +270,6 @@ export class MeetingScheduleManager {
 			return;
 		}
 		try {
-			const content = await this.app.vault.read(file);
-			const lines = content.split("\n");
-			const scheduleIndex = lines.findIndex((line) =>
-				line.trim().startsWith("> [!info] Schedule")
-			);
-			if (scheduleIndex === -1) {
-				return;
-			}
-			let endIndex = scheduleIndex + 1;
-			while (
-				endIndex < lines.length &&
-				lines[endIndex].trim().startsWith(">")
-			) {
-				endIndex += 1;
-			}
 			const context = resolveMeetingContext(this.plugin.settings, {
 				title: file.basename,
 				audioPath: this.context.getCurrentAudioPath() ?? "",
@@ -275,13 +277,11 @@ export class MeetingScheduleManager {
 				start,
 				end,
 			});
-			const replacement = buildScheduleCallout(context).split("\n");
-			lines.splice(
-				scheduleIndex,
-				Math.max(endIndex - scheduleIndex, 1),
-				...replacement
+			// process() reads and writes atomically, so typing in the note
+			// at the same moment can't be lost.
+			await this.app.vault.process(file, (content) =>
+				replaceScheduleCallout(content, buildScheduleCallout(context))
 			);
-			await this.app.vault.modify(file, lines.join("\n"));
 		} catch (error) {
 			console.error(
 				"Audio Notes: Could not refresh schedule callout.",

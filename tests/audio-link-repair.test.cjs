@@ -94,3 +94,14 @@ test('meetings without a transcript fingerprint are skipped, not guessed', async
   assert.equal(plan.unverifiable, 1);
   assert.deepEqual(plain(plan.missing), []);
 });
+
+test('a folder moved to another month is still searched for recordings nobody owns', async () => {
+  const lost = note('july.md', 'MediaArchive/2026/07/16/gvhm-system-audio/system-audio-2.m4a', 'july', '16');
+  const owned = 'MediaArchive/2026/08/25/gvhm-system-audio/system-audio-2.m4a';
+  const orphan = 'MediaArchive/2026/08/25/gvhm-system-audio/system-audio-2-1.m4a';
+  const owner = note('aug.md', owned, 'aug', '25');
+  const fake = io({ [owned]: 'aug', [orphan]: 'july' });
+  const plan = await planAudioLinkRepair([lost, owner], [owned, orphan], fake, 'july.md');
+  assert.deepEqual(plain(plan.relinks.map(r => [r.note.path, r.to])), [['july.md', orphan]]);
+  assert.equal(fake.hashed.includes(owned), false);
+});

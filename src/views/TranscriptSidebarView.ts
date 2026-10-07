@@ -1,5 +1,6 @@
 import { modelOptions, effortOptions } from "../services/AiModelCatalog";
 import {
+	type CachedMetadata,
 	ItemView,
 	Notice,
 	TFile,
@@ -23,6 +24,7 @@ import {
 	type MeetingFolderResult,
 } from "./transcript-sidebar/MeetingFileService";
 import { DashboardController } from "./transcript-sidebar/DashboardController";
+import { SplitMeetingModal } from "../modals/SplitMeetingModal";
 import { TranscriptionService } from "./transcript-sidebar/TranscriptionService";
 import {
 	buildMeetingLabelInfo,
@@ -63,7 +65,9 @@ export class TranscriptSidebarView extends ItemView {
 	private mode: "meeting" | "dashboard" = "dashboard";
 	private isUploadingMeetingAudio = false;
 	private isUploadingTranscript = false;
-	private isTranscribingMeeting = false;
+	/** The meeting whose transcription is running, if any, and its latest status. */
+	private transcribingMeetingPath: string | null = null;
+	private transcriptionProgress: string | null = null;
 	private get isGeneratingMeetingAi(): boolean {
 		return this.plugin.meetingAiService.isGenerating(this.currentMeetingFile);
 	}
@@ -72,6 +76,8 @@ export class TranscriptSidebarView extends ItemView {
 	private currentAudioPath: string | null = null;
 	private currentHasAudioReference = false;
 	private currentTranscriptText = "";
+	private currentTranscriptDurationSec: number | null = null;
+	private loadedMediaSignature: string | null = null;
 	private readonly meetingFiles: MeetingFileService;
 	private readonly attachments: AttachmentManager;
 	private readonly dashboardController: DashboardController;
@@ -146,6 +152,7 @@ export class TranscriptSidebarView extends ItemView {
 			refreshDashboardSchedule: () => {
 				this.dashboardController.scheduleRefresh();
 			},
+			getRecordingDurationSec: () => this.currentTranscriptDurationSec,
 		});
 		this.speakerLabelManager = new SpeakerLabelManager(this.app, {
 			getCurrentMeetingFile: () => this.currentMeetingFile,
@@ -250,6 +257,8 @@ export class TranscriptSidebarView extends ItemView {
 		this.currentMeetingFile = activeFile;
 		this.attachments.setMeetingFilePath(activeFile.path);
 		this.currentAudioPath = null;
+		this.currentTranscriptDurationSec = null;
+		this.loadedMediaSignature = this.mediaSignature(file);
 		if (!this.transcriptComponent) {
 			this.renderBase();
 		}
@@ -289,7 +298,7 @@ export class TranscriptSidebarView extends ItemView {
 				hasTranscript: typeof transcriptPath === "string",
 				isLoadingTranscript: typeof transcriptPath === "string",
 				needsAudioUpload: false,
-				isTranscribing: this.isTranscribingMeeting,
+				...this.transcriptionPropsFor(activeFile.path),
 			});
 			this.updateAiProps();
 			const archivedRecording =
@@ -315,26 +324,7 @@ export class TranscriptSidebarView extends ItemView {
 						archivedRecording?.recordingUrl
 				);
 			this.currentHasAudioReference = hasAudio;
-		const categories = getEffectiveMeetingLabelCategories(
-			this.plugin.settings.meetingLabelCategories
-		);
-		const explicitLabel = getMeetingLabelFromFrontmatter(frontmatter);
-		let detectedLabel = explicitLabel;
-		if (!detectedLabel) {
-			const tags = collectTags(cache);
-			detectedLabel =
-				tags.find((tag) =>
-					categories.some((category) =>
-						tag.startsWith(category.tagPrefix)
-					)
-				) ?? undefined;
-		}
-		this.currentMeetingLabel = detectedLabel
-			? buildMeetingLabelInfo(detectedLabel, categories)
-			: undefined;
-		this.updateLabelHeader();
-		this.currentAttendees = getAttendeesFromFrontmatter(frontmatter);
-		this.updateAttendeeDisplay();
+		this.syncLabelAndAttendees(cache);
 		const preferredDateParts =
 			this.meetingFiles.extractDatePartsFromFrontmatter(
 				frontmatter
@@ -461,7 +451,7 @@ export class TranscriptSidebarView extends ItemView {
 		setTranscriptProps({
 			...this.getAiOptionProps(),
 				playerContainer: playerEl ?? null,
-				isTranscribing: this.isTranscribingMeeting,
+				...this.transcriptionPropsFor(activeFile.path),
 				needsAudioUpload: !hasAudio,
 				audioUploadInProgress: this.isUploadingMeetingAudio,
 				transcriptUploadInProgress: this.isUploadingTranscript,
@@ -497,6 +487,72 @@ export class TranscriptSidebarView extends ItemView {
 			});
 			this.updateAiProps();
 		}
+	}
+
+	private syncLabelAndAttendees(cache: CachedMetadata | null): void {
+		const frontmatter = (cache?.frontmatter ?? {}) as Record<string, unknown>;
+		const categories = getEffectiveMeetingLabelCategories(
+			this.plugin.settings.meetingLabelCategories
+		);
+		const explicitLabel = getMeetingLabelFromFrontmatter(frontmatter);
+		let detectedLabel = explicitLabel;
+		if (!detectedLabel) {
+			const tags = collectTags(cache);
+			detectedLabel =
+				tags.find((tag) =>
+					categories.some((category) =>
+						tag.startsWith(category.tagPrefix)
+					)
+				) ?? undefined;
+		}
+		this.currentMeetingLabel = detectedLabel
+			? buildMeetingLabelInfo(detectedLabel, categories)
+			: undefined;
+		this.updateLabelHeader();
+		this.currentAttendees = getAttendeesFromFrontmatter(frontmatter);
+		this.updateAttendeeDisplay();
+	}
+
+	/** The frontmatter that decides what a full load sets up (player, transcript). */
+	private mediaSignature(file: TFile): string {
+		const fm = (this.plugin.app.metadataCache.getFileCache(file)?.frontmatter ??
+			{}) as Record<string, unknown>;
+		return JSON.stringify(
+			[
+				"media_uri",
+				"audio",
+				"media",
+				"transcript_uri",
+				"transcript",
+				"recording_drive_path",
+				"recording_url",
+			].map((key) => fm[key] ?? null)
+		);
+	}
+
+	/**
+	 * Called on every metadata change while a meeting is open. Typing in the
+	 * note must not tear down the player, so unless its recording or
+	 * transcript changed this only refreshes the header.
+	 */
+	public async refreshMeetingFile(file: TFile): Promise<void> {
+		if (
+			this.mode === "meeting" &&
+			this.currentMeetingFile?.path === file.path &&
+			this.loadedMediaSignature === this.mediaSignature(file)
+		) {
+			const cache = this.plugin.app.metadataCache.getFileCache(file);
+			this.header?.setTitle(file.basename);
+			this.syncLabelAndAttendees(cache);
+			this.updateSpeakerLabelOverrides(
+				SpeakerLabelManager.extractOverrides(
+					(cache?.frontmatter ?? {}) as Record<string, unknown>
+				)
+			);
+			this.scheduleManager.updateScheduleSummary();
+			return;
+		}
+		await this.showMeetingFile(file);
 	}
 
 	private releasePlayer(): void {
@@ -538,6 +594,7 @@ export class TranscriptSidebarView extends ItemView {
 					  )
 					: null;
 			this.currentTranscriptText = transcript.getEntireTranscript();
+			this.currentTranscriptDurationSec = duration;
 			// Lets the unloaded player show a length without touching the audio.
 			this.currentPlayer?.setDurationHint(duration);
 			this.transcriptComponent?.$set({
@@ -567,6 +624,7 @@ export class TranscriptSidebarView extends ItemView {
 			onLabelClick: () => this.labelManager.openLabelPicker(),
 			onAttendeeClick: () => this.attendeeManager.openAttendeePicker(),
 			onScheduleEdit: () => this.scheduleManager.openScheduleEditor(),
+			onSplit: () => this.openSplitModal(),
 			onDelete: () => {
 				void this.confirmDeleteCurrentMeeting();
 			},
@@ -674,12 +732,40 @@ export class TranscriptSidebarView extends ItemView {
 		this.header?.setDeleteEnabled(enabled);
 	}
 
+	private transcriptionPropsFor(path: string): { isTranscribing: boolean; progressMessage: string | null } {
+		const active = this.transcribingMeetingPath === path;
+		return { isTranscribing: active, progressMessage: active ? this.transcriptionProgress : null };
+	}
+
+	public getCurrentMeetingPath(): string | null {
+		return this.mode === "meeting" ? this.currentMeetingFile?.path ?? null : null;
+	}
+
+	public openSplitModal(): void {
+		const file = this.currentMeetingFile;
+		if (this.mode !== "meeting" || !file) {
+			new Notice("Open a meeting note to split it.", 4000);
+			return;
+		}
+		// Don't talk over the modal's own preview player.
+		this.plugin.getCurrentlyPlayingAudioElement()?.pause();
+		new SplitMeetingModal(this.plugin, {
+			file,
+			audioPath: this.currentAudioPath,
+			transcriptPath: this.currentTranscriptPath,
+			onDone: () => {
+				void this.showMeetingFile(file);
+			},
+		}).open();
+	}
+
 	private async confirmDeleteCurrentMeeting() {
 		await this.deletionManager.confirmDeleteCurrentMeeting();
 	}
 
 	public async showDashboard(): Promise<void> {
 		this.loadGeneration++;
+		this.loadedMediaSignature = null;
 		this.releasePlayer();
 		this.transcriptComponent?.$set({ playerContainer: null });
 		this.currentFilePath = null;
@@ -958,29 +1044,51 @@ export class TranscriptSidebarView extends ItemView {
 			new Notice("Scriberr is not configured in settings.", 4000);
 			return;
 		}
-		this.isTranscribingMeeting = true;
-		this.transcriptComponent?.$set({ isTranscribing: true });
+		if (this.transcribingMeetingPath) {
+			new Notice("Another meeting is still being transcribed.", 4000);
+			return;
+		}
+		const meetingPath = this.currentMeetingFile.path;
+		const meetingFile = this.currentMeetingFile;
+		this.transcribingMeetingPath = meetingPath;
+		this.transcriptionProgress = null;
+		this.transcriptComponent?.$set(this.transcriptionPropsFor(meetingPath));
+		// Progress belongs to the meeting it started on; another note opened
+		// meanwhile keeps its own panel.
+		const reportProgress = (message: string) => {
+			this.transcriptionProgress = message;
+			if (this.currentMeetingFile?.path === meetingPath) {
+				this.transcriptComponent?.$set({ progressMessage: message });
+			}
+		};
 		try {
 			const transcriptPath =
 				await this.transcriptionService.requestTranscription(
 					provider,
-					this.currentAudioPath
+					this.currentAudioPath,
+					reportProgress
 				);
 			await this.plugin.app.fileManager.processFrontMatter(
-				this.currentMeetingFile,
+				meetingFile,
 				(fm) => {
 					fm["transcript_uri"] = transcriptPath;
 				}
 			);
-			this.currentTranscriptPath = transcriptPath;
-			await this.loadTranscript(transcriptPath);
-			new Notice("Transcript saved.", 4000);
+			if (this.currentMeetingFile?.path === meetingPath) {
+				this.currentTranscriptPath = transcriptPath;
+				await this.loadTranscript(transcriptPath);
+			}
+			new Notice(`Transcript saved for “${meetingFile.basename}”.`, 4000);
 		} catch (error) {
 			console.error("Audio Notes: Could not transcribe audio.", error);
-			new Notice("Could not transcribe audio.", 6000);
+			const reason = error instanceof Error && error.message ? `\n${error.message}` : "";
+			new Notice(`Could not transcribe audio.${reason}`, 8000);
 		} finally {
-			this.isTranscribingMeeting = false;
-			this.transcriptComponent?.$set({ isTranscribing: false });
+			this.transcribingMeetingPath = null;
+			this.transcriptionProgress = null;
+			if (this.currentMeetingFile?.path === meetingPath) {
+				this.transcriptComponent?.$set({ isTranscribing: false, progressMessage: null });
+			}
 		}
 	}
 

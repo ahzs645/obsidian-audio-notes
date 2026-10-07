@@ -133,7 +133,7 @@ export default class AutomaticAudioNotes extends Plugin {
 			_periodicWeeklyNoteEnabled = true;
 		}
 		let _periodicWeeklyNoteFormat =
-			loadedData["_periodicWeeklyNoteFormat"] || "gggg-'W'WW";
+			loadedData["_periodicWeeklyNoteFormat"] || "gggg-[W]ww";
 		let _calendarSidebarPinned = loadedData["_calendarSidebarPinned"];
 		if (_calendarSidebarPinned === undefined) {
 			_calendarSidebarPinned = false;
@@ -184,6 +184,16 @@ export default class AutomaticAudioNotes extends Plugin {
 			loadedData["_meetingLabelCategories"],
 		);
 		this.settings = AudioNotesSettings.overrideDefaultSettings(newSettings);
+	}
+
+	/**
+	 * Obsidian calls this when data.json changes on disk, e.g. synced from
+	 * another device through Google Drive. Without it the stale in-memory
+	 * settings would overwrite the newer file on the next save.
+	 */
+	async onExternalSettingsChange() {
+		await this.loadSettings();
+		this.app.workspace.trigger("audio-notes:settings-updated");
 	}
 
 	async saveSettings() {
@@ -405,7 +415,13 @@ export default class AutomaticAudioNotes extends Plugin {
 						if (!this.isMeetingFile(active)) {
 							return;
 						}
-						void this.handleFileOpen(active);
+						// Metadata changes on every keystroke save; refresh in place
+						// so an open recording keeps playing.
+						this.lastMeetingFilePath = active.path;
+						this.lastMeetingFolder = active.parent?.path ?? "";
+						void this.getTranscriptSidebarView(false).then((view) =>
+							view.refreshMeetingFile(active)
+						);
 					})
 				);
 			this.registerEvent(
@@ -546,6 +562,15 @@ export default class AutomaticAudioNotes extends Plugin {
 	public async openTranscriptSidebar(file?: TFile) {
 		const targetFile = file ?? this.app.workspace.getActiveFile();
 		await this.syncTranscriptSidebar(targetFile ?? null, true);
+	}
+
+	/** Opens the split dialog for a meeting note via the transcript sidebar. */
+	public async openSplitMeeting(file: TFile): Promise<void> {
+		const view = await this.getTranscriptSidebarView(true);
+		if (view.getCurrentMeetingPath() !== file.path) {
+			await view.showMeetingFile(file);
+		}
+		view.openSplitModal();
 	}
 
 	private async handleFileOpen(file: TFile | null) {
@@ -735,25 +760,24 @@ export default class AutomaticAudioNotes extends Plugin {
 		if (!oldBasename) {
 			return;
 		}
+		// Titles can be YAML numbers (a recorder file named "4") and macOS puts
+		// narrow no-break spaces in times that file names lose, so compare
+		// loosely.
+		const sameTitle = (value: unknown, name: string) =>
+			(typeof value === "string" || typeof value === "number") &&
+			normalizeTitleText(String(value)) === normalizeTitleText(name);
 		const cache = this.app.metadataCache.getFileCache(file);
-		const frontmatterTitle =
-			typeof cache?.frontmatter?.title === "string"
-				? cache.frontmatter.title.trim()
-				: "";
-		if (!frontmatterTitle || frontmatterTitle !== oldBasename) {
+		if (!sameTitle(cache?.frontmatter?.title, oldBasename)) {
 			return;
 		}
 		const newTitle = file.basename.trim();
-		if (!newTitle || newTitle === frontmatterTitle) {
+		if (!newTitle || sameTitle(cache?.frontmatter?.title, newTitle)) {
 			return;
 		}
 		try {
 			await this.app.fileManager.processFrontMatter(file, (fm) => {
-				if (typeof fm.title === "string") {
-					const current = fm.title.trim();
-					if (current === frontmatterTitle) {
-						fm.title = newTitle;
-					}
+				if (sameTitle(fm.title, oldBasename)) {
+					fm.title = newTitle;
 				}
 			});
 		} catch (error) {
@@ -1024,4 +1048,8 @@ export default class AutomaticAudioNotes extends Plugin {
 		this.currentlyPlayingAudioFakeUuid = null;
 		this.transcriptDatastore.cache.clear();
 	}
+}
+
+function normalizeTitleText(value: string): string {
+	return value.replace(/\s+/gu, " ").trim();
 }

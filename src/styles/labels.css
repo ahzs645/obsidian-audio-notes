@@ -25,6 +25,21 @@
 	color: var(--text-faint);
 }
 
+.aan-transcript-split-btn {
+	flex-shrink: 0;
+	margin: -4px 0 0 0;
+	color: var(--text-faint);
+}
+
+.aan-transcript-split-btn:hover:not(:disabled) {
+	color: var(--text-normal);
+}
+
+.aan-transcript-split-btn:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
 .aan-transcript-delete-btn:hover:not(:disabled) {
 	color: var(--text-error);
 }
@@ -357,4 +372,57 @@
 	display: flex;
 	flex-wrap: wrap;
 	gap: 4px;
+}
+
+/* Each label row: color, editable display name, then the tag and its uses. */
+.aan-settings-label-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.aan-settings-label-color {
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	background: none;
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+.aan-settings-label-color::-webkit-color-swatch-wrapper {
+	padding: 0;
+}
+
+.aan-settings-label-color::-webkit-color-swatch {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 50%;
+}
+
+.aan-settings-label-reset {
+	padding: 0 4px;
+	font-size: 0.8rem;
+	flex-shrink: 0;
+}
+
+.aan-settings-label-reset.is-hidden {
+	visibility: hidden;
+}
+
+.aan-settings-label-row .aan-settings-label-name {
+	flex: 0 1 180px;
+	min-width: 80px;
+	height: 26px;
+	font-size: 0.85rem;
+}
+
+.aan-settings-label-row > span {
+	font-size: 0.78rem;
+	color: var(--text-faint);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }

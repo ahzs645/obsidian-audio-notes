@@ -1,3 +1,4 @@
+import { moment } from "obsidian";
 import type { AudioNotesSettings } from "./AudioNotesSettings";
 
 export interface MeetingTemplateData {
@@ -194,6 +195,26 @@ export function buildScheduleCallout(
 	].join("\n");
 }
 
+/**
+ * Swaps the body's "> [!info] Schedule" callout for a new one. Only the
+ * callout's own bullets are replaced, so a quote right after it survives.
+ * Returns the content unchanged when the note has no schedule callout.
+ */
+export function replaceScheduleCallout(content: string, callout: string): string {
+	const lines = content.split("\n");
+	const index = lines.findIndex((line) => line.trim().startsWith("> [!info] Schedule"));
+	if (index === -1) return content;
+	let end = index + 1;
+	while (
+		end < lines.length &&
+		/^>\s*-\s+\*\*(When|Time|Duration|Timezone):\*\*/.test(lines[end].trim())
+	) {
+		end += 1;
+	}
+	lines.splice(index, end - index, ...callout.split("\n"));
+	return lines.join("\n");
+}
+
 function formatTimeRange(
 	start: Date,
 	end: Date,
@@ -307,48 +328,32 @@ function formatDuration(durationMs: number): string {
 	return `${hours}h ${minutes}m`;
 }
 
-function formatPeriodicName(date: Date, format: string): string {
+/**
+ * Formats a periodic-note name with moment, as Periodic Notes does. Older
+ * settings quoted literals the SQL way ("gggg-'W'WW"), which moment prints
+ * verbatim, so those quotes become moment's [W] brackets first.
+ */
+export function formatPeriodicName(date: Date, format: string): string {
 	if (!format) {
 		return "";
 	}
-	const year = date.getFullYear();
-	const month = (date.getMonth() + 1).toString().padStart(2, "0");
-	const day = date.getDate().toString().padStart(2, "0");
-	const { isoWeek, isoYear } = getIsoWeek(date);
-	const replacements: Record<string, string> = {
-		YYYY: year.toString(),
-		MM: month,
-		DD: day,
-		WW: isoWeek,
-		ww: isoWeek,
-		gggg: isoYear,
-	};
-	let result = format;
-	for (const [token, value] of Object.entries(replacements)) {
-		const regex = new RegExp(token, "g");
-		result = result.replace(regex, value);
-	}
-	return result;
+	// Obsidian's typings export the moment namespace; the value is callable.
+	const callMoment = moment as unknown as (input: Date) => { format(pattern: string): string };
+	return callMoment(date).format(normalizePeriodicFormat(format));
 }
 
-function getIsoWeek(date: Date): { isoWeek: string; isoYear: string } {
-	const temp = new Date(date.getTime());
-	const dayNr = (temp.getDay() + 6) % 7;
-	temp.setDate(temp.getDate() - dayNr + 3);
-	const firstThursday = new Date(temp.getFullYear(), 0, 4);
-	const firstThursdayDay = (firstThursday.getDay() + 6) % 7;
-	firstThursday.setDate(firstThursday.getDate() - firstThursdayDay + 3);
-	const week =
-		1 + Math.round((temp.getTime() - firstThursday.getTime()) / 604800000);
-	const isoYear = temp.getFullYear();
-	return {
-		isoWeek: week.toString().padStart(2, "0"),
-		isoYear: isoYear.toString(),
-	};
+export function normalizePeriodicFormat(format: string): string {
+	return format.replace(/'([^']*)'/g, "[$1]");
 }
 
-function yamlQuote(value: string): string {
-	const needsQuotes = /[:#,{[\]\s]/.test(value);
-	const escaped = value.replace(/"/g, '\\"');
-	return needsQuotes ? `"${escaped}"` : escaped;
+/**
+ * Leaves plain words bare and double-quotes anything YAML would read as a
+ * number, boolean, null, date or syntax ("4" must stay the string "4").
+ */
+export function yamlQuote(value: string): string {
+	const plain =
+		/^[A-Za-z_][\w ./()+&'-]*$/.test(value) &&
+		!/^(true|false|yes|no|on|off|null|~)$/i.test(value) &&
+		!/\s$/.test(value);
+	return plain ? value : JSON.stringify(value);
 }

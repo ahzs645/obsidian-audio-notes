@@ -46,6 +46,8 @@ export interface ScriberrSubmitJobRequest extends ScriberrQuickJobRequest {
 export interface ScriberrPollOptions {
 	pollIntervalMs?: number;
 	timeoutMs?: number;
+	/** Called after every poll with the job's state and time waited so far. */
+	onStatus?: (job: ScriberrJob, elapsedMs: number) => void;
 }
 
 interface MultipartFilePart {
@@ -234,11 +236,14 @@ export class ScriberrClient {
 		options?: ScriberrPollOptions
 	): Promise<ScriberrJob> {
 		const pollIntervalMs = options?.pollIntervalMs ?? 3000;
-		const timeoutMs = options?.timeoutMs ?? 5 * 60 * 1000;
+		// An hour-long meeting can take well over five minutes on a local
+		// Scriberr server; give up only after an hour of no result.
+		const timeoutMs = options?.timeoutMs ?? 60 * 60 * 1000;
 		const start = Date.now();
 
 		while (true) {
 			const job = await fetcher();
+			options?.onStatus?.(job, Date.now() - start);
 			if (job.status === "failed") {
 				throw new Error(job.error_message || "Scriberr job failed");
 			}
