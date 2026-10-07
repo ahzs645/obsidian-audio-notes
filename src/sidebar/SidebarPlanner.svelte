@@ -432,7 +432,6 @@
 					<li class="aan-calendar-day-row">
 						<div
 							class="aan-calendar-day-card"
-							class:has-label={Boolean(event.label)}
 							style={`--aan-label-color:${event.color || "var(--interactive-accent)"}`}
 						>
 							<div class="aan-calendar-day-card-top">

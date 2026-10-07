@@ -323,10 +323,6 @@
   cursor: pointer;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
-.aan-sidebar-agenda .aan-calendar-day-card.has-label {
-  border-left: 4px solid var(--aan-label-color);
-  padding-left: 9px;
-}
 .aan-sidebar-agenda .aan-calendar-day-card:hover {
   border-color: var(--background-modifier-border-hover);
   background: var(--background-modifier-hover);
@@ -1328,8 +1324,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px 12px;
-  flex-wrap: wrap;
+  gap: 8px;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 .audio-note-transcript-title {
   display: flex;
@@ -1349,24 +1346,62 @@
   color: var(--interactive-accent);
 }
 .audio-note-transcript-meta {
+  all: unset;
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 0;
+  gap: 4px;
+  flex: 1 1 auto;
   min-width: 0;
+  padding: 4px 6px 4px 2px;
+  margin-left: -2px;
+  border-radius: var(--radius-s, 6px);
   color: var(--text-muted);
   font-size: 0.85em;
   font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.audio-note-transcript-meta:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.audio-note-transcript-meta:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+.audio-note-transcript-meta-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.audio-note-transcript-meta .aan-transcript-meta-chevron {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  transition: transform 0.15s ease;
+}
+.audio-note-transcript-meta.collapsed .aan-transcript-meta-chevron {
+  transform: rotate(-90deg);
+}
+.audio-note-transcript-meta .audio-note-transcript-pill {
+  flex-shrink: 0;
 }
 .audio-note-transcript-actions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
   gap: 4px;
   margin-left: auto;
 }
 .audio-note-transcript-actions .aan-transcript-btn {
   --aan-transcript-btn-size: 32px;
+}
+.audio-note-transcript-header.is-compact .audio-note-transcript-actions {
+  gap: 2px;
+}
+.audio-note-transcript-header.is-compact .audio-note-transcript-actions .aan-transcript-btn {
+  --aan-transcript-btn-size: 28px;
 }
 .audio-note-transcript-actions .aan-transcript-icon {
   flex-shrink: 0;

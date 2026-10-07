@@ -241,21 +241,33 @@ onMount(() => {
 		</div>
 	{:else}
 		<div class="audio-note-transcript-card">
-			<header class="audio-note-transcript-header" bind:clientWidth={headerWidth}>
-				<p class="audio-note-transcript-meta">
+			<header class="audio-note-transcript-header" class:is-compact={compactHeader} bind:clientWidth={headerWidth}>
+				<!-- The summary doubles as the collapse toggle, so the header needs one
+				     button fewer and stays on a single line in a narrow sidebar. -->
+				<button
+					type="button"
+					class="audio-note-transcript-meta"
+					class:collapsed={collapsed}
+					on:click={() => (collapsed = !collapsed)}
+					aria-expanded={!collapsed}
+					title={`${collapsed ? "Show" : "Hide"} transcript${hasSegments ? ` · ${segments.length.toLocaleString()} lines` : ""}`}
+				>
+					<svg aria-hidden="true" viewBox="0 0 24 24" focusable="false" class="aan-transcript-icon aan-transcript-meta-chevron" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5 5 5-5" /></svg>
 					{#if isTranscribing}
 						<span class="audio-note-transcript-pill">Transcribing…</span>
 					{/if}
-					{#if isLoadingTranscript && !hasSegments}
-						Loading transcript…
-					{:else if hasSegments}
-						{segments.length} segments{#if !hasPlayer}&nbsp;· {formatDurationLabel(transcriptDuration)}{/if}
-					{:else if isTranscribing}
-						{progressMessage ?? "Waiting for transcript…"}
-					{:else}
-						Ready for transcript
-					{/if}
-				</p>
+					<span class="audio-note-transcript-meta-text">
+						{#if isLoadingTranscript && !hasSegments}
+							Loading transcript…
+						{:else if hasSegments}
+							{segments.length.toLocaleString()} lines{#if !hasPlayer}&nbsp;· {formatDurationLabel(transcriptDuration)}{/if}
+						{:else if isTranscribing}
+							{progressMessage ?? "Waiting for transcript…"}
+						{:else}
+							Ready for transcript
+						{/if}
+					</span>
+				</button>
 				<div class="audio-note-transcript-actions">
 					{#if showAudioUploadButton}
 						<button
@@ -290,17 +302,6 @@ onMount(() => {
 						aria-label="Copy transcript"
 					>
 						<svg aria-hidden="true" viewBox="0 0 24 24" focusable="false" class="aan-transcript-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></svg>
-					</button>
-					<button
-						class="aan-transcript-btn icon-only collapse-toggle"
-						type="button"
-						on:click={() => (collapsed = !collapsed)}
-						aria-expanded={!collapsed}
-						title={collapsed ? "Expand transcript" : "Collapse transcript"}
-						aria-label={collapsed ? "Expand transcript" : "Collapse transcript"}
-						class:collapsed={collapsed}
-					>
-						<svg aria-hidden="true" viewBox="0 0 24 24" focusable="false" class="aan-transcript-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5 5 5-5" /></svg>
 					</button>
 					{#if aiModelOptions.length || canGenerateAiNotes || isGeneratingAiNotes}
 						<AiNotesControls compact={compactHeader} {canGenerateAiNotes} {isGeneratingAiNotes} {onGenerateAiNotes}

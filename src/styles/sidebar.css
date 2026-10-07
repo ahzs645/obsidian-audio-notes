@@ -302,11 +302,6 @@
 	transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
-.aan-sidebar-agenda .aan-calendar-day-card.has-label {
-	border-left: 4px solid var(--aan-label-color);
-	padding-left: 9px;
-}
-
 .aan-sidebar-agenda .aan-calendar-day-card:hover {
 	border-color: var(--background-modifier-border-hover);
 	background: var(--background-modifier-hover);
