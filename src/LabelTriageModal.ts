@@ -14,6 +14,7 @@ import {
 	findLabelCategoryForTag,
 	getEffectiveMeetingLabelCategories,
 	normalizeTagName,
+	resolveLabelColor,
 	type MeetingLabelInfo,
 	type NormalizedMeetingLabelCategory,
 } from "./meeting-labels";
@@ -21,7 +22,6 @@ import { NOTES_PLACEHOLDER_LINE } from "./MeetingNoteTemplate";
 import { confirmWithModal } from "./modals/ConfirmModal";
 
 const AI_CONTEXT_MAX_CHARS = 4000;
-const CREATE_LABEL_OPTION = "__create-new-label__";
 /** Reads are cheap but plentiful; batch them so the UI keeps painting. */
 const CONTENT_SCAN_BATCH = 10;
 /** Each suggestion spawns its own CLI process, so a few can run at once. */
@@ -37,7 +37,7 @@ interface TriageItem {
 	source?: "ai" | "manual";
 	rowEl?: HTMLElement;
 	labelEl?: HTMLElement;
-	selectEl?: HTMLSelectElement;
+	chooseEl?: HTMLButtonElement;
 	applyButton?: HTMLButtonElement;
 }
 
@@ -65,11 +65,14 @@ export class LabelTriageModal extends Modal {
 	private closed = false;
 	private activeTag = "";
 	private individualMode = false;
-	private activeButton?: HTMLButtonElement;
 	private activeHintEl?: HTMLElement;
 	private filterEl?: HTMLInputElement;
 	private filterQuery = "";
-	private individualCheckbox?: HTMLInputElement;
+	private individualCheckbox?: { checked: boolean };
+	private modeButtons?: { one: HTMLButtonElement; each: HTMLButtonElement };
+	private chipsEl?: HTMLElement;
+	/** Notes per label tag, so the quick chips lead with the busiest labels. */
+	private labelUsage = new Map<string, number>();
 	private applying = new Set<TriageItem>();
 	private resultEl?: HTMLElement;
 
@@ -95,34 +98,20 @@ export class LabelTriageModal extends Modal {
 
 		const toolbar = contentEl.createDiv({ cls: "aan-label-triage-toolbar" });
 
+		// How labels get chosen: one label applied to many meetings, or a
+		// label per meeting (where AI suggestions land).
+		const modeRow = toolbar.createDiv({ cls: "aan-label-triage-mode", attr: { role: "group", "aria-label": "Labeling mode" } });
+		const one = modeRow.createEl("button", { text: "One label for many", attr: { type: "button" } });
+		const each = modeRow.createEl("button", { text: "Pick per meeting", attr: { type: "button" } });
+		one.addEventListener("click", () => this.setIndividualMode(false));
+		each.addEventListener("click", () => this.setIndividualMode(true));
+		this.modeButtons = { one, each };
+
 		const active = toolbar.createDiv({ cls: "aan-label-triage-active" });
-		active.createSpan({
-			cls: "aan-label-triage-caption",
-			text: "Active label",
-		});
-		this.activeButton = active.createEl("button", {
-			text: "Choose label…",
-			cls: "aan-label-triage-active-choice",
-		});
-		this.activeButton.addEventListener("click", () => {
-			new MeetingLabelPickerModal(this.plugin.app, this.plugin, selection => {
-				this.activeTag = selection.tag;
-				this.activeButton!.setText(formatLabelOptionText(selection.label));
-				this.activeButton!.addClass("has-label");
-				setHoverLabel(this.activeButton!, `${selection.label.displayName}\n#${selection.tag}`);
-				const wasIndividual = this.individualMode;
-				this.individualMode = false;
-				if (this.individualCheckbox) this.individualCheckbox.checked = false;
-				this.activeHintEl?.setText("Click Apply beside each meeting that belongs to it.");
-				// Only a mode switch changes row markup; otherwise keep the scroll position.
-				if (wasIndividual) this.renderList();
-				else for (const item of this.items) this.updateRowLabel(item);
-			}).open();
-		});
-		setHoverLabel(this.activeButton, "Choose one label, then apply it to any number of meetings below.");
+		this.chipsEl = active.createDiv({ cls: "aan-label-triage-chips" });
 		this.activeHintEl = active.createSpan({
 			cls: "aan-label-triage-hint",
-			text: "Choose once, then click Apply beside each matching meeting.",
+			text: "Pick a label, then click Apply on each meeting that belongs to it.",
 		});
 
 		const options = toolbar.createDiv({ cls: "aan-label-triage-options" });
@@ -138,32 +127,9 @@ export class LabelTriageModal extends Modal {
 			this.filterQuery = this.filterEl!.value.trim().toLowerCase();
 			this.renderList();
 		});
-		const mode = options.createEl("label", { cls: "aan-label-triage-toggle" });
-		this.individualCheckbox = mode.createEl("input", { type: "checkbox" });
-		mode.createSpan({ text: "Choose labels individually / review AI suggestions" });
-		this.individualCheckbox.addEventListener("change", () => {
-			this.individualMode = this.individualCheckbox!.checked;
-			this.renderList();
-		});
-
-		this.emptyToggleEl = options.createEl("label", {
-			cls: "aan-label-triage-toggle",
-		});
-		this.emptyToggleEl.hide();
-		const emptyCheckbox = this.emptyToggleEl.createEl("input", {
-			type: "checkbox",
-		});
-		emptyCheckbox.addEventListener("change", () => {
-			this.showEmpty = emptyCheckbox.checked;
-			this.renderList();
-		});
-		this.emptyToggleTextEl = this.emptyToggleEl.createSpan();
-
-		const controls = toolbar.createDiv({
-			cls: "aan-label-triage-controls",
-		});
-		this.suggestButton = controls.createEl("button", {
-			text: "Suggest labels with AI",
+		this.suggestButton = options.createEl("button", {
+			text: "Suggest with AI",
+			cls: "aan-label-triage-suggest",
 		});
 		this.suggestButton.disabled = true;
 		this.suggestButton.addEventListener("click", () => {
@@ -176,17 +142,13 @@ export class LabelTriageModal extends Modal {
 			}
 			void this.suggestAll();
 		});
-		this.applyAllButton = controls.createEl("button", {
-			text: "Apply all chosen labels",
-			cls: "mod-cta",
-		});
-		this.applyAllButton.disabled = true;
-		this.applyAllButton.addEventListener("click", () => {
-			void this.applyAll();
+
+		const controls = toolbar.createDiv({
+			cls: "aan-label-triage-controls",
 		});
 		this.aiStatusEl = controls.createEl("span", {
 			cls: "aan-label-triage-ai-status",
-			attr: { role: "button", tabindex: "0" },
+			attr: { role: "button", tabindex: "0", title: "Click to re-check the AI provider." },
 		});
 		this.aiStatusEl.addEventListener("click", () =>
 			this.recheckAiStatus()
@@ -197,14 +159,113 @@ export class LabelTriageModal extends Modal {
 				this.recheckAiStatus();
 			}
 		});
+		this.emptyToggleEl = controls.createEl("label", {
+			cls: "aan-label-triage-toggle",
+		});
+		this.emptyToggleEl.hide();
+		const emptyCheckbox = this.emptyToggleEl.createEl("input", {
+			type: "checkbox",
+		});
+		emptyCheckbox.addEventListener("change", () => {
+			this.showEmpty = emptyCheckbox.checked;
+			this.renderList();
+		});
+		this.emptyToggleTextEl = this.emptyToggleEl.createSpan();
+		this.applyAllButton = controls.createEl("button", {
+			text: "Apply all chosen labels",
+			cls: "mod-cta",
+		});
+		this.applyAllButton.disabled = true;
+		this.applyAllButton.addEventListener("click", () => {
+			void this.applyAll();
+		});
 		// The provider can be enabled or logged into while this modal is open.
 		window.addEventListener("focus", this.handleWindowFocus);
 		void this.refreshAiStatus();
+		this.renderModeButtons();
 
 		this.resultEl = contentEl.createDiv({ cls: "aan-label-triage-result", attr: { "role": "status" } });
 
 		this.listEl = contentEl.createDiv({ cls: "aan-label-triage-list" });
 		void this.loadItems();
+	}
+
+	private setIndividualMode(value: boolean) {
+		if (this.individualMode === value) return;
+		this.individualMode = value;
+		if (this.individualCheckbox) this.individualCheckbox.checked = value;
+		this.renderModeButtons();
+		this.renderList();
+	}
+
+	private renderModeButtons() {
+		if (!this.modeButtons) return;
+		this.modeButtons.one.toggleClass("is-active", !this.individualMode);
+		this.modeButtons.each.toggleClass("is-active", this.individualMode);
+		this.modeButtons.one.setAttribute("aria-pressed", String(!this.individualMode));
+		this.modeButtons.each.setAttribute("aria-pressed", String(this.individualMode));
+		this.contentEl.toggleClass("is-individual", this.individualMode);
+		this.activeHintEl?.setText(
+			this.individualMode
+				? "Choose a label on each meeting, or let AI suggest them, then apply."
+				: this.activeTag
+					? "Click Apply on each meeting that belongs to this label."
+					: "Pick a label, then click Apply on each meeting that belongs to it."
+		);
+	}
+
+	private colorFor(tag: string): string {
+		return resolveLabelColor(tag, this.plugin.settings.calendarTagColors);
+	}
+
+	/** The busiest labels as one-click chips, plus "More…" for the rest. */
+	private renderChips() {
+		const chips = this.chipsEl;
+		if (!chips) return;
+		chips.empty();
+		const top = [...this.labelOptions]
+			.sort((a, b) => (this.labelUsage.get(b.tag) ?? 0) - (this.labelUsage.get(a.tag) ?? 0))
+			.slice(0, 6);
+		if (this.activeTag && !top.some((option) => option.tag === this.activeTag)) {
+			top.unshift({ tag: this.activeTag, info: buildMeetingLabelInfo(this.activeTag, this.categories) });
+		}
+		for (const option of top) {
+			const chip = chips.createEl("button", {
+				cls: "aan-label-triage-chip",
+				attr: { type: "button", title: `${option.info.fullName} · #${option.tag}` },
+			});
+			chip.style.setProperty("--aan-label-color", this.colorFor(option.tag));
+			chip.toggleClass("is-active", option.tag === this.activeTag);
+			chip.setAttribute("aria-pressed", String(option.tag === this.activeTag));
+			chip.createSpan({ cls: "aan-label-triage-dot" });
+			chip.createSpan({ text: option.info.displayName });
+			chip.addEventListener("click", () => this.setActiveTag(option.tag));
+		}
+		const more = chips.createEl("button", {
+			cls: "aan-label-triage-chip is-more",
+			text: top.length ? "More…" : "Choose label…",
+			attr: { type: "button" },
+		});
+		more.addEventListener("click", () => {
+			new MeetingLabelPickerModal(
+				this.plugin.app,
+				this.plugin,
+				(selection) => this.setActiveTag(selection.tag),
+				{ currentTags: this.activeTag ? [this.activeTag] : [] }
+			).open();
+		});
+	}
+
+	private setActiveTag(tag: string) {
+		this.activeTag = tag;
+		const wasIndividual = this.individualMode;
+		this.individualMode = false;
+		if (this.individualCheckbox) this.individualCheckbox.checked = false;
+		this.renderChips();
+		this.renderModeButtons();
+		// Only a mode switch changes row markup; otherwise keep the scroll position.
+		if (wasIndividual) this.renderList();
+		else for (const item of this.items) this.updateRowLabel(item);
 	}
 
 	onClose() {
@@ -228,6 +289,7 @@ export class LabelTriageModal extends Modal {
 			tag,
 			info: buildMeetingLabelInfo(tag, this.categories),
 		}));
+		this.renderChips();
 		// Show and let the user label straight away; template-only notes drop
 		// out of the list as their reads land rather than gating the render.
 		this.scanning = this.items.length > 0;
@@ -346,6 +408,7 @@ export class LabelTriageModal extends Modal {
 
 	private collectCandidateTags(): string[] {
 		const candidates = new Set<string>();
+		this.labelUsage.clear();
 		for (const file of this.plugin.app.vault.getMarkdownFiles()) {
 			const cache = this.plugin.app.metadataCache.getFileCache(file);
 			if (!cache) continue;
@@ -356,6 +419,7 @@ export class LabelTriageModal extends Modal {
 					findLabelCategoryForTag(normalized, this.categories)
 				) {
 					candidates.add(normalized);
+					this.labelUsage.set(normalized, (this.labelUsage.get(normalized) ?? 0) + 1);
 				}
 			}
 		}
@@ -380,7 +444,6 @@ export class LabelTriageModal extends Modal {
 			"title",
 			folder ? `${item.title}\n${item.file.path}` : item.title
 		);
-		setHoverLabel(titleEl, `${item.title}\n${item.file.path}`);
 		titleEl.setAttribute("tabindex", "0");
 		titleEl.setAttribute("role", "link");
 		titleEl.addEventListener("keydown", event => { if (event.key === "Enter") titleEl.click(); });
@@ -405,11 +468,10 @@ export class LabelTriageModal extends Modal {
 
 		const actions = row.createDiv({ cls: "aan-label-triage-actions" });
 		item.labelEl = this.individualMode
-			? actions.createDiv({ cls: "aan-label-triage-label" })
+			? actions.createSpan({ cls: "aan-label-triage-label" })
 			: undefined;
-		item.selectEl = this.individualMode ? this.buildLabelSelect(item, actions) : undefined;
+		item.chooseEl = this.individualMode ? this.buildLabelChooser(item, actions) : undefined;
 		item.applyButton = actions.createEl("button", {
-			text: "Apply",
 			cls: "aan-label-triage-apply",
 		});
 		item.applyButton.addEventListener("click", () => {
@@ -419,112 +481,74 @@ export class LabelTriageModal extends Modal {
 		this.updateRowLabel(item);
 	}
 
-	private buildLabelSelect(
-		item: TriageItem,
-		container: HTMLElement
-	): HTMLSelectElement {
-		const select = container.createEl("select", {
-			cls: "dropdown aan-label-triage-select",
+	/** A colored button showing this meeting's chosen label; opens the picker. */
+	private buildLabelChooser(item: TriageItem, container: HTMLElement): HTMLButtonElement {
+		const button = container.createEl("button", {
+			cls: "aan-label-triage-choose",
+			attr: { type: "button" },
 		});
-		select.createEl("option", { text: "Choose label…", value: "" });
-
-		const grouped = new Map<string, LabelOption[]>();
-		for (const option of this.labelOptions) {
-			const groupName = option.info.categoryName ?? "Other";
-			const group = grouped.get(groupName) ?? [];
-			group.push(option);
-			grouped.set(groupName, group);
-		}
-		for (const [groupName, options] of grouped) {
-			const groupEl = select.createEl("optgroup");
-			groupEl.label = groupName;
-			for (const option of options) {
-				groupEl.createEl("option", {
-					text: formatLabelOptionText(option.info),
-					value: option.tag,
-					attr: { title: `${option.info.displayName} — #${option.tag}` },
-				});
-			}
-		}
-		select.createEl("option", {
-			text: "＋ New label…",
-			value: CREATE_LABEL_OPTION,
+		button.addEventListener("click", () => {
+			new MeetingLabelPickerModal(
+				this.plugin.app,
+				this.plugin,
+				(selection) => {
+					item.chosenTag = selection.tag;
+					item.source = "manual";
+					this.updateRowLabel(item);
+				},
+				{ currentTags: item.chosenTag ? [item.chosenTag] : [] }
+			).open();
 		});
-
-		select.addEventListener("change", () => {
-			const value = select.value;
-			if (value === CREATE_LABEL_OPTION) {
-				select.value = item.chosenTag ?? "";
-				const picker = new MeetingLabelPickerModal(
-					this.plugin.app,
-					this.plugin,
-					(selection) => {
-						item.chosenTag = selection.tag;
-						item.source = "manual";
-						this.updateRowLabel(item);
-					}
-				);
-				picker.open();
-				return;
-			}
-			item.chosenTag = value || undefined;
-			item.source = value ? "manual" : undefined;
-			this.updateRowLabel(item);
-		});
-		return select;
-	}
-
-	private ensureSelectOption(select: HTMLSelectElement, tag: string) {
-		if (
-			Array.from(select.options).some((option) => option.value === tag)
-		) {
-			return;
-		}
-		const info = buildMeetingLabelInfo(tag, this.categories);
-		const option = document.createElement("option");
-		option.value = tag;
-		option.text = formatLabelOptionText(info);
-		const createOption = Array.from(select.options).find(
-			(entry) => entry.value === CREATE_LABEL_OPTION
-		);
-		select.insertBefore(option, createOption ?? null);
-		if (!this.labelOptions.some((entry) => entry.tag === tag)) {
-			this.labelOptions.push({ tag, info });
-			this.labelOptions.sort((a, b) => a.tag.localeCompare(b.tag));
-		}
+		return button;
 	}
 
 	private updateRowLabel(item: TriageItem) {
-		if (item.selectEl) {
+		const tag = this.individualMode ? item.chosenTag : this.activeTag;
+		if (item.chooseEl) {
+			const chooser = item.chooseEl;
+			chooser.empty();
+			chooser.toggleClass("has-label", Boolean(item.chosenTag));
 			if (item.chosenTag) {
-				this.ensureSelectOption(item.selectEl, item.chosenTag);
+				const info = buildMeetingLabelInfo(item.chosenTag, this.categories);
+				chooser.style.setProperty("--aan-label-color", this.colorFor(item.chosenTag));
+				chooser.createSpan({ cls: "aan-label-triage-dot" });
+				chooser.createSpan({ text: info.displayName });
+				chooser.setAttribute("title", `${info.fullName} · #${item.chosenTag}`);
+			} else {
+				chooser.style.removeProperty("--aan-label-color");
+				chooser.setText("Choose label…");
+				chooser.removeAttribute("title");
 			}
-			item.selectEl.value = item.chosenTag ?? "";
-			item.selectEl.setAttribute(
-				"title",
-				item.chosenTag ? `#${item.chosenTag}` : "Choose a label"
-			);
 		}
 		if (item.applyButton) {
-			const tag = this.individualMode ? item.chosenTag : this.activeTag;
-			item.applyButton.disabled = !tag || this.applying.has(item);
-			item.applyButton.setText(this.applying.has(item) ? "Applying…" : this.individualMode ? "Apply" : "Apply label");
-			setHoverLabel(item.applyButton, tag ? `Apply ${buildMeetingLabelInfo(tag, this.categories).displayName} (#${tag}) to ${item.title}` : "Choose an active label above first.");
+			const button = item.applyButton;
+			const applying = this.applying.has(item);
+			button.disabled = !tag || applying;
+			button.empty();
+			if (tag) {
+				button.style.setProperty("--aan-label-color", this.colorFor(tag));
+				button.addClass("has-label");
+				if (!this.individualMode) button.createSpan({ cls: "aan-label-triage-dot" });
+			} else {
+				button.style.removeProperty("--aan-label-color");
+				button.removeClass("has-label");
+			}
+			button.createSpan({ text: applying ? "Applying…" : "Apply" });
+			button.setAttribute(
+				"title",
+				tag
+					? `Label “${item.title}” as ${buildMeetingLabelInfo(tag, this.categories).fullName}`
+					: this.individualMode
+						? "Choose a label for this meeting first."
+						: "Pick a label at the top first."
+			);
 		}
 		if (item.labelEl) {
-			if (this.individualMode && item.source === "ai" && item.chosenTag) {
-				const info = buildMeetingLabelInfo(item.chosenTag, this.categories);
-				item.labelEl.setText("AI");
-				setHoverLabel(
-					item.labelEl,
-					`AI suggested ${info.displayName} (#${item.chosenTag})`
-				);
-				item.labelEl.addClass("has-label");
-			} else {
-				item.labelEl.setText("");
-				item.labelEl.removeAttribute("title");
-				item.labelEl.removeClass("has-label");
-			}
+			const fromAi = this.individualMode && item.source === "ai" && Boolean(item.chosenTag);
+			item.labelEl.setText(fromAi ? "AI" : "");
+			item.labelEl.toggleClass("has-label", fromAi);
+			if (fromAi) item.labelEl.setAttribute("title", "Suggested by AI. Check it, then Apply.");
+			else item.labelEl.removeAttribute("title");
 		}
 		this.updateApplyAllButton();
 	}
@@ -574,7 +598,6 @@ export class LabelTriageModal extends Modal {
 
 	private async refreshAiStatus() {
 		if (!this.aiStatusEl || !this.suggestButton || this.checkingAi) return;
-		setHoverLabel(this.aiStatusEl, "Click to re-check the AI provider.");
 		if (!this.plugin.meetingAiService.isConfigured()) {
 			this.aiStatusEl.setText(
 				"AI suggestions are disabled. Enable a local AI provider (Claude Code or Codex) in Audio Notes settings to use them."
@@ -620,6 +643,7 @@ export class LabelTriageModal extends Modal {
 		}
 		this.individualMode = true;
 		if (this.individualCheckbox) this.individualCheckbox.checked = true;
+		this.renderModeButtons();
 		this.renderList();
 		this.suggesting = true;
 		this.cancelSuggest = false;
@@ -688,7 +712,7 @@ export class LabelTriageModal extends Modal {
 			this.suggesting = false;
 			this.cancelSuggest = false;
 			if (this.suggestButton) {
-				this.suggestButton.textContent = "Suggest labels with AI";
+				this.suggestButton.textContent = "Suggest with AI";
 				this.suggestButton.disabled = false;
 			}
 		}
@@ -771,10 +795,6 @@ export class LabelTriageModal extends Modal {
 	}
 }
 
-function formatLabelOptionText(info: MeetingLabelInfo): string {
-	return `${info.icon ? `${info.icon} ` : ""}${info.displayName}`;
-}
-
 function hasMeaningfulContent(content: string): boolean {
 	let body = content.replace(/^---\n[\s\S]*?\n---\n?/, "");
 	body = body.replace(/```audio-note[\s\S]*?(```|$)/g, "");
@@ -790,8 +810,4 @@ function hasMeaningfulContent(content: string): boolean {
 		return true;
 	}
 	return false;
-}
-
-function setHoverLabel(element: HTMLElement, text: string) {
-	element.setAttribute("title", text);
 }

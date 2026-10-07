@@ -605,25 +605,110 @@ input.title-input {
 	text-transform: uppercase;
 }
 
-.aan-label-triage-active-choice {
-	height: auto;
-	min-height: 28px;
-	max-width: 100%;
-	padding: 3px 10px;
-	background: var(--background-primary);
-	border: 1px dashed var(--background-modifier-border-hover);
-	box-shadow: none;
-	font-size: var(--font-ui-small);
-	text-align: left;
-	white-space: normal;
-	overflow-wrap: anywhere;
+/* Segmented switch between the two ways of labeling. */
+.aan-label-triage-mode {
+	display: inline-flex;
+	align-self: flex-start;
+	padding: 2px;
+	border-radius: var(--radius-m);
+	background: var(--background-modifier-border);
 }
 
-.aan-label-triage-active-choice.has-label {
-	border-style: solid;
-	border-color: var(--interactive-accent);
+.aan-label-triage-mode button {
+	height: 26px;
+	padding: 0 12px;
+	border: none;
+	box-shadow: none;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.aan-label-triage-mode button.is-active {
+	background: var(--background-primary);
 	color: var(--text-normal);
+	box-shadow: var(--shadow-s);
+}
+
+.aan-label-triage-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+/* Picking a single label only applies in "one label for many" mode. */
+.aan-label-triage.is-individual .aan-label-triage-chips {
+	display: none;
+}
+
+.aan-label-triage button.aan-label-triage-chip,
+.aan-label-triage button.aan-label-triage-choose {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 28px;
+	padding: 0 12px 0 10px;
+	border-radius: 999px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	box-shadow: none;
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	white-space: nowrap;
+}
+
+.aan-label-triage button.aan-label-triage-chip:hover {
+	border-color: var(--aan-label-color, var(--background-modifier-border-hover));
+}
+
+.aan-label-triage button.aan-label-triage-chip.is-active {
+	background: var(--aan-label-color);
+	border-color: var(--aan-label-color);
+	color: #fff;
 	font-weight: var(--font-medium);
+}
+
+.aan-label-triage-chip.is-active .aan-label-triage-dot {
+	background: #fff;
+}
+
+.aan-label-triage button.aan-label-triage-chip.is-more {
+	border-style: dashed;
+	color: var(--text-muted);
+}
+
+.aan-label-triage-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex-shrink: 0;
+	background: var(--aan-label-color, var(--text-faint));
+}
+
+/* Per-meeting label button (individual mode), in that label's color. */
+.aan-label-triage button.aan-label-triage-choose {
+	max-width: 200px;
+	height: 26px;
+	font-size: var(--font-ui-smaller);
+	border-style: dashed;
+	color: var(--text-muted);
+}
+
+.aan-label-triage-choose span:last-child {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.aan-label-triage button.aan-label-triage-choose.has-label {
+	border-style: solid;
+	border-color: color-mix(in srgb, var(--aan-label-color) 50%, transparent);
+	background: color-mix(in srgb, var(--aan-label-color) 12%, transparent);
+	color: var(--text-normal);
+}
+
+.aan-label-triage-suggest {
+	height: 28px;
+	font-size: var(--font-ui-small);
 }
 
 .aan-label-triage-hint {
@@ -770,16 +855,9 @@ input.title-input {
 }
 
 .aan-label-triage-label.has-label {
-	background: var(--background-modifier-active-hover);
+	background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
 	color: var(--text-accent);
-}
-
-.aan-label-triage-select {
-	flex: 0 0 auto;
-	width: 190px;
-	max-width: 40vw;
-	height: 28px;
-	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
 }
 
 /* Ghost per-row buttons: 87 accent buttons would out-shout the note titles. */
@@ -799,11 +877,25 @@ input.title-input {
 	color: var(--text-normal);
 }
 
+.aan-label-triage-apply {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.aan-label-triage-apply.has-label {
+	border-color: color-mix(in srgb, var(--aan-label-color) 45%, var(--background-modifier-border));
+}
+
 .aan-label-triage-apply:not(:disabled):hover,
 .aan-label-triage-apply:not(:disabled):focus-visible {
-	background: var(--interactive-accent);
-	border-color: var(--interactive-accent);
-	color: var(--text-on-accent);
+	background: var(--aan-label-color, var(--interactive-accent));
+	border-color: var(--aan-label-color, var(--interactive-accent));
+	color: #fff;
+}
+
+.aan-label-triage-apply:not(:disabled):hover .aan-label-triage-dot {
+	background: #fff;
 }
 
 .aan-label-triage-apply:disabled {
@@ -1102,4 +1194,240 @@ input.title-input {
 	.aan-split-line-action {
 		opacity: 1;
 	}
+}
+
+/* ── Import recordings ───────────────────────────────────────── */
+
+.modal.aan-import-modal {
+	width: min(600px, 94vw);
+}
+
+.aan-import-intro {
+	margin-top: 0;
+	color: var(--text-muted);
+}
+
+.aan-import-modal .aan-whisper-dropzone {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	padding: var(--size-4-6) var(--size-4-4);
+}
+
+.aan-import-modal .aan-whisper-dropzone:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
+.aan-import-drop-icon {
+	color: var(--interactive-accent);
+}
+
+.aan-import-drop-icon svg {
+	width: 22px;
+	height: 22px;
+}
+
+/* Once files are listed, the drop area shrinks to a single line. */
+.aan-import-modal .aan-whisper-dropzone.is-compact {
+	flex-direction: row;
+	justify-content: center;
+	padding: var(--size-4-2) var(--size-4-3);
+	margin-bottom: var(--size-4-2);
+	background: transparent;
+	transform: none;
+	color: var(--text-muted);
+}
+
+.aan-import-modal .aan-whisper-dropzone.is-compact.is-dragging {
+	background: color-mix(in srgb, var(--background-secondary) 72%, var(--interactive-accent) 28%);
+}
+
+.aan-import-modal .aan-whisper-dropzone.is-compact .aan-import-drop-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+.aan-import-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-height: 280px;
+	overflow-y: auto;
+	margin-bottom: var(--size-4-3);
+}
+
+.aan-import-list.is-empty {
+	display: none;
+}
+
+.aan-import-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background: var(--background-primary);
+}
+
+.aan-import-item.is-done {
+	border-color: color-mix(in srgb, var(--color-green) 45%, var(--background-modifier-border));
+}
+
+.aan-import-item.is-failed {
+	border-color: color-mix(in srgb, var(--text-error) 50%, var(--background-modifier-border));
+}
+
+.aan-import-item.is-duplicate {
+	opacity: 0.75;
+}
+
+.aan-import-item-icon {
+	flex-shrink: 0;
+	color: var(--text-muted);
+	display: inline-flex;
+}
+
+.aan-import-item.is-done .aan-import-item-icon {
+	color: var(--color-green);
+}
+
+.aan-import-item-body {
+	flex: 1;
+	min-width: 0;
+}
+
+.aan-import-item-name {
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.aan-import-item-meta {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.aan-import-item.is-failed .aan-import-item-meta {
+	color: var(--text-error);
+	white-space: normal;
+}
+
+.aan-import-item-side {
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.aan-import-status {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.aan-import-item.is-importing .aan-import-status {
+	color: var(--interactive-accent);
+}
+
+.aan-import-item.is-failed .aan-import-status {
+	color: var(--text-error);
+}
+
+.aan-import-modal .setting-item.is-hidden,
+.aan-import-modal .is-hidden {
+	display: none;
+}
+
+.aan-import-modal .setting-item-control input[type="text"] {
+	width: min(260px, 100%);
+}
+
+/* Label as a colored chip; click to change, × to clear. */
+button.aan-import-label-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	border-radius: 999px;
+	padding: 4px 12px;
+}
+
+button.aan-import-label-chip.has-label {
+	padding: 4px 6px 4px 10px;
+	background: color-mix(in srgb, var(--aan-label-color) 14%, transparent);
+	border: 1px solid color-mix(in srgb, var(--aan-label-color) 45%, transparent);
+	box-shadow: none;
+	color: var(--text-normal);
+}
+
+.aan-import-label-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--aan-label-color);
+}
+
+.aan-import-label-clear {
+	display: inline-flex;
+	color: var(--text-muted);
+	border-radius: 50%;
+	padding: 1px;
+}
+
+.aan-import-label-clear:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.aan-import-label-clear svg {
+	width: 14px;
+	height: 14px;
+}
+
+.aan-import-options {
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: var(--size-4-2);
+	margin-top: var(--size-4-1);
+}
+
+.aan-import-options > summary {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	cursor: pointer;
+	list-style: none;
+	padding: 4px 0;
+}
+
+.aan-import-options > summary::-webkit-details-marker {
+	display: none;
+}
+
+.aan-import-options > summary::before {
+	content: "›";
+	display: inline-block;
+	color: var(--text-muted);
+	transition: transform 0.15s ease;
+}
+
+.aan-import-options[open] > summary::before {
+	transform: rotate(90deg);
+}
+
+.aan-import-options-title {
+	font-weight: 500;
+}
+
+.aan-import-options-summary {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.aan-import-spacer {
+	flex: 1;
 }

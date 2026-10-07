@@ -916,6 +916,45 @@ export function extractWhisperArchive(
 	return { metadata, audioBuffer, audioExtension: audioExt, segments, durationSec };
 }
 
+export interface WhisperArchivePeek {
+	/** When the recording started, if the archive says. */
+	startMs?: number;
+	durationSec: number;
+	lineCount: number;
+	originalName?: string;
+}
+
+/**
+ * Reads only metadata.json from an archive (the audio stays compressed), so
+ * the import list can show each recording's date and length up front.
+ */
+export function peekWhisperArchive(data: ArrayBuffer): WhisperArchivePeek {
+	const zip = new AdmZip(Buffer.from(data));
+	const entry = zip.getEntry("metadata.json");
+	if (!entry) {
+		throw new Error("Not a Whisper archive (no metadata.json).");
+	}
+	const metadata = JSON.parse(entry.getData().toString("utf8")) as WhisperMetadata;
+	const offsetMs = msFromOffset(metadata.startTimeOffset);
+	const transcripts = Array.isArray(metadata.transcripts) ? metadata.transcripts : [];
+	let durationSec = 0;
+	let lineCount = 0;
+	for (const segment of transcripts) {
+		const end = segment.end;
+		if (typeof segment.start !== "number" || typeof end !== "number") continue;
+		lineCount += 1;
+		durationSec = Math.max(durationSec, (end + offsetMs) / 1000);
+	}
+	// dateCreated is when recording stopped; imports place the start before it.
+	const endMs = normalizeEpoch(metadata.dateCreated) ?? normalizeEpoch(metadata.dateUpdated);
+	return {
+		startMs: endMs !== undefined ? endMs - durationSec * 1000 : undefined,
+		durationSec,
+		lineCount,
+		originalName: metadata.originalMediaFilename,
+	};
+}
+
 function trimSegments(
 	segments: ProcessedSegment[],
 	startSec: number,
