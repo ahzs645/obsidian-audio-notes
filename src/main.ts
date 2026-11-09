@@ -36,6 +36,7 @@ import {
 	getStartAndEndFromBracketString,
 } from "./AudioNotes";
 import { TranscriptsCache } from "./Transcript";
+import { planPathFieldUpdates } from "./MediaPathSync";
 import {
 	AUDIO_NOTES_CALENDAR_VIEW,
 	MeetingCalendarView,
@@ -432,6 +433,7 @@ export default class AutomaticAudioNotes extends Plugin {
 			);
 			this.registerEvent(
 				this.app.vault.on("rename", (file, oldPath) => {
+					void this.syncPathReferences(file, oldPath);
 					void this.handleMeetingRename(file, oldPath);
 					this.whisperInboxImporter?.scheduleAbstractFile(file);
 				})
@@ -743,6 +745,40 @@ export default class AutomaticAudioNotes extends Plugin {
 			await this.app.fileManager.renameFile(file, targetPath);
 		} catch (error) {
 			console.error("Audio Notes: Could not move attachment", error);
+		}
+	}
+
+	/**
+	 * Keeps every note's recording and transcript paths pointing at a file or
+	 * folder after it moves, whoever moved it. Notes are matched from the
+	 * metadata cache, then re-checked against their live frontmatter, so a
+	 * caller that relinks a note on purpose right after a move (the repair
+	 * modal, the sidebar's meeting folders) always has the last word.
+	 */
+	private async syncPathReferences(
+		file: TAbstractFile,
+		oldPath: string
+	): Promise<void> {
+		if (file instanceof TFile && file.extension === "md") {
+			return;
+		}
+		const newPath = file.path;
+		const { vault, metadataCache, fileManager } = this.app;
+		for (const note of vault.getMarkdownFiles()) {
+			const cached = metadataCache.getFileCache(note)?.frontmatter;
+			if (!Object.keys(planPathFieldUpdates(cached, oldPath, newPath)).length) {
+				continue;
+			}
+			try {
+				await fileManager.processFrontMatter(note, (fm) => {
+					Object.assign(fm, planPathFieldUpdates(fm, oldPath, newPath));
+				});
+			} catch (error) {
+				console.error(
+					`Audio Notes: Could not update links in ${note.path} after ${oldPath} moved`,
+					error
+				);
+			}
 		}
 	}
 
